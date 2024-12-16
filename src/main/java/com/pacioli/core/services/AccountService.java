@@ -1,0 +1,16 @@
+package com.pacioli.core.services;
+
+import com.pacioli.core.models.Account;
+
+import java.util.List;
+
+public interface AccountService {
+    List<Account> getAllAccounts();
+    Account createAccount(Account account);
+    Account updateAccount(Long id, Account updatedAccount);
+    void deleteAccount(Long id);
+    Account findAccountById(Long id);
+    List<Account> findAccountsByJournalId(Long journalId);
+
+    List<Account> getAccountsByDossierId(Long dossierId);
+}

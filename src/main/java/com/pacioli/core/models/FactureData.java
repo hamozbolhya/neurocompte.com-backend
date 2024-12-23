@@ -28,5 +28,6 @@ public class FactureData {
     private Double taxRate;       // Taux TVA
     private String tier;          // Tiers (client ou fournisseur)
     private String ice;           // ICE
+    private String devise;           // ICE
 }
 

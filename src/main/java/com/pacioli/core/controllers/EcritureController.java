@@ -58,6 +58,8 @@ public class EcritureController {
     }
 
 
+
+
     // Fetch Ecritures by Piece ID
     @GetMapping("/piece/{pieceId}")
     public ResponseEntity<List<Ecriture>> getEcrituresByPieceId(@PathVariable("pieceId") Long pieceId) {

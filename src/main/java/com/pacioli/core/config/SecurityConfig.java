@@ -60,10 +60,13 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://104.236.50.144:3000", "http://localhost:5173")); // Add your frontend origin
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS")); // Explicitly allow methods
-        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "*", "X-Frame-Options")); // Allow headers
-        configuration.setExposedHeaders(List.of("Authorization")); // Expose headers for frontend access
+        configuration.setAllowedOrigins(List.of("http://104.236.50.144:3000", "http://localhost:5173", "https://neurocompta.com")); // Add your frontend origin
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")); // Explicitly allow methods
+        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "X-Frame-Options")); // Allow headers
+        // Specify exposed headers (for frontend access to certain headers)
+        configuration.setExposedHeaders(List.of(
+                "Authorization", "Content-Disposition"
+        ));// Expose headers for frontend access
         configuration.setAllowCredentials(true); // Allow cookies and credentials
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

@@ -3,6 +3,7 @@ package com.pacioli.core.controllers;
 import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.deser.DefaultDeserializationContext;
+import com.pacioli.core.DTO.UpdatePieceStatusRequest;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Piece;
 import com.pacioli.core.services.DossierService;
@@ -61,57 +62,22 @@ public class PieceController {
             @RequestPart("piece") String pieceData,
             @RequestPart("file") MultipartFile file,
             @RequestParam("dossier_id") Long dossierId) throws IOException {
-
-        // Step 1: Fetch Dossier
-        Dossier dossier = dossierService.getDossierById(dossierId);
-        if (dossier == null) {
-            throw new IllegalArgumentException("Dossier not found for ID: " + dossierId);
-        }
-
-        // Step 2: Deserialize piece
-        Piece piece;
-        try {
-            InjectableValues.Std injectableValues = new InjectableValues.Std();
-            injectableValues.addValue("dossierId", dossierId);
-            objectMapper.setInjectableValues(injectableValues);
-            piece = objectMapper.readValue(pieceData, Piece.class);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse 'piece' JSON data: " + e.getMessage());
-        }
-
-        // Step 3: Link Dossier to Piece
-        piece.setDossier(dossier);
-
-        // Step 4: Save file to disk
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-
-        String originalFilename = file.getOriginalFilename();
-        String uniqueFilename = generateUniqueFilename(originalFilename, uploadPath);
-        Path filePath = uploadPath.resolve(uniqueFilename);
-        Files.copy(file.getInputStream(), filePath);
-        piece.setFilename(uniqueFilename);
-
-        // Step 5: Save Piece and return Response
-        Piece savedPiece = pieceService.savePiece(piece);
+        log.info("peiceData: {}, dossier_id:{}" , pieceData, dossierId);
+        Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId);
         return ResponseEntity.ok(savedPiece);
     }
 
-
-    // Utility method to ensure unique filenames
-    private String generateUniqueFilename(String filename, Path uploadPath) {
-        String baseName = FilenameUtils.getBaseName(filename);
-        String extension = FilenameUtils.getExtension(filename);
-        String uniqueFilename = filename;
-
-        int count = 1;
-        while (Files.exists(uploadPath.resolve(uniqueFilename))) {
-            uniqueFilename = baseName + "_" + count + "." + extension;
-            count++;
-        }
-        return uniqueFilename;
+    /**
+     * Endpoint to save Ecritures and Facture Data for a given Piece.
+     */
+    @PostMapping("/save-ecritures-and-facture")
+    public ResponseEntity<Piece> saveEcrituresAndFacture(
+            @RequestBody String pieceData,
+            @RequestParam(name = "piece_id", required = true) Long pieceId,
+            @RequestParam(name = "dossier_id", required = true) Long dossierId) {
+        log.info("Piece ID: {}, Dossier ID: {}", pieceId, dossierId);
+        Piece savedPiece = pieceService.saveEcrituresAndFacture(pieceId, dossierId, pieceData);
+        return ResponseEntity.ok(savedPiece);
     }
 
     @GetMapping
@@ -185,6 +151,23 @@ public class PieceController {
                 .header(HttpHeaders.PRAGMA, "no-cache")
                 .header(HttpHeaders.EXPIRES, "0")
                 .body(resource);
+    }
+
+
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<?> updatePieceStatus(
+            @PathVariable Long id,
+            @RequestBody UpdatePieceStatusRequest requestBody) {
+
+        log.info("Updating status for piece with id {} to {}", id, requestBody.getStatus());
+
+        Piece updatedPiece = pieceService.updatePieceStatus(id, requestBody.getStatus());
+
+        if (updatedPiece != null) {
+            return ResponseEntity.ok(updatedPiece);
+        } else {
+            return ResponseEntity.badRequest().body("Piece not found or update failed");
+        }
     }
 
 }

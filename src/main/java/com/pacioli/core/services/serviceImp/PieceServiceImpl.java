@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.DoubleStream;
 
 @Slf4j
 @Service
@@ -130,31 +131,55 @@ public class PieceServiceImpl implements PieceService {
 
 
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {
+        // Fetch existing Accounts and Journals for the Dossier
         List<Account> accounts = accountRepository.findByDossierId(dossierId);
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
         for (Ecriture ecriture : deserializeEcritures(pieceData)) {
             ecriture.setPiece(piece);
-
+            ecriture.setEntryDate(ecriture.getEntryDate());
+            // Find or create Journal
             Journal journal = journals.stream()
                     .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
-                    .findFirst().orElse(null);
+                    .findFirst()
+                    .orElseGet(() -> {
+                        // Create and save a new Journal
+                        Journal newJournal = new Journal(
+                                ecriture.getJournal().getName(),
+                                ecriture.getJournal().getType(),
+                                piece.getDossier().getCabinet(),
+                                piece.getDossier()
+                        );
+                        return journalRepository.save(newJournal);
+                    });
             ecriture.setJournal(journal);
 
+            // Save the Ecriture
             Ecriture savedEcriture = ecritureRepository.save(ecriture);
 
             for (Line line : ecriture.getLines()) {
                 line.setEcriture(savedEcriture);
 
+                // Find or create Account
                 Account account = accounts.stream()
                         .filter(a -> a.getAccount().equals(line.getAccount().getAccount()))
-                        .findFirst().orElse(null);
+                        .findFirst()
+                        .orElseGet(() -> {
+                            // Create and save a new Account
+                            Account newAccount = new Account();
+                            newAccount.setAccount(line.getAccount().getAccount());
+                            newAccount.setLabel(line.getAccount().getLabel());
+                            newAccount.setDossier(piece.getDossier());
+                            return accountRepository.save(newAccount);
+                        });
                 line.setAccount(account);
             }
 
+            // Save Lines associated with the Ecriture
             lineRepository.saveAll(ecriture.getLines());
         }
     }
+
 
     private List<Ecriture> deserializeEcritures(String pieceData) {
         try {
@@ -174,12 +199,14 @@ public class PieceServiceImpl implements PieceService {
 
     private Double calculateAmountFromEcritures(String pieceData) {
         List<Ecriture> ecritures = deserializeEcritures(pieceData);
+
         return ecritures.stream()
                 .flatMap(e -> e.getLines().stream())
-                .mapToDouble(Line::getDebit)
+                .flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit())) // Include both Debit and Credit
                 .max()
                 .orElse(0.0);
     }
+
 
 
 

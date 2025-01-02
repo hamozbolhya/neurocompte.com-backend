@@ -12,7 +12,7 @@ import java.util.List;
 public interface LineRepository extends JpaRepository<Line, Long> {
 
     @Modifying
-    @Query("UPDATE Line e SET e.account = :account WHERE e.ecriture.id IN :ids")
+    @Query("UPDATE Line e SET e.account = :account WHERE e.id IN :ids")
     void updateCompteByIds(@Param("account") Account account, @Param("ids") List<Long> ids);
 
 }

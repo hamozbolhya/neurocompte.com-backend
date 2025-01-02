@@ -34,12 +34,6 @@ public class EcritureController {
         this.journalService = journalService;
     }
 
-    // Fetch all Ecritures
-   /* @GetMapping
-    public ResponseEntity<List<Ecriture>> getAllEcritures() {
-        List<Ecriture> ecritures = ecritureService.getAllEcritures();
-        return ResponseEntity.ok(ecritures);
-    }*/
 
     @GetMapping("/filter")
     public ResponseEntity<List<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
@@ -152,16 +146,19 @@ public class EcritureController {
     }
 
     @GetMapping("/export")
-    public ResponseEntity<List<EcritureExportDTO>> exportEcritures(
-            @RequestParam Long dossierId,
-            @RequestParam(required = false) Long exerciseId,
-            @RequestParam(required = false) Long journalId,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    public List<EcritureExportDTO> exportEcritures(
+            @RequestParam("dossierId") Long dossierId,
+            @RequestParam(value = "exerciseId", required = false) Long exerciseId,
+            @RequestParam(value = "journalId", required = false) Long journalId,
+            @RequestParam(value = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(value = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
-        List<EcritureExportDTO> ecritures = ecritureService.exportEcritures(dossierId, exerciseId, journalId, startDate, endDate);
-        return ResponseEntity.ok(ecritures);
+        // Default `endDate` to `LocalDate.now()` if missing
+        endDate = (endDate != null) ? endDate : LocalDate.now();
+        return ecritureService.exportEcritures(dossierId, exerciseId, journalId, startDate, endDate);
     }
+
+
 
 }
 

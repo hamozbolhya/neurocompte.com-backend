@@ -1,6 +1,7 @@
 package com.pacioli.core.models;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.Data;
@@ -23,7 +24,8 @@ public class Ecriture {
     private Piece piece;
 
     private String uniqueEntryNumber; // Numéro d’écriture unique
-    private LocalDate entryDate;           // Date
+    @JsonFormat(pattern = "dd/MM/yyyy")  // Specify the expected date format
+    private LocalDate entryDate;            // Date
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "journal_id", nullable = false)
     @JsonBackReference("journal-ecritures") // New back-reference for Journal

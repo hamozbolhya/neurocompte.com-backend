@@ -75,7 +75,6 @@ public class PieceController {
             @RequestBody String pieceData,
             @RequestParam(name = "piece_id", required = true) Long pieceId,
             @RequestParam(name = "dossier_id", required = true) Long dossierId) {
-        log.info("Piece ID: {}, Dossier ID: {}", pieceId, dossierId);
         Piece savedPiece = pieceService.saveEcrituresAndFacture(pieceId, dossierId, pieceData);
         return ResponseEntity.ok(savedPiece);
     }

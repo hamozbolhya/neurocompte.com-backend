@@ -43,11 +43,13 @@ public class AccountServiceImpl implements AccountService {
     }
 
     @Override
-    public void deleteAccount(Long id) {
-        if (!accountRepository.existsById(id)) {
-            throw new RuntimeException("Account not found with ID: " + id);
+    public void deleteAccounts(List<Long> ids) {
+        for (Long id : ids) {
+            if (!accountRepository.existsById(id)) {
+                throw new RuntimeException("Account not found with ID: " + id);
+            }
         }
-        accountRepository.deleteById(id);
+        accountRepository.deleteAllById(ids);
     }
 
     @Override

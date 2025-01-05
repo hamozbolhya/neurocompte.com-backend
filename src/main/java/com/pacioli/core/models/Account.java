@@ -6,6 +6,7 @@ import lombok.Data;
 
 @Entity
 @Data
+@Table(name = "account", uniqueConstraints = @UniqueConstraint(columnNames = {"account", "dossier_id"}))
 public class Account {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -20,7 +21,7 @@ public class Account {
     @JsonBackReference("journal-accounts") // Match the reference in Journal
     private Journal journal;
 
-    @ManyToOne(optional = false) // Each account belongs to a Dossier (required)
+    @ManyToOne(optional = false, fetch = FetchType.LAZY) // Each account belongs to a Dossier (required)
     @JoinColumn(name = "dossier_id", nullable = false) // Add dossier_id as foreign key
     @JsonBackReference("dossier-accounts") // Match the reference in Dossier
     private Dossier dossier;

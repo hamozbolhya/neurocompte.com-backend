@@ -8,7 +8,7 @@ public interface AccountService {
     List<Account> getAllAccounts();
     Account createAccount(Account account);
     Account updateAccount(Long id, Account updatedAccount);
-    void deleteAccount(Long id);
+    void deleteAccounts(List<Long> ids);
     Account findAccountById(Long id);
     List<Account> findAccountsByJournalId(Long journalId);
 

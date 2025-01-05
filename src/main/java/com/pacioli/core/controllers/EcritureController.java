@@ -9,6 +9,7 @@ import com.pacioli.core.services.EcritureService;
 import com.pacioli.core.services.ExerciseService;
 import com.pacioli.core.services.JournalService;
 import jakarta.persistence.EntityNotFoundException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/ecritures")
 public class EcritureController {
@@ -139,11 +141,14 @@ public class EcritureController {
             Ecriture updatedEcriture = ecritureService.updateEcriture(ecritureId, ecritureRequest);
             return ResponseEntity.ok("L'écriture a été mise à jour avec succès.");
         } catch (IllegalArgumentException ex) {
+            log.error("Validation error during update: {}", ex.getMessage(), ex);
             return ResponseEntity.badRequest().body(ex.getMessage());
         } catch (Exception ex) {
+            log.error("Unexpected error during update", ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erreur interne du serveur.");
         }
     }
+
 
     @GetMapping("/export")
     public List<EcritureExportDTO> exportEcritures(

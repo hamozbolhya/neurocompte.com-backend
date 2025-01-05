@@ -17,7 +17,9 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
    @Query("SELECT a FROM Account a WHERE a.dossier.id = :dossierId")
     List<Account> findByDossierId(@Param("dossierId") Long dossierId);
 
-    Optional<Account> findByAccountAndDossierId(String account, Long dossierId);
+    @Query("SELECT a FROM Account a WHERE a.account = :account AND a.dossier.id = :dossierId")
+    Account findByAccountAndDossierId(@Param("account") String account, @Param("dossierId") Long dossierId);
+
 
     //List<Account> findByDossierId(Long dossierId);
 

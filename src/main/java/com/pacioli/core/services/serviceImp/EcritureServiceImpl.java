@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -214,7 +215,7 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
 
-    @Transactional
+   /* @Transactional
     @Override
     public Ecriture updateEcriture(Long ecritureId, Ecriture ecritureRequest) {
         // Step 1: Use the custom query to fetch the existing Ecriture
@@ -258,10 +259,10 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Step 6: Save and return the updated Ecriture
         return ecritureRepository.save(existingEcriture);
-    }
+    }*/
 
 
-    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines) {
+   /* private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines) {
         List<Line> existingLines = existingEcriture.getLines();
 
         // Step 1: Remove lines that no longer exist
@@ -293,6 +294,100 @@ public class EcritureServiceImpl implements EcritureService {
                 // Add a new line
                 Line newLine = new Line();
                 newLine.setAccount(updatedLine.getAccount());
+                newLine.setLabel(updatedLine.getLabel());
+                newLine.setDebit(updatedLine.getDebit());
+                newLine.setCredit(updatedLine.getCredit());
+                newLine.setEcriture(existingEcriture);
+                existingLines.add(newLine);
+            }
+        }
+        // Update the Ecriture with the new list of lines
+        existingEcriture.setLines(existingLines);
+    }*/
+
+    @Transactional
+    @Override
+    public Ecriture updateEcriture(Long ecritureId, Ecriture ecritureRequest) {
+        Ecriture existingEcriture = ecritureRepository.findEcritureByIdCustom(ecritureId)
+                .orElseThrow(() -> new IllegalArgumentException("Ecriture non trouvée avec l'identifiant : " + ecritureId));
+
+        log.info("Existing Ecriture: {}", existingEcriture);
+        log.info("Update Request: {}", ecritureRequest);
+
+        if (ecritureRequest.getEntryDate() == null) {
+            throw new IllegalArgumentException("La date d'entrée est obligatoire.");
+        }
+
+        if (ecritureRequest.getJournal() == null || ecritureRequest.getJournal().getId() == null) {
+            throw new IllegalArgumentException("Le journal est obligatoire.");
+        }
+
+        Journal newJournal = journalRepository.findById(ecritureRequest.getJournal().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + ecritureRequest.getJournal().getId()));
+
+        if (existingEcriture.getJournal() != null &&
+                !existingEcriture.getJournal().getDossier().getId().equals(newJournal.getDossier().getId())) {
+            throw new IllegalArgumentException("Le nouveau journal doit appartenir au même dossier.");
+        }
+
+        existingEcriture.setJournal(newJournal);
+        existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
+
+        updateEcritureLines(existingEcriture, ecritureRequest.getLines());
+
+        double totalDebit = existingEcriture.getLines().stream()
+                .mapToDouble(line -> line.getDebit() != null ? line.getDebit() : 0)
+                .sum();
+        double totalCredit = existingEcriture.getLines().stream()
+                .mapToDouble(line -> line.getCredit() != null ? line.getCredit() : 0)
+                .sum();
+
+        if (totalDebit != totalCredit) {
+            throw new IllegalArgumentException("La somme du débit doit être égale à la somme du crédit.");
+        }
+
+        return ecritureRepository.save(existingEcriture);
+    }
+
+    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines) {
+        List<Line> existingLines = existingEcriture.getLines();
+
+        // Step 1: Remove lines that no longer exist
+        List<Long> updatedLineIds = updatedLines.stream()
+                .filter(line -> line.getId() != null)
+                .map(Line::getId)
+                .toList();
+
+        List<Line> linesToRemove = existingLines.stream()
+                .filter(line -> !updatedLineIds.contains(line.getId()))
+                .toList();
+
+        existingLines.removeAll(linesToRemove);
+
+        // Step 2: Add new or update existing lines
+        for (Line updatedLine : updatedLines) {
+            if (updatedLine.getId() != null) {
+                // Update existing line
+                Line existingLine = existingLines.stream()
+                        .filter(line -> line.getId().equals(updatedLine.getId()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("Ligne non trouvée avec l'identifiant : " + updatedLine.getId()));
+
+                // Fetch the Account to ensure it is managed
+                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+
+                existingLine.setAccount(managedAccount);
+                existingLine.setLabel(updatedLine.getLabel());
+                existingLine.setDebit(updatedLine.getDebit());
+                existingLine.setCredit(updatedLine.getCredit());
+            } else {
+                // Add a new line
+                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+
+                Line newLine = new Line();
+                newLine.setAccount(managedAccount);
                 newLine.setLabel(updatedLine.getLabel());
                 newLine.setDebit(updatedLine.getDebit());
                 newLine.setCredit(updatedLine.getCredit());

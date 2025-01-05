@@ -22,9 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
 
@@ -89,12 +88,14 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
         // ** Step 1: Fetch the Piece by ID **
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         Piece piece = pieceRepository.findById(pieceId)
                 .orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
 
         // ** Step 2: Update the amount and status of the Piece **
         piece.setStatus(PieceStatus.PROCESSED);
-        piece.setAmount(calculateAmountFromEcritures(pieceData)); // Calculate amount from Ecritures
+        piece.setAmount(calculateAmountFromEcritures(pieceData, dossier)); // Calculate amount from Ecritures
         piece = pieceRepository.save(piece); // Save changes to the Piece
 
         // ** Step 3: Save Ecritures and FactureData for the Piece **
@@ -129,76 +130,147 @@ public class PieceServiceImpl implements PieceService {
         }
     }
 
-
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {
+        log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
+
+        // Fetch the Dossier explicitly
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        log.info("Fetched Dossier ID: {}", dossier.getId());
+
         // Fetch existing Accounts and Journals for the Dossier
-        List<Account> accounts = accountRepository.findByDossierId(dossierId);
+        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
+                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
-        for (Ecriture ecriture : deserializeEcritures(pieceData)) {
+        for (Ecriture ecriture : deserializeEcritures(pieceData, dossier)) {
             ecriture.setPiece(piece);
-            ecriture.setEntryDate(ecriture.getEntryDate());
+
             // Find or create Journal
             Journal journal = journals.stream()
                     .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
                     .findFirst()
                     .orElseGet(() -> {
-                        // Create and save a new Journal
+                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
                         Journal newJournal = new Journal(
                                 ecriture.getJournal().getName(),
                                 ecriture.getJournal().getType(),
-                                piece.getDossier().getCabinet(),
-                                piece.getDossier()
+                                dossier.getCabinet(),
+                                dossier
                         );
-                        return journalRepository.save(newJournal);
+                        Journal savedJournal = journalRepository.save(newJournal);
+                        journals.add(savedJournal); // Add to the list to prevent redundant creations
+                        return savedJournal;
                     });
             ecriture.setJournal(journal);
 
-            // Save the Ecriture
-            Ecriture savedEcriture = ecritureRepository.save(ecriture);
+            log.info("Ecriture before saving: {}", ecriture);
 
-            for (Line line : ecriture.getLines()) {
-                line.setEcriture(savedEcriture);
+            try {
+                log.info("Attempting to save Ecriture: {}", ecriture);
+                Ecriture savedEcriture = ecritureRepository.save(ecriture);
+                log.info("Saved Ecriture: {}", savedEcriture);
 
-                // Find or create Account
-                Account account = accounts.stream()
-                        .filter(a -> a.getAccount().equals(line.getAccount().getAccount()))
-                        .findFirst()
-                        .orElseGet(() -> {
-                            // Create and save a new Account
-                            Account newAccount = new Account();
-                            newAccount.setAccount(line.getAccount().getAccount());
-                            newAccount.setLabel(line.getAccount().getLabel());
-                            newAccount.setDossier(piece.getDossier());
-                            return accountRepository.save(newAccount);
-                        });
-                line.setAccount(account);
+                for (Line line : ecriture.getLines()) {
+                    line.setEcriture(savedEcriture);
+
+                    // Fetch or create Account
+                    Account account = accountMap.computeIfAbsent(line.getAccount().getAccount(), accountNumber -> {
+                        log.info("Checking Account for account number: {}", accountNumber);
+
+                        // Fetch from the database
+                        Account existingAccount = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
+                        if (existingAccount != null) {
+                            log.info("Matched existing Account: {}", existingAccount);
+                            return existingAccount;
+                        }
+
+                        // Create new Account
+                        Account newAccount = new Account();
+                        newAccount.setAccount(accountNumber);
+                        newAccount.setLabel(line.getAccount().getLabel());
+                        newAccount.setDossier(dossier); // Explicitly set the Dossier
+                        log.info("New Account Details before saving: {}", newAccount);
+                        return accountRepository.save(newAccount);
+                    });
+
+                    // Set the matched or newly created account to the line
+                    line.setAccount(account);
+                }
+
+                // Save Lines associated with the Ecriture
+                lineRepository.saveAll(ecriture.getLines());
+            } catch (Exception e) {
+                log.error("Error saving Ecriture: {}", e.getMessage(), e);
+                throw e; // Rethrow to propagate the exception
             }
-
-            // Save Lines associated with the Ecriture
-            lineRepository.saveAll(ecriture.getLines());
         }
     }
 
 
-    private List<Ecriture> deserializeEcritures(String pieceData) {
+    private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
         try {
-            // Extract 'ecritures' from the JSON body
             JsonNode rootNode = objectMapper.readTree(pieceData);
-
-            // Extract the 'ecritures' field from the main pieceData
             JsonNode ecrituresNode = rootNode.get("ecritures");
 
-            // Deserialize the 'ecritures' field as a List<Ecriture>
-            return objectMapper.readValue(ecrituresNode.toString(), new TypeReference<List<Ecriture>>() {});
+            if (ecrituresNode == null || ecrituresNode.isNull()) {
+                log.warn("'ecritures' field is missing or null in the JSON");
+                return Collections.emptyList();
+            }
+
+            log.info("Raw Ecritures JSON Node: {}", ecrituresNode);
+
+            Map<String, Account> accountMap = accountRepository.findByDossierId(dossier.getId()).stream()
+                    .collect(Collectors.toMap(Account::getAccount, Function.identity()));
+            log.info("Initial Account Map: {}", accountMap);
+
+            List<Ecriture> ecritures = new ArrayList<>();
+            for (JsonNode ecritureNode : ecrituresNode) {
+                Ecriture ecriture = objectMapper.treeToValue(ecritureNode, Ecriture.class);
+
+                if (ecriture.getLines() != null) {
+                    for (Line line : ecriture.getLines()) {
+                        Account account = line.getAccount();
+
+                        if (account != null) {
+                            Account existingAccount = accountMap.get(account.getAccount());
+                            if (existingAccount == null) {
+                                existingAccount = accountRepository.findByAccountAndDossierId(account.getAccount(), dossier.getId());
+                                if (existingAccount != null) {
+                                    accountMap.put(existingAccount.getAccount(), existingAccount);
+                                }
+                            }
+
+                            if (existingAccount != null) {
+                                log.info("Matched existing Account: {}", existingAccount);
+                                line.setAccount(existingAccount);
+                            } else {
+                                account.setDossier(dossier);
+                                log.info("Prepared new Account with Dossier: {}", account);
+                                accountMap.put(account.getAccount(), account); // Add to map
+                            }
+                        } else {
+                            log.warn("Line does not have an account: {}", line.getLabel());
+                        }
+                    }
+                } else {
+                    log.warn("Ecriture has no lines: {}", ecriture.getUniqueEntryNumber());
+                }
+
+                log.info("Deserialized Ecriture: {}", ecriture);
+                ecritures.add(ecriture);
+            }
+            return ecritures;
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse 'ecritures' JSON: " + e.getMessage());
+            log.error("Failed to parse 'ecritures' JSON: {}", e.getMessage(), e);
+            throw new IllegalArgumentException("Invalid JSON format for 'ecritures': " + e.getMessage(), e);
         }
     }
 
 
-    private Double calculateAmountFromEcritures(String pieceData) {
-        List<Ecriture> ecritures = deserializeEcritures(pieceData);
+
+    private Double calculateAmountFromEcritures(String pieceData, Dossier dossier) {
+        List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
 
         return ecritures.stream()
                 .flatMap(e -> e.getLines().stream())

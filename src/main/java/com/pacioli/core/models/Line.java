@@ -37,7 +37,7 @@ public class Line {
 
     //@JsonDeserialize(using = AccountDeserializer.class)
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.PERSIST)
     @JoinColumn(name = "account_id", nullable = true)
     @JsonBackReference("account-lines")
     private Account account;

@@ -106,8 +106,8 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
         p.filename, 
         a.label, 
         l.label, 
-        SUM(l.debit), 
-        SUM(l.credit), 
+        SUM(DISTINCT l.debit),
+        SUM(DISTINCT l.credit),
         fd.invoiceNumber, 
         fd.invoiceDate, 
         fd.totalTTC, 
@@ -132,13 +132,12 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     LEFT JOIN 
         p.factureData fd 
     LEFT JOIN 
-        Exercise ex ON ex.dossier.id = d.id
+        Exercise ex ON ex.dossier.id = d.id 
+        AND e.entryDate BETWEEN ex.startDate AND ex.endDate
     WHERE 
         d.id = :dossierId
-        AND (
-            (:exerciseId IS NULL OR (ex.id = :exerciseId AND e.entryDate BETWEEN ex.startDate AND ex.endDate))
-            AND e.entryDate BETWEEN COALESCE(:startDate, e.entryDate) AND COALESCE(:endDate, CURRENT_DATE)
-        )
+        AND (:exerciseId IS NULL OR ex.id = :exerciseId)
+        AND e.entryDate BETWEEN COALESCE(:startDate, e.entryDate) AND COALESCE(:endDate, CURRENT_DATE)
         AND (:journalId IS NULL OR e.journal.id = :journalId)
     GROUP BY 
         e.uniqueEntryNumber, 

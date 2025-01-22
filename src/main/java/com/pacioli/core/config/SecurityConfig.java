@@ -60,7 +60,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://104.236.50.144:3000", "http://localhost:5173", "https://neurocompta.com")); // Add your frontend origin
+        configuration.setAllowedOrigins(List.of("http://localhost:5173", "https://neurocompta.com", "http://64.23.236.247:3000")); // Add your frontend origin
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")); // Explicitly allow methods
         configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "X-Frame-Options")); // Allow headers
         // Specify exposed headers (for frontend access to certain headers)
@@ -81,7 +81,7 @@ public class SecurityConfig {
             protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
                     throws ServletException, IOException {
                 // Set X-Frame-Options to allow specific origin
-                response.setHeader("X-Frame-Options", "ALLOW-FROM http://104.236.50.144:3000");
+                response.setHeader("X-Frame-Options", "ALLOW-FROM https://neurocompta.com");
                 // Alternatively, allow all origins (less secure)
                 // response.setHeader("X-Frame-Options", "ALLOWALL");
                 filterChain.doFilter(request, response);

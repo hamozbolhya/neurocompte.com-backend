@@ -78,7 +78,7 @@ public class PieceServiceImpl implements PieceService {
         piece.setFilename(formattedFilename); // Store the exact formatted filename in the Piece entity
 
         // **Step 5: Set status to PROCESSING**
-        piece.setStatus(PieceStatus.PROCESSING);
+        piece.setStatus(PieceStatus.UPLOADED);
 
         // **Step 6: Save the Piece in the database**
         return pieceRepository.save(piece);

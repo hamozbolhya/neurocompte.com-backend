@@ -2,6 +2,7 @@ package com.pacioli.core.controllers;
 
 import com.pacioli.core.DTO.DossierDTO;
 import com.pacioli.core.DTO.DossierRequest;
+import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Exercise;
 import com.pacioli.core.services.DossierService;
@@ -33,14 +34,67 @@ public class DossierController {
     // Endpoint to add a new dossier
     @Validated
     @PostMapping
-    public ResponseEntity<Dossier> createDossier(@Valid @RequestBody DossierRequest request) {
+    public ResponseEntity<DossierDTO> createDossier(@Valid @RequestBody DossierRequest request) {
+        // Validate request
+        if (request.getDossier() == null || request.getDossier().getCabinet() == null
+                || request.getDossier().getCabinet().getId() == null) {
+            throw new RuntimeException("Cabinet ID must not be null");
+        }
+
         System.out.println("Incoming Dossier: " + request.getDossier());
         System.out.println("Incoming Exercises: " + request.getExercises());
-        if (request.getDossier() == null) {
-            throw new RuntimeException("Dossier is null in the request payload");
+
+        // Convert DTO to entity
+        Dossier dossierEntity = convertToEntity(request.getDossier());
+
+        // Create dossier
+        Dossier createdDossier = dossierService.createDossier(dossierEntity, request.getExercises());
+
+        // Convert back to DTO for response
+        return ResponseEntity.ok(convertToDTO(createdDossier));
+    }
+
+    private Dossier convertToEntity(DossierDTO dto) {
+        Dossier dossier = new Dossier();
+        dossier.setName(dto.getName());
+        dossier.setICE(dto.getICE());
+        dossier.setAddress(dto.getAddress());
+        dossier.setCity(dto.getCity());
+        dossier.setPhone(dto.getPhone());
+        dossier.setEmail(dto.getEmail());
+
+        Cabinet cabinet = new Cabinet();
+        cabinet.setId(dto.getCabinet().getId());
+        dossier.setCabinet(cabinet);
+
+        // Set exercises if they exist in the DTO
+        if (dto.getExercises() != null) {
+            dossier.setExercises(dto.getExercises());
         }
-        Dossier createdDossier = dossierService.createDossier(request.getDossier(), request.getExercises());
-        return ResponseEntity.ok(createdDossier);
+
+        return dossier;
+    }
+
+    private DossierDTO convertToDTO(Dossier entity) {
+        DossierDTO dto = new DossierDTO();
+        dto.setId(entity.getId());
+        dto.setName(entity.getName());
+        dto.setICE(entity.getICE());
+        dto.setAddress(entity.getAddress());
+        dto.setCity(entity.getCity());
+        dto.setPhone(entity.getPhone());
+        dto.setEmail(entity.getEmail());
+
+        DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
+        cabinetDTO.setId(entity.getCabinet().getId());
+        dto.setCabinet(cabinetDTO);
+
+        // Convert exercises
+        if (entity.getExercises() != null) {
+            dto.setExercises(entity.getExercises());
+        }
+
+        return dto;
     }
 
     // Endpoint to get details of a dossier by ID

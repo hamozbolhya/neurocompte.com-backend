@@ -15,15 +15,30 @@ import java.util.Optional;
 public interface DossierRepository extends JpaRepository<Dossier, Long> {
     boolean existsByName(String name);
     Optional<Dossier> findByName(String name);
-    @Query("SELECT new com.pacioli.core.DTO.DossierDTO(d.id, d.name, d.ICE, d.address, d.city, d.phone, d.email) " +
+
+    // For single Dossier fetch
+    @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
+            "d.id, " +
+            "d.name, " +
+            "d.ICE, " +
+            "d.address, " +
+            "d.city, " +
+            "d.phone, " +
+            "d.email) " +
             "FROM Dossier d WHERE d.id = :id")
     Optional<DossierDTO> findDossierById(@Param("id") Long id);
 
-
     Page<Dossier> findByCabinetId(Long cabinetId, Pageable pageable);
 
-    @Query("SELECT new com.pacioli.core.DTO.DossierDTO(d.id, d.name, d.ICE, d.address, d.city, d.phone, d.email) " +
+    // For paginated results
+    @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
+            "d.id, " +
+            "d.name, " +
+            "d.ICE, " +
+            "d.address, " +
+            "d.city, " +
+            "d.phone, " +
+            "d.email) " +
             "FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Page<DossierDTO> findDossierDTOsByCabinetId(@Param("cabinetId") Long cabinetId, Pageable pageable);
-
 }

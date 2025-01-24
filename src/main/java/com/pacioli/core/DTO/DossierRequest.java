@@ -5,11 +5,15 @@ import com.pacioli.core.models.Exercise;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Data
 public class DossierRequest {
-    private Dossier dossier;
+   /* private Dossier dossier;
     @JsonProperty("exercise") // Ensure it matches the JSON payload
-    private List<Exercise> exercises;
+    private List<Exercise> exercises;*/
+
+    private DossierDTO dossier;
+    private List<Exercise> exercises = new ArrayList<>();
 }

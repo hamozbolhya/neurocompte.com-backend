@@ -8,7 +8,6 @@ import java.time.LocalDate;
 import java.util.Date;
 
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
 public class EcritureExportDTO {
 
@@ -28,4 +27,47 @@ public class EcritureExportDTO {
     private Double taxRate;           // fd.taxRate
     private String tier;              // fd.tier
     private String ice;               // fd.ice
+
+    private Double debitTotal;
+    private Double creditTotal;
+
+    public EcritureExportDTO(
+            String uniqueEntryNumber,
+            LocalDate entryDate,
+            String journalName,
+            String pieceFilename,
+            String accountLabel,
+            String lineLabel,
+            Double debit,
+            Double credit,
+            String invoiceNumber,
+            Date invoiceDate,
+            Double totalTTC,
+            Double totalHT,
+            Double totalTVA,
+            Double taxRate,
+            String tier,
+            String ice,
+            Double debitTotal,
+            Double creditTotal
+    ) {
+        this.uniqueEntryNumber = uniqueEntryNumber;
+        this.entryDate = entryDate;
+        this.journalName = journalName;
+        this.pieceFilename = pieceFilename;
+        this.accountLabel = accountLabel;
+        this.lineLabel = lineLabel;
+        this.debit = debit;
+        this.credit = credit;
+        this.invoiceNumber = invoiceNumber;
+        this.invoiceDate = invoiceDate;
+        this.totalTTC = totalTTC;
+        this.totalHT = totalHT;
+        this.totalTVA = totalTVA;
+        this.taxRate = taxRate;
+        this.tier = tier;
+        this.ice = ice;
+        this.debitTotal = debitTotal;
+        this.creditTotal = creditTotal;
+    }
 }

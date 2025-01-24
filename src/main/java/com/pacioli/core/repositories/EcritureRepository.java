@@ -98,7 +98,7 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     Optional<Ecriture> findEcritureByIdCustom(@Param("ecritureId") Long ecritureId);
 
 
-    @Query("""
+  /*  @Query("""
     SELECT new com.pacioli.core.DTO.EcritureExportDTO(
         e.uniqueEntryNumber, 
         e.entryDate, 
@@ -156,16 +156,9 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
         fd.ice
     ORDER BY 
         e.entryDate DESC
-""")
-    List<EcritureExportDTO> findEcrituresByFilters(
-            @Param("dossierId") Long dossierId,
-            @Param("exerciseId") Long exerciseId,
-            @Param("journalId") Long journalId,
-            @Param("startDate") LocalDate startDate,
-            @Param("endDate") LocalDate endDate
-    );
+""")*/
 
-   /* @Query("""
+    @Query("""
     SELECT new com.pacioli.core.DTO.EcritureExportDTO(
         e.uniqueEntryNumber, 
         e.entryDate, 
@@ -173,8 +166,8 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
         p.filename, 
         a.label, 
         l.label, 
-        l.debit, 
-        l.credit, 
+        l.debit,
+        l.credit,
         fd.invoiceNumber, 
         fd.invoiceDate, 
         fd.totalTTC, 
@@ -182,33 +175,24 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
         fd.totalTVA, 
         fd.taxRate, 
         fd.tier, 
-        fd.ice
+        fd.ice,
+        (SELECT SUM(l2.debit) FROM Line l2 WHERE l2.ecriture = e),
+        (SELECT SUM(l2.credit) FROM Line l2 WHERE l2.ecriture = e)
     )
-    FROM 
-        Ecriture e
-    JOIN 
-        e.piece p 
-    JOIN 
-        p.dossier d 
-    LEFT JOIN 
-        e.journal j 
-    LEFT JOIN 
-        e.lines l 
-    LEFT JOIN 
-        l.account a 
-    LEFT JOIN 
-        p.factureData fd 
-    LEFT JOIN 
-        Exercise ex ON ex.dossier.id = d.id
-   WHERE
-       d.id = :dossierId
-       AND (
-           (:exerciseId IS NULL OR (ex.id = :exerciseId AND e.entryDate BETWEEN ex.startDate AND ex.endDate))
-           AND e.entryDate BETWEEN COALESCE(:startDate, e.entryDate) AND COALESCE(:endDate, CURRENT_DATE)
-       )
-       AND (:journalId IS NULL OR e.journal.id = :journalId)
-    ORDER BY 
-        e.entryDate DESC
+    FROM Ecriture e
+    JOIN e.piece p 
+    JOIN p.dossier d 
+    LEFT JOIN e.journal j 
+    LEFT JOIN e.lines l 
+    LEFT JOIN l.account a 
+    LEFT JOIN p.factureData fd 
+    LEFT JOIN Exercise ex ON ex.dossier.id = d.id 
+        AND e.entryDate BETWEEN ex.startDate AND ex.endDate
+    WHERE d.id = :dossierId
+        AND (:exerciseId IS NULL OR ex.id = :exerciseId)
+        AND e.entryDate BETWEEN COALESCE(:startDate, e.entryDate) AND COALESCE(:endDate, CURRENT_DATE)
+        AND (:journalId IS NULL OR e.journal.id = :journalId)
+    ORDER BY e.entryDate DESC, e.uniqueEntryNumber, l.id
 """)
     List<EcritureExportDTO> findEcrituresByFilters(
             @Param("dossierId") Long dossierId,
@@ -217,7 +201,6 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
-*/
 
 }
 

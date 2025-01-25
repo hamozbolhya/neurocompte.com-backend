@@ -1,5 +1,6 @@
 package com.pacioli.core.DTO;
 
+import lombok.Builder;
 import lombok.Data;
 
 import java.util.Date;
@@ -13,7 +14,7 @@ public class PieceDTO {
     private Date uploadDate;
     private Double amount;
     private FactureDataDTO factureData;
-    private List<EcritureDTO> ecritures;
+    private List<EcrituresDTO2> ecritures;
     private String dossierName;
     private Long dossierId;
 

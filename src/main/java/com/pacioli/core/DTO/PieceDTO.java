@@ -1,5 +1,6 @@
 package com.pacioli.core.DTO;
 
+import com.pacioli.core.enums.PieceStatus;
 import lombok.Builder;
 import lombok.Data;
 
@@ -13,6 +14,9 @@ public class PieceDTO {
     private String type;
     private Date uploadDate;
     private Double amount;
+
+    private PieceStatus status;
+
     private FactureDataDTO factureData;
     private List<EcrituresDTO2> ecritures;
     private String dossierName;

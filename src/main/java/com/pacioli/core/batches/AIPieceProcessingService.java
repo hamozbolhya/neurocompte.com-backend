@@ -67,11 +67,15 @@ public class AIPieceProcessingService {
     @Transactional
     public void processPieceBatch() {
         // Only get UPLOADED pieces for new processing
-        List<Piece> pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED);
+        List<Piece> pendingPieces;
+        pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED);
+        if(pendingPieces.size() == 0) {
+            pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING);
+        }
         log.info("⭐️ Starting batch processing");
         log.info("Found {} new pieces to process", pendingPieces.size());
 
-        ExecutorService executor = Executors.newFixedThreadPool(20);
+        ExecutorService executor = Executors.newFixedThreadPool(BATCH_SIZE);
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
         for (Piece piece : pendingPieces) {
@@ -113,6 +117,8 @@ public class AIPieceProcessingService {
         if (currentPiece.getStatus() == PieceStatus.UPLOADED) {
             currentPiece.setStatus(PieceStatus.PROCESSING);
             pieceRepository.save(currentPiece);
+            log.info("DOSSIER ID 1 {}", currentPiece.getDossier().getId());
+            pieceService.getPiecesByDossier(currentPiece.getDossier().getId());
         }
 
         try {
@@ -125,6 +131,7 @@ public class AIPieceProcessingService {
                     attemptAIProcessing(currentPiece, attempt + 1);
                 } else {
                     rejectPiece(currentPiece, "Invalid AI response after all attempts");
+                    log.info("❌ File rejected response AI be like {}", jsonResponse);
                 }
                 return;
             }
@@ -135,6 +142,7 @@ public class AIPieceProcessingService {
                     currentPiece.getDossier().getId(),
                     objectMapper.writeValueAsString(pieceDTO)
             );
+            pieceService.getPiecesByDossier(currentPiece.getDossier().getId());
         } catch (Exception e) {
             if (attempt < 4) {
                 Thread.sleep(30000);
@@ -150,6 +158,8 @@ public class AIPieceProcessingService {
         log.error("Rejecting piece {}: {}", piece.getId(), reason);
         piece.setStatus(PieceStatus.REJECTED);
         pieceRepository.save(piece);
+        log.info("DOSSIER ID 2 {}", piece.getDossier().getId());
+        pieceService.getPiecesByDossier(piece.getDossier().getId());
     }
 
 
@@ -157,6 +167,8 @@ public class AIPieceProcessingService {
         piece.setStatus(PieceStatus.PROCESSING);
         pieceRepository.save(piece);
         log.info("Processing piece: {} (attempt {}/4)", piece.getId(), attempt);
+        log.info("DOSSIER ID 3 {}", piece.getDossier().getId());
+        pieceService.getPiecesByDossier(piece.getDossier().getId());
 
         try {
             String jsonResponse = callAIService(piece.getFilename());
@@ -178,7 +190,8 @@ public class AIPieceProcessingService {
                     piece.getDossier().getId(),
                     objectMapper.writeValueAsString(pieceDTO)
             );
-
+            log.info("DOSSIER ID 4 {}", piece.getDossier().getId());
+            pieceService.getPiecesByDossier(piece.getDossier().getId());
         } catch (Exception e) {
             if (attempt < 4) {
                 try {
@@ -253,7 +266,7 @@ public class AIPieceProcessingService {
             }
 
             if (ecritures == null || !ecritures.isArray() || ecritures.size() == 0) {
-                log.info("❌ No valid ecritures found in response");
+                log.info("❌ No valid ecritures found in response {}", parsedJson);
                 return false;
             }
 

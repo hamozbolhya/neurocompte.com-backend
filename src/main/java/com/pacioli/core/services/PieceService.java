@@ -17,5 +17,7 @@ public interface PieceService {
     Piece savePiece(String pieceData, MultipartFile file, Long dossierId) throws IOException;
     Piece saveEcrituresAndFacture(Long pieceId ,Long dossierId , String pieceData);
 
+    void notifyPiecesUpdate(Long dossierId);
+
     Piece updatePieceStatus(Long id, String request);
 }

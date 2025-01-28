@@ -42,7 +42,10 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Enable CORS
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authz -> authz
+                        .requestMatchers("/error").authenticated()
                         .requestMatchers("/auth/login", "/auth/register", "/auth/change-password").permitAll()
+                        .requestMatchers("/ws").permitAll() // Allow initial handshake
+                        .requestMatchers("/topic/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .logout(logout -> logout

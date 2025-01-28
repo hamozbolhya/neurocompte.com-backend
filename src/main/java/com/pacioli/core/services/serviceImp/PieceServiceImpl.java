@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pacioli.core.DTO.EcrituresDTO2;
+import com.pacioli.core.DTO.FactureDataDTO;
+import com.pacioli.core.DTO.PieceDTO;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
@@ -12,8 +15,10 @@ import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FilenameUtils;
+import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -40,6 +46,9 @@ public class PieceServiceImpl implements PieceService {
     private final DossierRepository dossierRepository;
 
     private final ObjectMapper objectMapper;
+
+    @Autowired
+    private SimpMessagingTemplate messagingTemplate;
 
     @Value("${file.upload.dir:Files/}")
     private String uploadDir;
@@ -332,8 +341,60 @@ public class PieceServiceImpl implements PieceService {
     }
 
     @Override
+    @Transactional()
     public List<Piece> getPiecesByDossier(Long dossierId) {
-        return pieceRepository.findByDossierId(dossierId);
+        List<Piece> pieces = pieceRepository.findByDossierId(dossierId);
+        messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, pieces);
+        return pieces;
+    }
+
+    @Transactional()
+    public void notifyPiecesUpdate(Long dossierId) {
+        List<Piece> pieces = pieceRepository.findByDossierId(dossierId);
+
+        // Eagerly load collections before leaving the transaction
+        pieces.forEach(piece -> {
+            Hibernate.initialize(piece.getEcritures());
+            Hibernate.initialize(piece.getFactureData());
+        });
+
+        List<PieceDTO> dtos = pieces.stream()
+                .map(piece -> {
+                    PieceDTO dto = new PieceDTO();
+                    dto.setId(piece.getId());
+                    dto.setFilename(piece.getFilename());
+                    dto.setType(piece.getType());
+                    dto.setStatus(piece.getStatus());
+                    dto.setUploadDate(piece.getUploadDate());
+                    dto.setAmount(piece.getAmount());
+                    dto.setDossierId(piece.getDossier().getId());
+                    dto.setDossierName(piece.getDossier().getName());
+
+                    if (piece.getFactureData() != null) {
+                        FactureDataDTO factureDataDTO = new FactureDataDTO();
+                        factureDataDTO.setInvoiceNumber(piece.getFactureData().getInvoiceNumber());
+                        factureDataDTO.setTotalTVA(piece.getFactureData().getTotalTVA());
+                        factureDataDTO.setTaxRate(piece.getFactureData().getTaxRate());
+                        dto.setFactureData(factureDataDTO);
+                    }
+
+                    if (piece.getEcritures() != null) {
+                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
+                                .map(ecriture -> {
+                                    EcrituresDTO2 dto2 = new EcrituresDTO2();
+                                    dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
+                                    dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+                                    return dto2;
+                                })
+                                .collect(Collectors.toList());
+                        dto.setEcritures(ecrituresDTOs);
+                    }
+
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, dtos);
     }
 
     @Override

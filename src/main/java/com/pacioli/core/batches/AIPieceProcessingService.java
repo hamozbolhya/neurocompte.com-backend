@@ -293,7 +293,7 @@ public class AIPieceProcessingService {
                entry.has("EcritLib") && !entry.get("EcritLib").asText().isEmpty() &&
                entry.has("DebitAmt") && entry.get("DebitAmt").isNumber() &&
                entry.has("CreditAmt") && entry.get("CreditAmt").isNumber() &&
-               entry.has("TVARate") && entry.get("TVARate").isNumber() &&
+               //entry.has("TVARate") && entry.get("TVARate").isNumber() &&
                entry.has("Devise") && !entry.get("Devise").asText().isEmpty();
     }
 
@@ -408,11 +408,52 @@ public class AIPieceProcessingService {
         }
     }
 
-    private FactureDataDTO buildFactureData(JsonNode entry) {
+   /* private FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
         factureData.setInvoiceNumber(entry.get("FactureNum").asText());
         factureData.setTotalTVA(entry.get("TVARate").asDouble());
         factureData.setTaxRate(entry.get("TVARate").asDouble());
+        return factureData;
+    }*/
+
+    private FactureDataDTO buildFactureData(JsonNode entry) {
+        FactureDataDTO factureData = new FactureDataDTO();
+        factureData.setInvoiceNumber(entry.get("FactureNum").asText());
+
+        // Default TVA rate to null
+        Double tvaRate = null;
+
+        try {
+            JsonNode tvaNode = entry.get("TVARate");
+            if (tvaNode != null && !tvaNode.isNull()) {
+                if (tvaNode.isNumber()) {
+                    // If it's a number, use it directly
+                    tvaRate = tvaNode.asDouble();
+                } else {
+                    // For any string value, try to extract numbers
+                    String tvaText = tvaNode.asText().trim();
+                    if (!tvaText.isEmpty()) {
+                        // Extract first sequence of numbers (with possible decimal point)
+                        String numberStr = tvaText.replaceAll("[^0-9.]", "");
+                        if (!numberStr.isEmpty()) {
+                            try {
+                                tvaRate = Double.parseDouble(numberStr);
+                            } catch (NumberFormatException ignored) {
+                                // If parsing fails, keep tvaRate as null
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // If any error occurs during TVA processing, just log and continue
+            log.trace("Error processing TVA rate: {}", e.getMessage());
+        }
+
+        // Set the TVA rate (will be null if any processing failed)
+        factureData.setTotalTVA(tvaRate);
+        factureData.setTaxRate(tvaRate);
+
         return factureData;
     }
 

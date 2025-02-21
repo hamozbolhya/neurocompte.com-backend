@@ -51,10 +51,9 @@ public class PieceController {
         this.dossierService = dossierService;
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Piece> getPieceById(@PathVariable Long id) {
-        Piece piece = pieceService.getPieceById(id);
-        return ResponseEntity.ok(piece);
+    @GetMapping("/{Id}")
+    public List<Piece> getPiecesByDossierId(@PathVariable Long dossierId) {
+        return pieceService.getPiecesByDossierIdSortedByDate(dossierId);
     }
 
     @PostMapping

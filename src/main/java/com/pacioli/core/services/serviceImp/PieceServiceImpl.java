@@ -414,6 +414,11 @@ public class PieceServiceImpl implements PieceService {
                 .orElseThrow(() -> new IllegalArgumentException("Piece with id " + id + " not found"));
     }
 
+    @Override
+    public List<Piece> getPiecesByDossierIdSortedByDate(Long dossierId) {
+        return pieceRepository.findByDossierIdOrderByUploadDateDesc(dossierId);
+    }
+
     @Transactional
     public Piece updatePieceStatus(Long pieceId, String newStatus) {
         Optional<Piece> optionalPiece = pieceRepository.findById(pieceId);

@@ -14,7 +14,7 @@ import java.util.List;
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierId(Long dossierId);
-
+    List<Piece> findByDossierIdOrderByUploadDateDesc(Long dossierId);
     @Query("SELECT DISTINCT p FROM Piece p LEFT JOIN FETCH p.ecritures WHERE p.dossier.id = :dossierId")
     List<Piece> findPiecesWithEcritures(@Param("dossierId") Long dossierId);
 

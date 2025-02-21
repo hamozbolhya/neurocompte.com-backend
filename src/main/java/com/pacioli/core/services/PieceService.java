@@ -10,6 +10,7 @@ import java.util.List;
 
 public interface PieceService {
     Piece getPieceById(Long id); // Add this method
+    List<Piece> getPiecesByDossierIdSortedByDate(Long id);
     List<Piece> getPiecesByDossier(Long dossierId);
     List<Piece> getAllPieces();
     void deletePiece(Long id);

@@ -206,24 +206,6 @@ public class AIPieceProcessingService {
             }
         }
     }
-    private void handleFailure(Piece piece, String error, int attempt) {
-        if (attempt < MAX_RETRIES) {
-            log.info("⏳ Waiting {}ms before retry {}/{} for piece [ID: {}]",
-                    RETRY_DELAY, attempt + 1, MAX_RETRIES, piece.getId());
-            try {
-                Thread.sleep(RETRY_DELAY);
-                processWithRetry(piece, attempt + 1);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                log.info("🚫 Retry interrupted");
-            }
-        } else {
-            log.info("❌ Final failure after {} attempts. Setting status REJECTED", MAX_RETRIES);
-            piece.setStatus(PieceStatus.REJECTED);
-            pieceRepository.save(piece);
-        }
-    }
-
 
     private String callAIService(String filename) throws IOException {
         Path filePath = Paths.get(uploadDir, filename);

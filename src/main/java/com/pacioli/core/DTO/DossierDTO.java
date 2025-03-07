@@ -17,6 +17,7 @@ public class DossierDTO {
     private String city;
     private String phone;
     private String email;
+    private PaysDTO pays;
     private CabinetDTO cabinet;
     private List<Exercise> exercises = new ArrayList<>();
 
@@ -26,7 +27,9 @@ public class DossierDTO {
     }
 
     // Constructor for JPQL queries
-    public DossierDTO(Long id, String name, String ICE, String address, String city, String phone, String email) {
+    // Constructor for JPQL queries
+    public DossierDTO(Long id, String name, String ICE, String address, String city, String phone, String email,
+                      String country, String code) {
         this.id = id;
         this.name = name;
         this.ICE = ICE;
@@ -34,9 +37,17 @@ public class DossierDTO {
         this.city = city;
         this.phone = phone;
         this.email = email;
-        // Create cabinet DTO with null ID - you'll need to set this after query if needed
-        this.cabinet = new CabinetDTO();
 
+        // Create pays object
+        if (country != null || code != null) {
+            PaysDTO paysDTO = new PaysDTO();
+            paysDTO.setCountry(country);
+            paysDTO.setCode(code);
+            this.pays = paysDTO;
+        }
+
+        // Create cabinet DTO with null ID
+        this.cabinet = new CabinetDTO();
     }
 
     // Default constructor

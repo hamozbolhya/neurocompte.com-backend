@@ -50,4 +50,35 @@ public class Dossier {
     private String city;
     private String phone;
     private String email;
+
+    // Add country information as columns in the Dossier table
+    @Column(name = "country")
+    private String country;
+
+    @Column(name = "code")
+    private String code;
+
+    // Transient getter for pays as a nested object (not persisted in DB)
+    @Transient
+    public Pays getPays() {
+        Pays pays = new Pays();
+        pays.setCountry(this.country);
+        pays.setCode(this.code);
+        return pays;
+    }
+
+    // Transient setter for pays as a nested object
+    public void setPays(Pays pays) {
+        if (pays != null) {
+            this.country = pays.getCountry();
+            this.code = pays.getCode();
+        }
+    }
+
+    // Helper class for the transient pays property
+    @Data
+    public static class Pays {
+        private String country;
+        private String code;
+    }
 }

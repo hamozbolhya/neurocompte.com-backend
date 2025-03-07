@@ -18,27 +18,31 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
 
     // For single Dossier fetch
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
-            "d.id, " +
-            "d.name, " +
-            "d.ICE, " +
-            "d.address, " +
-            "d.city, " +
-            "d.phone, " +
-            "d.email) " +
-            "FROM Dossier d WHERE d.id = :id")
+           "d.id, " +
+           "d.name, " +
+           "d.ICE, " +
+           "d.address, " +
+           "d.city, " +
+           "d.phone, " +
+           "d.email, " +
+           "d.country, " +
+           "d.code) " +
+           "FROM Dossier d WHERE d.id = :id")
     Optional<DossierDTO> findDossierById(@Param("id") Long id);
 
     Page<Dossier> findByCabinetId(Long cabinetId, Pageable pageable);
 
     // For paginated results
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
-            "d.id, " +
-            "d.name, " +
-            "d.ICE, " +
-            "d.address, " +
-            "d.city, " +
-            "d.phone, " +
-            "d.email) " +
+           "d.id, " +
+           "d.name, " +
+           "d.ICE, " +
+           "d.address, " +
+           "d.city, " +
+           "d.phone, " +
+           "d.email, " +
+           "d.country, " +
+           "d.code) " +
             "FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Page<DossierDTO> findDossierDTOsByCabinetId(@Param("cabinetId") Long cabinetId, Pageable pageable);
 }

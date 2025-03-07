@@ -63,6 +63,16 @@ public class DossierController {
         dossier.setPhone(dto.getPhone());
         dossier.setEmail(dto.getEmail());
 
+        // Set country and code values from either individual fields or pays object
+        if (dto.getPays() != null) {
+            dossier.setCountry(dto.getPays().getCountry());
+            dossier.setCode(dto.getPays().getCode());
+        } else {
+            // If pays is null, set default values or leave them null
+            dossier.setCountry(null);
+            dossier.setCode(null);
+        }
+
         Cabinet cabinet = new Cabinet();
         cabinet.setId(dto.getCabinet().getId());
         dossier.setCabinet(cabinet);

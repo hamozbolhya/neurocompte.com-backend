@@ -3,7 +3,9 @@ package com.pacioli.core.services;
 
 import com.pacioli.core.models.User;
 import com.pacioli.core.repositories.UserRepository;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -13,8 +15,9 @@ import java.util.Optional;
 
 @Slf4j
 @Service
+@Transactional
 public class CustomUserDetailsService implements UserDetailsService {
-
+    @Autowired
     private final UserRepository userRepository;
 
     public CustomUserDetailsService(UserRepository userRepository) {
@@ -32,7 +35,11 @@ public class CustomUserDetailsService implements UserDetailsService {
         }
 
         User user = userOptional.get();
-        log.info("User found: {}", user);
+
+        // Force Hibernate to initialize lazy collections before logging
+        user.getRoles().size();
+
+        log.info("User found: {}", user.getUsername()); // Log only safe fields
 
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getUsername())
@@ -40,4 +47,5 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .roles("USER")  // Customize roles as needed
                 .build();
     }
+
 }

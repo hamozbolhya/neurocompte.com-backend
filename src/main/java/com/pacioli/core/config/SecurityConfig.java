@@ -64,7 +64,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "https://neurocompta.com", "https://www.neurocompta.com", "http://64.23.236.247:3000", "http://64.23.236.247")); // Add your frontend origin
+        configuration.setAllowedOrigins(List.of("http://localhost:5173", "https://neurocompta.com", "https://www.neurocompta.com", "http://146.190.141.243:3000", "http://146.190.141.243")); // Add your frontend origin
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")); // Explicitly allow methods
         configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "X-Frame-Options")); // Allow headers
         // Specify exposed headers (for frontend access to certain headers)
@@ -85,7 +85,7 @@ public class SecurityConfig {
             private final List<String> allowedHosts = Arrays.asList(
                     "https://neurocompta.com",
                     "https://www.neurocompta.com",
-                    "http://64.23.236.247:3000",
+                    "http://146.190.141.243:3000",
                     "http://localhost:5173/"
             );
 

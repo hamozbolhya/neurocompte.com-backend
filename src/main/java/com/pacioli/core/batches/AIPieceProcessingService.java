@@ -265,18 +265,37 @@ public class AIPieceProcessingService {
     }
 
     private boolean validateEcritureFields(JsonNode entry) {
-        return entry != null &&
-               entry.has("Date") && !entry.get("Date").asText().isEmpty() &&
-               entry.has("JournalCode") && !entry.get("JournalCode").asText().isEmpty() &&
-               entry.has("JournalLib") && !entry.get("JournalLib").asText().isEmpty() &&
-               entry.has("FactureNum") && !entry.get("FactureNum").asText().isEmpty() &&
-               entry.has("CompteNum") && !entry.get("CompteNum").asText().isEmpty() &&
-               entry.has("CompteLib") && !entry.get("CompteLib").asText().isEmpty() &&
-               entry.has("EcritLib") && !entry.get("EcritLib").asText().isEmpty() &&
-               entry.has("DebitAmt") && entry.get("DebitAmt").isNumber() &&
-               entry.has("CreditAmt") && entry.get("CreditAmt").isNumber() &&
-               //entry.has("TVARate") && entry.get("TVARate").isNumber() &&
-               entry.has("Devise") && !entry.get("Devise").asText().isEmpty();
+        // Basic field presence validation
+        if (entry == null ||
+                !entry.has("Date") || entry.get("Date").asText().isEmpty() ||
+                !entry.has("JournalCode") || entry.get("JournalCode").asText().isEmpty() ||
+                !entry.has("JournalLib") || entry.get("JournalLib").asText().isEmpty() ||
+                !entry.has("FactureNum") || entry.get("FactureNum").asText().isEmpty() ||
+                !entry.has("CompteNum") || entry.get("CompteNum").asText().isEmpty() ||
+                !entry.has("CompteLib") || entry.get("CompteLib").asText().isEmpty() ||
+                !entry.has("EcritLib") || entry.get("EcritLib").asText().isEmpty() ||
+                !entry.has("DebitAmt") ||
+                !entry.has("CreditAmt") ||
+                !entry.has("Devise") || entry.get("Devise").asText().isEmpty()) {
+
+            log.info("❌ Missing required fields in ecriture: {}", entry);
+            return false;
+        }
+
+        // Check if DebitAmt and CreditAmt can be parsed as numbers
+        try {
+            // Try to parse the numeric fields whether they're numbers or strings
+            String debitStr = entry.get("DebitAmt").asText();
+            String creditStr = entry.get("CreditAmt").asText();
+
+            Double.parseDouble(debitStr);
+            Double.parseDouble(creditStr);
+
+            return true;
+        } catch (NumberFormatException e) {
+            log.info("❌ Invalid number format in DebitAmt or CreditAmt: {}", e.getMessage());
+            return false;
+        }
     }
 
     private PieceDTO buildPieceDTO(Piece piece, JsonNode aiResponse) throws JsonProcessingException {

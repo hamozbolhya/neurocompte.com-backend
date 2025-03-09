@@ -1,7 +1,5 @@
 package com.pacioli.core.services.serviceImp;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pacioli.core.DTO.EcrituresDTO2;
@@ -11,10 +9,12 @@ import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.PieceService;
-import jakarta.persistence.EntityManager;
+import com.pacioli.core.utils.InMemoryMultipartFile;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,7 +22,11 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -53,6 +57,12 @@ public class PieceServiceImpl implements PieceService {
     @Value("${file.upload.dir:Files/}")
     private String uploadDir;
 
+    @Value("${app.ai.api-url}")
+    private String aiApiBaseUrl;
+
+    @Value("${ai.service.api-key}")
+    private String aiApiKey;
+
     public PieceServiceImpl(
             PieceRepository pieceRepository,
             FactureDataRepository factureDataRepository,
@@ -70,27 +80,275 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece savePiece(String pieceData, MultipartFile file, Long dossierId) throws IOException {
-        // **Step 1: Deserialize the Piece**
-        Piece piece = deserializePiece(pieceData, dossierId);
+    public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException {
+        try {
+            // Step 1: Deserialize the Piece
+            Piece piece = deserializePiece(pieceData, dossierId);
+            log.info("Piece deserialized: {}", piece.getOriginalFileName());
 
-        // **Step 2: Fetch Dossier from the database**
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+            // Step 2: Fetch Dossier from the database
+            Dossier dossier = dossierRepository.findById(dossierId)
+                    .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+            log.info("Dossier found with ID: {}", dossierId);
 
-        // **Step 3: Link Dossier to Piece**
-        piece.setDossier(dossier); // Attach the dossier to the piece
-        piece.setOriginalFileName(piece.getOriginalFileName());
-        // **Step 4: Use the formatted file name from the request (DO NOT CHANGE IT)**
-        String formattedFilename = piece.getFilename(); // Use the filename sent from the frontend
-        saveFileToDisk(file, formattedFilename); // Save file with the formatted filename
-        piece.setFilename(formattedFilename); // Store the exact formatted filename in the Piece entity
+            // Step 3: Link Dossier to Piece
+            piece.setDossier(dossier);
+            piece.setOriginalFileName(piece.getOriginalFileName());
 
-        // **Step 5: Set status to PROCESSING**
-        piece.setStatus(PieceStatus.UPLOADED);
+            // Step 4: Check file type and handle conversion if needed
+            boolean isPdf = isPdfFile(file);
+            log.info("Is this a PDF file? {}", isPdf);
 
-        // **Step 6: Save the Piece in the database**
-        return pieceRepository.save(piece);
+            if (isPdf) {
+                log.info("PDF file detected, starting conversion for AI processing");
+
+                try {
+                    // Convert PDF to images for AI processing
+                    List<MultipartFile> convertedImages = convertPdfToImages(file);
+                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
+
+                    if (!convertedImages.isEmpty()) {
+                        // For the first image, convert filename to png
+                        String originalFilename = piece.getFilename();
+                        String filenameWithoutExt = originalFilename.substring(0, originalFilename.lastIndexOf('.'));
+                        String formattedFilename = filenameWithoutExt + ".png";
+
+                        log.info("Saving first image with filename: {}", formattedFilename);
+
+                        // Send each converted image to AI (but save only one record)
+                        for (int i = 0; i < convertedImages.size(); i++) {
+                            // Generate a unique filename for AI purpose
+                            String aiFilename = (i == 0) ? formattedFilename :
+                                    filenameWithoutExt + "_page" + (i+1) + ".png";
+
+                            // Send to AI
+                            sendFileToAI(convertedImages.get(i), aiFilename, dossierId, country);
+                        }
+
+                        // Save only the first image to disk (or save all but associate with single piece)
+                        saveFileToDisk(convertedImages.get(0), formattedFilename);
+                        piece.setFilename(formattedFilename);
+                        piece.setStatus(PieceStatus.UPLOADED);
+
+                        // Save only one piece for the entire PDF
+                        Piece savedPiece = pieceRepository.save(piece);
+                        log.info("Piece saved with ID: {}", savedPiece.getId());
+                        return savedPiece;
+                    } else {
+                        log.warn("No images were converted from the PDF, falling back to save as-is");
+                    }
+                } catch (Exception e) {
+                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
+                    log.info("Falling back to saving the PDF as-is");
+                    // Continue with normal file saving logic
+                }
+            }
+
+            // Not a PDF or conversion failed - save as-is and send to AI
+            log.info("Processing as regular file");
+            String formattedFilename = piece.getFilename(); // Use the filename sent from the frontend
+
+            // Send the file to AI
+            sendFileToAI(file, formattedFilename, dossierId, country);
+
+            saveFileToDisk(file, formattedFilename); // Save file with the formatted filename
+            piece.setFilename(formattedFilename); // Store the exact formatted filename in the Piece entity
+
+            // Step 5: Set status to UPLOADED
+            piece.setStatus(PieceStatus.UPLOADED);
+
+            // Step 6: Save the Piece in the database
+            Piece savedPiece = pieceRepository.save(piece);
+            log.info("Piece saved with ID: {}", savedPiece.getId());
+            return savedPiece;
+
+        } catch (Exception e) {
+            log.error("Error in savePiece: {}", e.getMessage(), e);
+            throw new IOException("Failed to save piece", e);
+        }
+    }
+    private boolean isPdfFile(MultipartFile file) {
+        String filename = file.getOriginalFilename();
+        String contentType = file.getContentType();
+
+        log.info("Checking if file is PDF. Filename: {}, Content Type: {}", filename, contentType);
+
+        boolean hasExtension = (filename != null && filename.toLowerCase().endsWith(".pdf"));
+        boolean hasContentType = (contentType != null &&
+                (contentType.equals("application/pdf") ||
+                        contentType.equals("application/x-pdf")));
+
+        log.info("Has PDF extension: {}, Has PDF content type: {}", hasExtension, hasContentType);
+
+        // Also try to peek at first few bytes if content type and extension checks fail
+        if (!hasExtension && !hasContentType) {
+            try {
+                byte[] header = new byte[5];
+                file.getInputStream().read(header);
+                String headerStr = new String(header);
+                boolean hasPdfHeader = headerStr.startsWith("%PDF-");
+                log.info("Has PDF header: {}", hasPdfHeader);
+
+                // Reset input stream for future readers
+                file.getInputStream().reset();
+
+                return hasPdfHeader;
+            } catch (Exception e) {
+                log.warn("Error checking file header: {}", e.getMessage());
+            }
+        }
+
+        return hasExtension || hasContentType;
+    }
+
+    private List<MultipartFile> convertPdfToImages(MultipartFile pdfFile) throws IOException {
+        List<MultipartFile> imageFiles = new ArrayList<>();
+
+        try {
+            // Log that we're starting conversion
+            log.info("Starting PDF conversion for file: {}", pdfFile.getOriginalFilename());
+
+            PDDocument document = PDDocument.load(pdfFile.getInputStream());
+            log.info("PDF loaded successfully. Number of pages: {}", document.getNumberOfPages());
+
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+
+            for (int page = 0; page < document.getNumberOfPages(); page++) {
+                log.info("Processing page {}", (page + 1));
+
+                BufferedImage image = pdfRenderer.renderImageWithDPI(page, 300, ImageType.RGB);
+                log.info("Page {} rendered. Image dimensions: {}x{}",
+                        (page + 1), image.getWidth(), image.getHeight());
+
+                ByteArrayOutputStream imageStream = new ByteArrayOutputStream();
+                ImageIO.write(image, "png", imageStream);
+
+                byte[] imageBytes = imageStream.toByteArray();
+                log.info("Page {} converted to PNG. Size: {} bytes", (page + 1), imageBytes.length);
+
+                String imageName = "page-" + (page + 1) + ".png";
+
+                MultipartFile imageFile = new InMemoryMultipartFile(
+                        imageName,
+                        imageName,
+                        "image/png",
+                        imageBytes
+                );
+
+                imageFiles.add(imageFile);
+                log.info("Added image file to list: {}", imageName);
+            }
+
+            document.close();
+            log.info("PDF conversion completed. Total images: {}", imageFiles.size());
+        } catch (Exception e) {
+            log.error("Error converting PDF to images: {}", e.getMessage(), e);
+            throw new IOException("Failed to convert PDF to images", e);
+        }
+
+        return imageFiles;
+    }
+
+    /**
+     * Sends a file to the AI service for processing
+     */
+    private void sendFileToAI(MultipartFile file, String filename, Long dossierID, String country) {
+        try {
+            log.info("============ START AI FILE UPLOAD TRACE ============");
+            log.info("File details:");
+            log.info("  - Original filename: {}", file.getOriginalFilename());
+            log.info("  - Content type: {}", file.getContentType());
+            log.info("  - Size: {} bytes", file.getSize());
+
+            // Get necessary data for the API call
+            String bucket = "upload-facture"; // Fixed value for the bucket
+            String stage = "Dev"; // The API stage (e.g., Dev, Prod)
+
+            // Get the dossier ID from the context
+            String dossierId = String.valueOf(dossierID);
+
+            // Manually construct the URL to avoid automatic URL encoding
+            try {
+                // Build the base URL
+                String baseUrl = aiApiBaseUrl;
+                if (baseUrl.endsWith("/")) {
+                    baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                }
+
+                // Now add the path components
+                String urlPath = baseUrl + "/" + stage + "/" + bucket + "/" + country + dossierId;
+
+                // Append the %2F and filename directly to the URL string
+                // This prevents double encoding
+                String finalUrl = urlPath + "%2F" + filename;
+
+                log.info("Complete API URL: {}", finalUrl);
+
+                // Create headers for the request
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Content-Type", file.getContentType());
+                headers.put("x-api-key", aiApiKey);
+
+                // Get the file bytes
+                byte[] fileBytes = file.getBytes();
+                log.info("File byte array size: {} bytes", fileBytes.length);
+
+                // Use HttpURLConnection directly to avoid RestTemplate's automatic encoding
+                URL url = new URL(finalUrl);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("PUT");
+                connection.setDoOutput(true);
+
+                // Set headers
+                headers.forEach(connection::setRequestProperty);
+
+                // Write the file data
+                try (OutputStream os = connection.getOutputStream()) {
+                    os.write(fileBytes);
+                }
+
+                // Get response
+                int responseCode = connection.getResponseCode();
+                log.info("Response code: {}", responseCode);
+
+                // Read response if available
+                StringBuilder response = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(
+                                responseCode >= 400 ? connection.getErrorStream() : connection.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        response.append(line);
+                    }
+                }
+
+                if (responseCode == 200) {
+                    log.info("File successfully sent to AI: {}", filename);
+                } else {
+                    log.warn("AI service responded with non-OK status: {} - {}", responseCode, response.toString());
+                }
+
+            } catch (IOException e) {
+                log.error("Error constructing or opening URL connection: {}", e.getMessage(), e);
+            }
+
+            log.info("============ END AI FILE UPLOAD TRACE ============");
+
+        } catch (Exception e) {
+            log.error("Error in sendFileToAI: {}", e.getMessage(), e);
+            // Don't rethrow - we don't want to fail the whole upload if AI processing fails
+        }
+    }
+
+    private void saveFileToDisk(MultipartFile file, String formattedFilename) throws IOException {
+        Path uploadPath = Paths.get(uploadDir);
+        if (!Files.exists(uploadPath)) {
+            Files.createDirectories(uploadPath); // Create directory if it doesn't exist
+        }
+
+        // **DO NOT MODIFY THE FILE NAME - SAVE AS-IS**
+        Path filePath = uploadPath.resolve(formattedFilename);
+        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING); // Copy the file to disk
     }
 
     @Override
@@ -288,9 +546,6 @@ public class PieceServiceImpl implements PieceService {
                 .orElse(0.0);
     }
 
-
-
-
     /**
      * Deserializes the Piece from the provided data.
      */
@@ -310,35 +565,6 @@ public class PieceServiceImpl implements PieceService {
         return piece;
     }
 
-    /**
-     * Saves a file to the disk and returns the unique filename.
-     */
-    private void saveFileToDisk(MultipartFile file, String formattedFilename) throws IOException {
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath); // Create directory if it doesn't exist
-        }
-
-        // **DO NOT MODIFY THE FILE NAME - SAVE AS-IS**
-        Path filePath = uploadPath.resolve(formattedFilename);
-        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING); // Copy the file to disk
-    }
-
-    /**
-     * Generates a unique filename to avoid collisions.
-     */
-    private String generateUniqueFilename(String filename, Path uploadPath) {
-        String baseName = FilenameUtils.getBaseName(filename);
-        String extension = FilenameUtils.getExtension(filename);
-        String uniqueFilename = filename;
-
-        int count = 1;
-        while (Files.exists(uploadPath.resolve(uniqueFilename))) {
-            uniqueFilename = baseName + "_pacioli_" + count + "." + extension;
-            count++;
-        }
-        return uniqueFilename;
-    }
 
     @Override
     @Transactional()

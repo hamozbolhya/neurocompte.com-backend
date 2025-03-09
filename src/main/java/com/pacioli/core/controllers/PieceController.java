@@ -60,9 +60,11 @@ public class PieceController {
     public ResponseEntity<Piece> savePiece(
             @RequestPart("piece") String pieceData,
             @RequestPart("file") MultipartFile file,
-            @RequestParam("dossier_id") Long dossierId) throws IOException {
+            @RequestParam("dossier_id") Long dossierId,
+            @RequestParam("country") String country
+            ) throws IOException {
         log.info("peiceData: {}, dossier_id:{}" , pieceData, dossierId);
-        Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId);
+        Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId, country);
         return ResponseEntity.ok(savedPiece);
     }
 

@@ -18,8 +18,10 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
@@ -81,6 +83,81 @@ public class PieceServiceImpl implements PieceService {
     @Override
     @Transactional
     public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException {
+        try {
+            // Step 1: Deserialize the Piece
+            Piece piece = deserializePiece(pieceData, dossierId);
+            log.info("Piece deserialized: {}", piece.getOriginalFileName());
+
+            // Step 2: Fetch Dossier from the database
+            Dossier dossier = dossierRepository.findById(dossierId)
+                    .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+            log.info("Dossier found with ID: {}", dossierId);
+
+            // Step 3: Link Dossier to Piece
+            piece.setDossier(dossier);
+            piece.setOriginalFileName(piece.getOriginalFileName());
+
+            // Generate a single formatted filename with UUID for all pages
+            String originalFilename = piece.getFilename();
+            String extension = originalFilename.substring(originalFilename.lastIndexOf('.') + 1);
+            String uuid = UUID.randomUUID().toString();
+            String formattedFilename = uuid + "." + extension;
+
+            // Step 4: Check file type and handle conversion if needed
+            boolean isPdf = isPdfFile(file);
+            log.info("Is this a PDF file? {}", isPdf);
+
+            if (isPdf) {
+                log.info("PDF file detected, converting first page for storage");
+
+                try {
+                    // Convert PDF to images but only use first page for processing
+                    List<MultipartFile> convertedImages = convertPdfToImages(file);
+                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
+
+                    if (!convertedImages.isEmpty()) {
+                        // Format the filename (just using UUID, not page specific)
+                        formattedFilename = uuid + ".png";
+
+                        sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
+
+                        // Save first page as thumbnail/preview
+                        saveFileToDisk(convertedImages.get(0), formattedFilename);
+                        piece.setFilename(formattedFilename);
+                        piece.setStatus(PieceStatus.UPLOADED);
+
+                        Piece savedPiece = pieceRepository.save(piece);
+                        log.info("Piece saved with ID: {}", savedPiece.getId());
+                        return savedPiece;
+                    } else {
+                        log.warn("No images were converted from the PDF, falling back to save as-is");
+                    }
+                } catch (Exception e) {
+                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
+                    log.info("Falling back to saving the PDF as-is");
+                }
+            }
+
+            // Not a PDF or conversion failed - save as-is and send to AI
+            log.info("Processing as regular file");
+
+            // Send the file to AI (just once)
+            sendFileToAI(file, formattedFilename, dossierId, country);
+
+            saveFileToDisk(file, formattedFilename);
+            piece.setFilename(formattedFilename);
+            piece.setStatus(PieceStatus.UPLOADED);
+
+            Piece savedPiece = pieceRepository.save(piece);
+            log.info("Piece saved with ID: {}", savedPiece.getId());
+            return savedPiece;
+
+        } catch (Exception e) {
+            log.error("Error in savePiece: {}", e.getMessage(), e);
+            throw new IOException("Failed to save piece", e);
+        }
+    }
+  /*  public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException {
         try {
             // Step 1: Deserialize the Piece
             Piece piece = deserializePiece(pieceData, dossierId);
@@ -167,6 +244,7 @@ public class PieceServiceImpl implements PieceService {
             throw new IOException("Failed to save piece", e);
         }
     }
+   */
     private boolean isPdfFile(MultipartFile file) {
         String filename = file.getOriginalFilename();
         String contentType = file.getContentType();
@@ -252,7 +330,7 @@ public class PieceServiceImpl implements PieceService {
     /**
      * Sends a file to the AI service for processing
      */
-    private void sendFileToAI(MultipartFile file, String filename, Long dossierID, String country) {
+ /*   private void sendFileToAI(MultipartFile file, String filename, Long dossierID, String country) {
         try {
             log.info("============ START AI FILE UPLOAD TRACE ============");
             log.info("File details:");
@@ -339,6 +417,91 @@ public class PieceServiceImpl implements PieceService {
             // Don't rethrow - we don't want to fail the whole upload if AI processing fails
         }
     }
+*/
+
+    private void sendFileToAI(MultipartFile file, String filename, Long dossierID, String country) {
+        try {
+            log.info("============ START AI FILE UPLOAD TRACE ============");
+            log.info("File details:");
+            log.info("  - Original filename: {}", file.getOriginalFilename());
+            log.info("  - Content type: {}", file.getContentType());
+            log.info("  - Size: {} bytes", file.getSize());
+
+            // Get necessary data for the API call
+            String bucket = "upload-facture";
+            String stage = "Dev";
+            String dossierId = String.valueOf(dossierID);
+
+            try {
+                // Extract UUID from filename
+                String uuid = filename;
+                if (filename.contains(".")) {
+                    uuid = filename.substring(0, filename.lastIndexOf('.'));
+                }
+
+                // Build the base URL
+                String baseUrl = aiApiBaseUrl;
+                if (baseUrl.endsWith("/")) {
+                    baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                }
+
+                // Keep the %2F format as before but eliminate page suffixes
+                String urlPath = baseUrl + "/" + stage + "/" + bucket + "/" + country + dossierId;
+                String finalUrl = urlPath + "%2F" + filename;  // Keep using %2F as it was working before
+
+                log.info("Complete API URL: {}", finalUrl);
+
+                // Set headers and send the request
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Content-Type", file.getContentType());
+                headers.put("x-api-key", aiApiKey);
+
+                byte[] fileBytes = file.getBytes();
+                log.info("File byte array size: {} bytes", fileBytes.length);
+
+                URL url = new URL(finalUrl);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("PUT");
+                connection.setDoOutput(true);
+
+                // Set headers
+                headers.forEach(connection::setRequestProperty);
+
+                // Write the file data
+                try (OutputStream os = connection.getOutputStream()) {
+                    os.write(fileBytes);
+                }
+
+                // Get response
+                int responseCode = connection.getResponseCode();
+                log.info("Response code: {}", responseCode);
+
+                StringBuilder response = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(
+                                responseCode >= 400 ? connection.getErrorStream() : connection.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        response.append(line);
+                    }
+                }
+
+                if (responseCode == 200) {
+                    log.info("File successfully sent to AI: {}", filename);
+                } else {
+                    log.warn("AI service responded with non-OK status: {} - {}", responseCode, response.toString());
+                }
+
+            } catch (IOException e) {
+                log.error("Error constructing or opening URL connection: {}", e.getMessage(), e);
+            }
+
+            log.info("============ END AI FILE UPLOAD TRACE ============");
+
+        } catch (Exception e) {
+            log.error("Error in sendFileToAI: {}", e.getMessage(), e);
+        }
+    }
 
     private void saveFileToDisk(MultipartFile file, String formattedFilename) throws IOException {
         Path uploadPath = Paths.get(uploadDir);
@@ -397,6 +560,7 @@ public class PieceServiceImpl implements PieceService {
         }
     }
 
+    @Transactional
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
@@ -441,8 +605,52 @@ public class PieceServiceImpl implements PieceService {
                 for (Line line : ecriture.getLines()) {
                     line.setEcriture(savedEcriture);
 
+                    // Get account number from the line
+                    String accountNumber = line.getAccount().getAccount();
+
+                    // Check if we already have it in our in-memory map
+                    Account account = accountMap.get(accountNumber);
+
+                    if (account == null) {
+                        // Not in memory, try to get from database (with lock to prevent race conditions)
+                        try {
+                            account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
+
+                            if (account == null) {
+                                // Truly doesn't exist, create a new one
+                                Account newAccount = new Account();
+                                newAccount.setAccount(accountNumber);
+                                newAccount.setLabel(line.getAccount().getLabel());
+                                newAccount.setDossier(dossier);
+                                newAccount.setJournal(journal);
+                                newAccount.setHasEntries(true);
+
+                                log.info("Creating new Account: {}", newAccount);
+                                account = accountRepository.save(newAccount);
+                            }
+
+                            // Add to our map for future lookups
+                            accountMap.put(accountNumber, account);
+                        } catch (DataIntegrityViolationException e) {
+                            // Another thread/process created the account just before us
+                            log.info("Account creation conflict detected. Retrying fetch for account: {}", accountNumber);
+                            account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
+                            if (account == null) {
+                                throw new RuntimeException("Failed to find or create account: " + accountNumber, e);
+                            }
+                            accountMap.put(accountNumber, account);
+                        }
+                    }
+
+                    // Set the account to the line
+                    line.setAccount(account);
+                }
+
+                // Save Lines associated with the Ecriture
+                lineRepository.saveAll(ecriture.getLines());
+
                     // Fetch or create Account
-                    Account account = accountMap.computeIfAbsent(line.getAccount().getAccount(), accountNumber -> {
+                    /* Account account = accountMap.computeIfAbsent(line.getAccount().getAccount(), accountNumber -> {
                         log.info("Checking Account for account number: {}", accountNumber);
 
                         // Fetch from the database
@@ -467,6 +675,8 @@ public class PieceServiceImpl implements PieceService {
 
                 // Save Lines associated with the Ecriture
                 lineRepository.saveAll(ecriture.getLines());
+                */
+
             } catch (Exception e) {
                 log.error("Error saving Ecriture: {}", e.getMessage(), e);
                 throw e; // Rethrow to propagate the exception

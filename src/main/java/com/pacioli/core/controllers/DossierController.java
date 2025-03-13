@@ -2,9 +2,11 @@ package com.pacioli.core.controllers;
 
 import com.pacioli.core.DTO.DossierDTO;
 import com.pacioli.core.DTO.DossierRequest;
+import com.pacioli.core.DTO.PaysDTO;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Exercise;
+import com.pacioli.core.repositories.CountryRepository;
 import com.pacioli.core.services.DossierService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,8 @@ import java.util.Map;
 public class DossierController {
 
     private final DossierService dossierService;
+    @Autowired
+    private CountryRepository countryRepository;
 
     @Autowired
     public DossierController(DossierService dossierService) {
@@ -63,14 +67,11 @@ public class DossierController {
         dossier.setPhone(dto.getPhone());
         dossier.setEmail(dto.getEmail());
 
-        // Set country and code values from either individual fields or pays object
-        if (dto.getPays() != null) {
-            dossier.setCountry(dto.getPays().getCountry());
-            dossier.setCode(dto.getPays().getCode());
-        } else {
-            // If pays is null, set default values or leave them null
-            dossier.setCountry(null);
-            dossier.setCode(null);
+        // Set country relationship from pays object
+        if (dto.getPays() != null && dto.getPays().getCode() != null) {
+            // Find country by code
+            countryRepository.findByCode(dto.getPays().getCode())
+                    .ifPresent(dossier::setCountry);
         }
 
         Cabinet cabinet = new Cabinet();
@@ -94,6 +95,23 @@ public class DossierController {
         dto.setCity(entity.getCity());
         dto.setPhone(entity.getPhone());
         dto.setEmail(entity.getEmail());
+
+        // Set pays object from country relationship including currency
+        if (entity.getCountry() != null) {
+            PaysDTO paysDTO = new PaysDTO();
+            paysDTO.setCountry(entity.getCountry().getName());
+            paysDTO.setCode(entity.getCountry().getCode());
+
+            // Add currency information if available
+            if (entity.getCountry().getCurrency() != null) {
+                PaysDTO.CurrencyDTO currencyDTO = new PaysDTO.CurrencyDTO();
+                currencyDTO.setCode(entity.getCountry().getCurrency().getCode());
+                currencyDTO.setName(entity.getCountry().getCurrency().getName());
+                paysDTO.setCurrency(currencyDTO);
+            }
+
+            dto.setPays(paysDTO);
+        }
 
         DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
         cabinetDTO.setId(entity.getCabinet().getId());

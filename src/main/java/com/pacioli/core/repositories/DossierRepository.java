@@ -16,33 +16,37 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
     boolean existsByName(String name);
     Optional<Dossier> findByName(String name);
 
-    // For single Dossier fetch
+    // For single Dossier fetch - Updated to include currency information
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
-           "d.id, " +
-           "d.name, " +
-           "d.ICE, " +
-           "d.address, " +
-           "d.city, " +
-           "d.phone, " +
-           "d.email, " +
-           "d.country, " +
-           "d.code) " +
-           "FROM Dossier d WHERE d.id = :id")
+            "d.id, " +
+            "d.name, " +
+            "d.ICE, " +
+            "d.address, " +
+            "d.city, " +
+            "d.phone, " +
+            "d.email, " +
+            "d.country.name, " +
+            "d.country.code, " +
+            "d.country.currency.code, " +
+            "d.country.currency.name) " +
+            "FROM Dossier d WHERE d.id = :id")
     Optional<DossierDTO> findDossierById(@Param("id") Long id);
 
     Page<Dossier> findByCabinetId(Long cabinetId, Pageable pageable);
 
-    // For paginated results
+    // For paginated results - Updated to include currency information
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
-           "d.id, " +
-           "d.name, " +
-           "d.ICE, " +
-           "d.address, " +
-           "d.city, " +
-           "d.phone, " +
-           "d.email, " +
-           "d.country, " +
-           "d.code) " +
+            "d.id, " +
+            "d.name, " +
+            "d.ICE, " +
+            "d.address, " +
+            "d.city, " +
+            "d.phone, " +
+            "d.email, " +
+            "d.country.name, " +
+            "d.country.code, " +
+            "d.country.currency.code, " +
+            "d.country.currency.name) " +
             "FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Page<DossierDTO> findDossierDTOsByCabinetId(@Param("cabinetId") Long cabinetId, Pageable pageable);
 }

@@ -51,28 +51,30 @@ public class Dossier {
     private String phone;
     private String email;
 
-    // Add country information as columns in the Dossier table
-    @Column(name = "country")
-    private String country;
+    // Replace the country string fields with a proper ManyToOne relationship
+    @ManyToOne
+    @JoinColumn(name = "country_id")
+    private Country country;
 
-    @Column(name = "code")
-    private String code;
-
-    // Transient getter for pays as a nested object (not persisted in DB)
+    // For backward compatibility - Deprecated but maintained for transition
+    @Deprecated
     @Transient
     public Pays getPays() {
+        if (this.country == null) {
+            return null;
+        }
+
         Pays pays = new Pays();
-        pays.setCountry(this.country);
-        pays.setCode(this.code);
+        pays.setCountry(this.country.getName());
+        pays.setCode(this.country.getCode());
         return pays;
     }
 
-    // Transient setter for pays as a nested object
+    // For backward compatibility - Deprecated but maintained for transition
+    @Deprecated
     public void setPays(Pays pays) {
-        if (pays != null) {
-            this.country = pays.getCountry();
-            this.code = pays.getCode();
-        }
+        // This is now handled by the country relationship
+        // This method is kept for backward compatibility
     }
 
     // Helper class for the transient pays property
@@ -80,5 +82,17 @@ public class Dossier {
     public static class Pays {
         private String country;
         private String code;
+    }
+
+    // Convenience methods to access country currency
+    @Transient
+    public Currency getCurrency() {
+        return country != null ? country.getCurrency() : null;
+    }
+
+    @Transient
+    public String getCurrencyCode() {
+        Currency currency = getCurrency();
+        return currency != null ? currency.getCode() : null;
     }
 }

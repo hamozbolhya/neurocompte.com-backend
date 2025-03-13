@@ -29,7 +29,7 @@ public class DossierDTO {
     // Constructor for JPQL queries
     // Constructor for JPQL queries
     public DossierDTO(Long id, String name, String ICE, String address, String city, String phone, String email,
-                      String country, String code) {
+                      String countryName, String countryCode, String currencyCode, String currencyName) {
         this.id = id;
         this.name = name;
         this.ICE = ICE;
@@ -38,12 +38,21 @@ public class DossierDTO {
         this.phone = phone;
         this.email = email;
 
-        // Create pays object
-        if (country != null || code != null) {
-            PaysDTO paysDTO = new PaysDTO();
-            paysDTO.setCountry(country);
-            paysDTO.setCode(code);
-            this.pays = paysDTO;
+        // Create pays object with country and currency info
+        if (countryName != null || countryCode != null) {
+            PaysDTO pays = new PaysDTO();
+            pays.setCountry(countryName);
+            pays.setCode(countryCode);
+
+            // Add currency information
+            if (currencyCode != null || currencyName != null) {
+                PaysDTO.CurrencyDTO currency = new PaysDTO.CurrencyDTO();
+                currency.setCode(currencyCode);
+                currency.setName(currencyName);
+                pays.setCurrency(currency);
+            }
+
+            this.pays = pays;
         }
 
         // Create cabinet DTO with null ID

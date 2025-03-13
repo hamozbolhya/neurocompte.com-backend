@@ -49,9 +49,10 @@ public class DossierServiceImpl implements DossierService {
             existingDossier.setCity(dossier.getCity());
             existingDossier.setPhone(dossier.getPhone());
             existingDossier.setEmail(dossier.getEmail());
-            // Update country and code values
+
+            // Update country relationship
             existingDossier.setCountry(dossier.getCountry());
-            existingDossier.setCode(dossier.getCode());
+
             dossier = existingDossier;
         } else {
             // If no Dossier with the same name exists, check the Cabinet

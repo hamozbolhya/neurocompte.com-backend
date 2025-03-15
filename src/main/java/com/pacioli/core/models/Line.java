@@ -1,12 +1,17 @@
 package com.pacioli.core.models;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.pacioli.core.Deserialize.AccountDeserializer;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 
 @Entity
 @Data
@@ -24,6 +29,23 @@ public class Line {
     }
 
     private Double credit;
+    // Fields to track original values before conversion
+    // Additional fields for conversion tracking
+    private Double originalDebit;        // Original debit amount before conversion
+    private Double originalCredit;       // Original credit amount before conversion
+    private String originalCurrency;     // Original currency from AI response
+
+    private Double convertedDebit;       // Converted debit to dossier currency
+    private Double convertedCredit;      // Converted credit to dossier currency
+    private String convertedCurrency;    // Dossier currency (what we converted to)
+
+    private Double usdDebit;             // Optional: USD equivalent (if converted)
+    private Double usdCredit;            // Optional: USD equivalent (if converted)
+
+    private Double exchangeRate;         // Exchange rate used
+    @JsonFormat(pattern = "yyyy-MM-dd") // Important: Match the format sent by the frontend
+    @Column(name = "exchange_rate_date")
+    private LocalDate exchangeRateDate;
 
     @JsonSetter("credit")
     public void setCredit(Object value) {
@@ -53,5 +75,29 @@ public class Line {
             }
         }
         return null;
+    }
+
+
+    @JsonSetter("exchangeRateDate")
+    public void setExchangeRateDate(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) {
+            this.exchangeRateDate = null;
+            return;
+        }
+
+        try {
+            // Attempt to parse with yyyy-MM-dd format first
+            this.exchangeRateDate = LocalDate.parse(dateStr);
+        } catch (Exception e) {
+            // If the above fails, try dd/MM/yyyy format
+            try {
+                java.time.format.DateTimeFormatter formatter =
+                        java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy");
+                this.exchangeRateDate = LocalDate.parse(dateStr, formatter);
+            } catch (Exception e2) {
+                // If all parsing fails, set to null
+                this.exchangeRateDate = null;
+            }
+        }
     }
 }

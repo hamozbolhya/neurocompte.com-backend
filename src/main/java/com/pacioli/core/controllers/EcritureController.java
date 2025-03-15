@@ -138,6 +138,18 @@ public class EcritureController {
             @RequestBody Ecriture ecritureRequest
     ) {
         try {
+            log.debug("Received exchange rate update request for ecriture {}: {}",
+                    ecritureId, ecritureRequest);
+
+            // Log exchange rate information if present
+            if (ecritureRequest.getExchangeRate() != null) {
+                log.debug("Exchange rate information provided: rate={}, from={}, to={}, date={}",
+                        ecritureRequest.getExchangeRate(),
+                        ecritureRequest.getOriginalCurrency(),
+                        ecritureRequest.getConvertedCurrency(),
+                        ecritureRequest.getExchangeRateDate());
+            }
+
             Ecriture updatedEcriture = ecritureService.updateEcriture(ecritureId, ecritureRequest);
             return ResponseEntity.ok("L'écriture a été mise à jour avec succès.");
         } catch (IllegalArgumentException ex) {

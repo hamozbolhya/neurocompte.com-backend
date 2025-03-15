@@ -33,6 +33,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Function;
@@ -534,13 +535,111 @@ public class PieceServiceImpl implements PieceService {
 
         return piece;
     }
-
     private void saveFactureDataForPiece(Piece piece, String pieceData) {
         FactureData factureData = deserializeFactureData(pieceData);
 
         if (factureData != null) {
-            factureData.setPiece(piece); // Attach FactureData to the existing Piece
+            // Attach FactureData to the existing Piece
+            factureData.setPiece(piece);
+
+            // Try to extract Invoice Date from the AI data
+            try {
+                // Parse the pieceData JSON to extract the Date field
+                JsonNode rootNode = objectMapper.readTree(pieceData);
+                JsonNode ecrituresNode = rootNode.get("ecritures");
+
+                // Check for case variations of "ecritures"
+                if (ecrituresNode == null) {
+                    ecrituresNode = rootNode.get("Ecritures");
+                }
+
+                if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                    // Get the first entry's Date field
+                    JsonNode firstEntry = ecrituresNode.get(0);
+                    if (firstEntry != null && firstEntry.has("Date")) {
+                        String dateStr = firstEntry.get("Date").asText();
+                        log.info("Found date in AI data: {}", dateStr);
+
+                        // Convert string date to Date object
+                        try {
+                            LocalDate localDate = parseDate(dateStr);
+                            Date invoiceDate = java.sql.Date.valueOf(localDate);
+                            factureData.setInvoiceDate(invoiceDate);
+                            log.info("Set invoice date to: {}", invoiceDate);
+                        } catch (Exception e) {
+                            log.error("Failed to convert date string to Date object: {}", e.getMessage(), e);
+                        }
+                    } else {
+                        log.warn("First entry does not have a Date field");
+                    }
+                } else {
+                    log.warn("No ecritures found in the data or empty ecritures array");
+                }
+            } catch (Exception e) {
+                log.error("Error extracting invoice date from AI data: {}", e.getMessage(), e);
+            }
+
+            // Set ICE from dossier if not already set
+            if (factureData.getIce() == null || factureData.getIce().isEmpty()) {
+                try {
+                    Dossier dossier = piece.getDossier();
+                    if (dossier != null && dossier.getICE() != null) {
+                        factureData.setIce(dossier.getICE());
+                        log.info("Set ICE from dossier: {}", dossier.getICE());
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to set ICE from dossier: {}", e.getMessage(), e);
+                }
+            }
+
+            // Copy currency conversion information from the piece if available
+            if (piece.getExchangeRate() != null && factureData.getExchangeRate() == null) {
+                factureData.setExchangeRate(piece.getExchangeRate());
+                factureData.setOriginalCurrency(piece.getAiCurrency());
+                factureData.setConvertedCurrency(piece.getConvertedCurrency());
+                factureData.setExchangeRateDate(piece.getExchangeRateDate());
+
+                // If we have exchange rate but no converted amounts, calculate them now
+                double rate = factureData.getExchangeRate();
+
+                if (factureData.getTotalTTC() != null && factureData.getConvertedTotalTTC() == null) {
+                    factureData.setConvertedTotalTTC(factureData.getTotalTTC() * rate);
+                }
+
+                if (factureData.getTotalHT() != null && factureData.getConvertedTotalHT() == null) {
+                    factureData.setConvertedTotalHT(factureData.getTotalHT() * rate);
+                }
+
+                if (factureData.getTotalTVA() != null && factureData.getConvertedTotalTVA() == null) {
+                    factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
+                }
+            }
+
+            // Log FactureData before saving
+            log.info("Saving FactureData: invoiceNumber={}, invoiceDate={}, ice={}",
+                    factureData.getInvoiceNumber(), factureData.getInvoiceDate(), factureData.getIce());
+
             factureDataRepository.save(factureData); // Save FactureData
+        } else {
+            log.warn("No FactureData found in the pieceData");
+        }
+    }
+
+    // Helper method to parse dates from various formats
+    private LocalDate parseDate(String dateStr) {
+        try {
+            log.info("Parsing date string: {}", dateStr);
+
+            // Handle dd/MM/yyyy format
+            if (dateStr.contains("/")) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+                return LocalDate.parse(dateStr, formatter);
+            }
+            // Handle yyyy-MM-dd format
+            return LocalDate.parse(dateStr);
+        } catch (Exception e) {
+            log.error("Date parsing failed for: {}. Error: {}", dateStr, e.getMessage(), e);
+            return LocalDate.now();
         }
     }
 
@@ -602,6 +701,9 @@ public class PieceServiceImpl implements PieceService {
                 Ecriture savedEcriture = ecritureRepository.save(ecriture);
                 log.info("Saved Ecriture: {}", savedEcriture);
 
+                // Modify just the account creation part in your saveEcrituresForPiece method:
+
+// Replace the current account handling code with this:
                 for (Line line : ecriture.getLines()) {
                     line.setEcriture(savedEcriture);
 
@@ -612,12 +714,13 @@ public class PieceServiceImpl implements PieceService {
                     Account account = accountMap.get(accountNumber);
 
                     if (account == null) {
-                        // Not in memory, try to get from database (with lock to prevent race conditions)
-                        try {
-                            account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
+                        // Not in memory, try to get from database
+                        account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
 
-                            if (account == null) {
-                                // Truly doesn't exist, create a new one
+                        if (account == null) {
+                            // Account doesn't exist yet, try to create it with error handling
+                            try {
+                                // Create new account
                                 Account newAccount = new Account();
                                 newAccount.setAccount(accountNumber);
                                 newAccount.setLabel(line.getAccount().getLabel());
@@ -627,17 +730,33 @@ public class PieceServiceImpl implements PieceService {
 
                                 log.info("Creating new Account: {}", newAccount);
                                 account = accountRepository.save(newAccount);
-                            }
 
-                            // Add to our map for future lookups
-                            accountMap.put(accountNumber, account);
-                        } catch (DataIntegrityViolationException e) {
-                            // Another thread/process created the account just before us
-                            log.info("Account creation conflict detected. Retrying fetch for account: {}", accountNumber);
-                            account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
-                            if (account == null) {
-                                throw new RuntimeException("Failed to find or create account: " + accountNumber, e);
+                                // Add to our map for future lookups
+                                accountMap.put(accountNumber, account);
+                            } catch (DataIntegrityViolationException e) {
+                                // Another thread/process created the account just before us
+                                log.info("Account creation conflict detected. Retrying fetch for account: {}", accountNumber);
+
+                                // Sleep briefly to allow the transaction to complete
+                                try {
+                                    Thread.sleep(50);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                }
+
+                                // Try to fetch the account again
+                                account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
+
+                                if (account == null) {
+                                    // This should be very rare - means we still can't find it after waiting
+                                    throw new RuntimeException("Failed to find or create account after concurrent creation: " + accountNumber, e);
+                                }
+
+                                // Add to our map for future lookups
+                                accountMap.put(accountNumber, account);
                             }
+                        } else {
+                            // Found in database, add to map
                             accountMap.put(accountNumber, account);
                         }
                     }
@@ -648,34 +767,6 @@ public class PieceServiceImpl implements PieceService {
 
                 // Save Lines associated with the Ecriture
                 lineRepository.saveAll(ecriture.getLines());
-
-                    // Fetch or create Account
-                    /* Account account = accountMap.computeIfAbsent(line.getAccount().getAccount(), accountNumber -> {
-                        log.info("Checking Account for account number: {}", accountNumber);
-
-                        // Fetch from the database
-                        Account existingAccount = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
-                        if (existingAccount != null) {
-                            log.info("Matched existing Account: {}", existingAccount);
-                            return existingAccount;
-                        }
-
-                        // Create new Account
-                        Account newAccount = new Account();
-                        newAccount.setAccount(accountNumber);
-                        newAccount.setLabel(line.getAccount().getLabel());
-                        newAccount.setDossier(dossier); // Explicitly set the Dossier
-                        log.info("New Account Details before saving: {}", newAccount);
-                        return accountRepository.save(newAccount);
-                    });
-
-                    // Set the matched or newly created account to the line
-                    line.setAccount(account);
-                }
-
-                // Save Lines associated with the Ecriture
-                lineRepository.saveAll(ecriture.getLines());
-                */
 
             } catch (Exception e) {
                 log.error("Error saving Ecriture: {}", e.getMessage(), e);

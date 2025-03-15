@@ -7,6 +7,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
 
+import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
 
@@ -32,6 +33,21 @@ public class Piece {
     @Enumerated(EnumType.STRING)
     private PieceStatus status; // New Status field
 
+    // AI currency and amount fields
+    @Column(name = "ai_currency", nullable = true)
+    private String aiCurrency;
+
+    @Column(name = "ai_amount", nullable = true)
+    private Double aiAmount;
+
+    @Column(name = "exchange_rate", nullable = true)
+    private Double exchangeRate;
+
+    @Column(name = "converted_currency", nullable = true)
+    private String convertedCurrency;
+
+    @Column(name = "exchange_rate_date", nullable = true)
+    private LocalDate exchangeRateDate;
     @Transient
     private String filePath;
 

@@ -85,22 +85,44 @@ public class EcritureServiceImpl implements EcritureService {
             LineDTO lineDTO = new LineDTO();
             lineDTO.setId(line.getId());
 
-            // **Map Account to AccountDTO**
+            // Map Account to AccountDTO
             AccountDTO accountDTO = new AccountDTO();
             if (line.getAccount() != null) {
                 accountDTO.setId(line.getAccount().getId());
                 accountDTO.setLabel(line.getAccount().getLabel());
                 accountDTO.setAccount(line.getAccount().getAccount());
             }
-            lineDTO.setAccount(accountDTO); // Attach AccountDTO to LineDTO
+            lineDTO.setAccount(accountDTO);
 
+            // Map basic fields
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+
+            // Map currency conversion fields
+            lineDTO.setOriginalDebit(line.getOriginalDebit());
+            lineDTO.setOriginalCredit(line.getOriginalCredit());
+            lineDTO.setOriginalCurrency(line.getOriginalCurrency());
+            lineDTO.setExchangeRate(line.getExchangeRate());
+            lineDTO.setConvertedCurrency(line.getConvertedCurrency());
+            lineDTO.setExchangeRateDate(line.getExchangeRateDate());
+            lineDTO.setUsdDebit(line.getUsdDebit());
+            lineDTO.setUsdCredit(line.getUsdCredit());
+            lineDTO.setConvertedDebit(line.getConvertedDebit());
+            lineDTO.setConvertedCredit(line.getConvertedCredit());
+
             return lineDTO;
         }).collect(Collectors.toList());
 
         dto.setLines(lineDTOs);
+
+        // Add piece if needed
+        if (ecriture.getPiece() != null) {
+            PieceDTO pieceDTO = new PieceDTO();
+            pieceDTO.setId(ecriture.getPiece().getId());
+            // Map other piece fields as needed
+            dto.setPiece(pieceDTO);
+        }
 
         return dto;
     }
@@ -184,12 +206,25 @@ public class EcritureServiceImpl implements EcritureService {
                 accountDTO.setId(line.getAccount().getId());
                 accountDTO.setLabel(line.getAccount().getLabel());
                 accountDTO.setAccount(line.getAccount().getAccount());
-                lineDTO.setAccount(accountDTO); // Set account as an object, not as plain string
+                lineDTO.setAccount(accountDTO);
             }
 
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+
+            // Set currency conversion fields
+            lineDTO.setOriginalDebit(line.getOriginalDebit());
+            lineDTO.setOriginalCredit(line.getOriginalCredit());
+            lineDTO.setOriginalCurrency(line.getOriginalCurrency());
+            lineDTO.setExchangeRate(line.getExchangeRate());
+            lineDTO.setConvertedCurrency(line.getConvertedCurrency());
+            lineDTO.setExchangeRateDate(line.getExchangeRateDate());
+            lineDTO.setUsdDebit(line.getUsdDebit());
+            lineDTO.setUsdCredit(line.getUsdCredit());
+            lineDTO.setConvertedDebit(line.getConvertedDebit());
+            lineDTO.setConvertedCredit(line.getConvertedCredit());
+
             return lineDTO;
         }).collect(Collectors.toList());
         dto.setLines(lineDTOs);
@@ -202,11 +237,35 @@ public class EcritureServiceImpl implements EcritureService {
             pieceDTO.setType(ecriture.getPiece().getType());
             pieceDTO.setUploadDate(ecriture.getPiece().getUploadDate());
             pieceDTO.setAmount(ecriture.getPiece().getAmount());
+            pieceDTO.setStatus(ecriture.getPiece().getStatus());
+
+            // Set currency-related fields
+            pieceDTO.setAiCurrency(ecriture.getPiece().getAiCurrency());
+            pieceDTO.setAiAmount(ecriture.getPiece().getAiAmount());
+            pieceDTO.setExchangeRate(ecriture.getPiece().getExchangeRate());
+            pieceDTO.setConvertedCurrency(ecriture.getPiece().getConvertedCurrency());
+            pieceDTO.setExchangeRateDate(ecriture.getPiece().getExchangeRateDate());
+
+            // These fields might not exist directly in the Piece entity but would come from
+            // processing in AIPieceProcessingService - add them if they exist in your entity
+            // pieceDTO.setOriginalCurrency(...);
+            // pieceDTO.setDossierCurrency(...);
 
             if (ecriture.getPiece().getDossier() != null) {
                 pieceDTO.setDossierName(ecriture.getPiece().getDossier().getName());
                 pieceDTO.setDossierId(ecriture.getPiece().getDossier().getId());
+
+                // If dossier has a country with currency, you can set dossierCurrency
+                if (ecriture.getPiece().getDossier().getCountry() != null &&
+                        ecriture.getPiece().getDossier().getCountry().getCurrency() != null) {
+                    pieceDTO.setDossierCurrency(ecriture.getPiece().getDossier().getCountry().getCurrency().getCode());
+                }
             }
+
+            // Optionally, you could also map factureData and ecritures if needed
+            // but this might create circular references or excessive data
+            // pieceDTO.setFactureData(...);
+            // pieceDTO.setEcritures(...);
 
             dto.setPiece(pieceDTO);
         }
@@ -214,96 +273,6 @@ public class EcritureServiceImpl implements EcritureService {
         return dto;
     }
 
-
-   /* @Transactional
-    @Override
-    public Ecriture updateEcriture(Long ecritureId, Ecriture ecritureRequest) {
-        // Step 1: Use the custom query to fetch the existing Ecriture
-        Ecriture existingEcriture = ecritureRepository.findEcritureByIdCustom(ecritureId)
-                .orElseThrow(() -> new IllegalArgumentException("Ecriture non trouvée avec l'identifiant : " + ecritureId));
-
-        // Step 2: Validate and update Journal
-        if (existingEcriture.getJournal() == null ||
-                !existingEcriture.getJournal().getId().equals(ecritureRequest.getJournal().getId())) {
-
-            Journal newJournal = journalRepository.findById(ecritureRequest.getJournal().getId())
-                    .orElseThrow(() -> new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + ecritureRequest.getJournal().getId()));
-
-            // If the existing journal is not null, ensure it belongs to the same Dossier
-            if (existingEcriture.getJournal() != null &&
-                    !existingEcriture.getJournal().getDossier().getId().equals(newJournal.getDossier().getId())) {
-                throw new IllegalArgumentException("Le nouveau journal doit appartenir au même dossier.");
-            }
-
-            existingEcriture.setJournal(newJournal);
-        }
-
-        // Step 3: Update `entryDate`
-        existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
-        log.info("existingEcriture ------- {}" ,existingEcriture);
-        // Step 4: Update Ecriture Lines
-        updateEcritureLines(existingEcriture, ecritureRequest.getLines());
-
-        // Step 5: Validate debit equals credit
-        double totalDebit = existingEcriture.getLines().stream()
-                .mapToDouble(line -> line.getDebit() != null ? line.getDebit() : 0)
-                .sum();
-
-        double totalCredit = existingEcriture.getLines().stream()
-                .mapToDouble(line -> line.getCredit() != null ? line.getCredit() : 0)
-                .sum();
-
-        if (totalDebit != totalCredit) {
-            throw new IllegalArgumentException("La somme du débit des lignes doit être égale à la somme du crédit.");
-        }
-
-        // Step 6: Save and return the updated Ecriture
-        return ecritureRepository.save(existingEcriture);
-    }*/
-
-
-   /* private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines) {
-        List<Line> existingLines = existingEcriture.getLines();
-
-        // Step 1: Remove lines that no longer exist
-        List<Long> updatedLineIds = updatedLines.stream()
-                .filter(line -> line.getId() != null)
-                .map(Line::getId)
-                .toList();
-
-        List<Line> linesToRemove = existingLines.stream()
-                .filter(line -> !updatedLineIds.contains(line.getId()))
-                .toList();
-
-        existingLines.removeAll(linesToRemove);
-
-        // Step 2: Add new or update existing lines
-        for (Line updatedLine : updatedLines) {
-            if (updatedLine.getId() != null) {
-                // Update existing line
-                Line existingLine = existingLines.stream()
-                        .filter(line -> line.getId().equals(updatedLine.getId()))
-                        .findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException("Ligne non trouvée avec l'identifiant : " + updatedLine.getId()));
-
-                existingLine.setAccount(updatedLine.getAccount());
-                existingLine.setLabel(updatedLine.getLabel());
-                existingLine.setDebit(updatedLine.getDebit());
-                existingLine.setCredit(updatedLine.getCredit());
-            } else {
-                // Add a new line
-                Line newLine = new Line();
-                newLine.setAccount(updatedLine.getAccount());
-                newLine.setLabel(updatedLine.getLabel());
-                newLine.setDebit(updatedLine.getDebit());
-                newLine.setCredit(updatedLine.getCredit());
-                newLine.setEcriture(existingEcriture);
-                existingLines.add(newLine);
-            }
-        }
-        // Update the Ecriture with the new list of lines
-        existingEcriture.setLines(existingLines);
-    }*/
 
     @Transactional
     @Override
@@ -333,8 +302,22 @@ public class EcritureServiceImpl implements EcritureService {
         existingEcriture.setJournal(newJournal);
         existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
 
-        updateEcritureLines(existingEcriture, ecritureRequest.getLines());
+        // Update exchange rate information if present in the request
+        double exchangeRate = 0;
+        boolean hasExchangeRate = false;
 
+        // Check if any of the lines have exchange rate information
+        for (Line line : ecritureRequest.getLines()) {
+            if (line.getExchangeRate() != null && line.getExchangeRate() > 0) {
+                exchangeRate = line.getExchangeRate();
+                hasExchangeRate = true;
+                break;
+            }
+        }
+
+        updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate);
+
+        // Validate original currency amounts (debit = credit)
         double totalDebit = existingEcriture.getLines().stream()
                 .mapToDouble(line -> line.getDebit() != null ? line.getDebit() : 0)
                 .sum();
@@ -342,14 +325,28 @@ public class EcritureServiceImpl implements EcritureService {
                 .mapToDouble(line -> line.getCredit() != null ? line.getCredit() : 0)
                 .sum();
 
-        if (totalDebit != totalCredit) {
+        if (Math.abs(totalDebit - totalCredit) > 0.01) {
             throw new IllegalArgumentException("La somme du débit doit être égale à la somme du crédit.");
+        }
+
+        // If we have exchange rate information, also validate converted amounts
+        if (hasExchangeRate) {
+            double totalConvertedDebit = existingEcriture.getLines().stream()
+                    .mapToDouble(line -> line.getConvertedDebit() != null ? line.getConvertedDebit() : 0)
+                    .sum();
+            double totalConvertedCredit = existingEcriture.getLines().stream()
+                    .mapToDouble(line -> line.getConvertedCredit() != null ? line.getConvertedCredit() : 0)
+                    .sum();
+
+            if (Math.abs(totalConvertedDebit - totalConvertedCredit) > 0.01) {
+                throw new IllegalArgumentException("La somme du débit converti doit être égale à la somme du crédit converti.");
+            }
         }
 
         return ecritureRepository.save(existingEcriture);
     }
 
-    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines) {
+    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines, boolean hasExchangeRate, double exchangeRate) {
         List<Line> existingLines = existingEcriture.getLines();
 
         // Step 1: Remove lines that no longer exist
@@ -363,6 +360,38 @@ public class EcritureServiceImpl implements EcritureService {
                 .toList();
 
         existingLines.removeAll(linesToRemove);
+
+        // Get exchange rate information from the first line if available
+        String originalCurrency = null;
+        String convertedCurrency = null;
+        String exchangeRateDate = null;  // Changed to String to match the field type
+
+        // Extract currency information from updated lines if available
+        for (Line line : updatedLines) {
+            if (line.getOriginalCurrency() != null) {
+                originalCurrency = line.getOriginalCurrency();
+            }
+            if (line.getConvertedCurrency() != null) {
+                convertedCurrency = line.getConvertedCurrency();
+            }
+            if (line.getExchangeRateDate() != null) {
+                // Convert LocalDate to String if needed
+                if (line.getExchangeRateDate() instanceof LocalDate) {
+                    LocalDate date = (LocalDate) line.getExchangeRateDate();
+                    exchangeRateDate = date.toString();  // ISO format (yyyy-MM-dd)
+                } else {
+                    exchangeRateDate = line.getExchangeRateDate().toString();
+                }
+            }
+            if (originalCurrency != null && convertedCurrency != null && exchangeRateDate != null) {
+                break;
+            }
+        }
+
+        // Default values if not provided
+        if (originalCurrency == null) originalCurrency = "EUR";
+        if (convertedCurrency == null) convertedCurrency = "MAD";
+        if (exchangeRateDate == null) exchangeRateDate = LocalDate.now().toString();  // Current date as String
 
         // Step 2: Add new or update existing lines
         for (Line updatedLine : updatedLines) {
@@ -381,6 +410,32 @@ public class EcritureServiceImpl implements EcritureService {
                 existingLine.setLabel(updatedLine.getLabel());
                 existingLine.setDebit(updatedLine.getDebit());
                 existingLine.setCredit(updatedLine.getCredit());
+
+                // Handle exchange rate information if available
+                if (hasExchangeRate) {
+                    // Set original amounts (same as regular amounts for now)
+                    existingLine.setOriginalDebit(updatedLine.getDebit());
+                    existingLine.setOriginalCredit(updatedLine.getCredit());
+                    existingLine.setOriginalCurrency(originalCurrency);
+
+                    // Set exchange rate info
+                    existingLine.setExchangeRate(exchangeRate);
+                    existingLine.setConvertedCurrency(convertedCurrency);
+                    existingLine.setExchangeRateDate(exchangeRateDate);  // Now passing a String
+
+                    // Calculate and set converted amounts
+                    if (updatedLine.getDebit() != null && updatedLine.getDebit() > 0) {
+                        existingLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
+                    } else {
+                        existingLine.setConvertedDebit(0.0);
+                    }
+
+                    if (updatedLine.getCredit() != null && updatedLine.getCredit() > 0) {
+                        existingLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
+                    } else {
+                        existingLine.setConvertedCredit(0.0);
+                    }
+                }
             } else {
                 // Add a new line
                 Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
@@ -392,6 +447,33 @@ public class EcritureServiceImpl implements EcritureService {
                 newLine.setDebit(updatedLine.getDebit());
                 newLine.setCredit(updatedLine.getCredit());
                 newLine.setEcriture(existingEcriture);
+
+                // Handle exchange rate information for new lines
+                if (hasExchangeRate) {
+                    // Set original amounts (same as regular amounts for now)
+                    newLine.setOriginalDebit(updatedLine.getDebit());
+                    newLine.setOriginalCredit(updatedLine.getCredit());
+                    newLine.setOriginalCurrency(originalCurrency);
+
+                    // Set exchange rate info
+                    newLine.setExchangeRate(exchangeRate);
+                    newLine.setConvertedCurrency(convertedCurrency);
+                    newLine.setExchangeRateDate(exchangeRateDate);  // Now passing a String
+
+                    // Calculate and set converted amounts
+                    if (updatedLine.getDebit() != null && updatedLine.getDebit() > 0) {
+                        newLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
+                    } else {
+                        newLine.setConvertedDebit(0.0);
+                    }
+
+                    if (updatedLine.getCredit() != null && updatedLine.getCredit() > 0) {
+                        newLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
+                    } else {
+                        newLine.setConvertedCredit(0.0);
+                    }
+                }
+
                 existingLines.add(newLine);
             }
         }

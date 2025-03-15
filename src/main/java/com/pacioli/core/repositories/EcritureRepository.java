@@ -28,14 +28,6 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     @Query("SELECT e FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId")
     List<Ecriture> findByPiece_Dossier_Cabinet_Id(@Param("cabinetId") Long cabinetId);
 
-  /*  @Query("SELECT e FROM Ecriture e " +
-            "JOIN e.piece p " +
-            "JOIN e.journal j " +
-            "JOIN p.dossier d " +
-            "JOIN d.exercises ex " +
-            "WHERE ex.id = :exerciseId AND d.cabinet.id = :cabinetId")
-    List<Ecriture> findEcrituresByExerciseAndCabinet(@Param("exerciseId") Long exerciseId,
-                                                     @Param("cabinetId") Long cabinetId);*/
 
    @Query("""
     SELECT e 
@@ -98,65 +90,6 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     Optional<Ecriture> findEcritureByIdCustom(@Param("ecritureId") Long ecritureId);
 
 
-  /*  @Query("""
-    SELECT new com.pacioli.core.DTO.EcritureExportDTO(
-        e.uniqueEntryNumber, 
-        e.entryDate, 
-        j.name, 
-        p.filename, 
-        a.label, 
-        l.label, 
-        SUM(DISTINCT l.debit),
-        SUM(DISTINCT l.credit),
-        fd.invoiceNumber, 
-        fd.invoiceDate, 
-        fd.totalTTC, 
-        fd.totalHT, 
-        fd.totalTVA, 
-        fd.taxRate, 
-        fd.tier, 
-        fd.ice
-    )
-    FROM 
-        Ecriture e
-    JOIN 
-        e.piece p 
-    JOIN 
-        p.dossier d 
-    LEFT JOIN 
-        e.journal j 
-    LEFT JOIN 
-        e.lines l 
-    LEFT JOIN 
-        l.account a 
-    LEFT JOIN 
-        p.factureData fd 
-    LEFT JOIN 
-        Exercise ex ON ex.dossier.id = d.id 
-        AND e.entryDate BETWEEN ex.startDate AND ex.endDate
-    WHERE 
-        d.id = :dossierId
-        AND (:exerciseId IS NULL OR ex.id = :exerciseId)
-        AND e.entryDate BETWEEN COALESCE(:startDate, e.entryDate) AND COALESCE(:endDate, CURRENT_DATE)
-        AND (:journalId IS NULL OR e.journal.id = :journalId)
-    GROUP BY 
-        e.uniqueEntryNumber, 
-        e.entryDate, 
-        j.name, 
-        p.filename, 
-        a.label, 
-        l.label, 
-        fd.invoiceNumber, 
-        fd.invoiceDate, 
-        fd.totalTTC, 
-        fd.totalHT, 
-        fd.totalTVA, 
-        fd.taxRate, 
-        fd.tier, 
-        fd.ice
-    ORDER BY 
-        e.entryDate DESC
-""")*/
 
     @Query("""
     SELECT new com.pacioli.core.DTO.EcritureExportDTO(

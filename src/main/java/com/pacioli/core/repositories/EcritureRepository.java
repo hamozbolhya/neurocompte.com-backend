@@ -110,7 +110,23 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
         fd.tier, 
         fd.ice,
         (SELECT SUM(l2.debit) FROM Line l2 WHERE l2.ecriture = e),
-        (SELECT SUM(l2.credit) FROM Line l2 WHERE l2.ecriture = e)
+        (SELECT SUM(l2.credit) FROM Line l2 WHERE l2.ecriture = e),
+        COALESCE(l.originalCurrency, e.originalCurrency, fd.originalCurrency, p.aiCurrency),
+        COALESCE(l.convertedCurrency, e.convertedCurrency, fd.convertedCurrency, p.convertedCurrency),
+        COALESCE(l.exchangeRate, e.exchangeRate, fd.exchangeRate, p.exchangeRate),
+        COALESCE(l.exchangeRateDate, e.exchangeRateDate, fd.exchangeRateDate, p.exchangeRateDate),
+        l.originalDebit,
+        l.originalCredit,
+        l.convertedDebit,
+        l.convertedCredit,
+        fd.convertedTotalTTC,
+        fd.convertedTotalHT,
+        fd.convertedTotalTVA,
+        l.usdDebit,
+        l.usdCredit,
+        fd.usdTotalTTC,
+        fd.usdTotalHT,
+        fd.usdTotalTVA
     )
     FROM Ecriture e
     JOIN e.piece p 
@@ -134,6 +150,5 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
-
 }
 

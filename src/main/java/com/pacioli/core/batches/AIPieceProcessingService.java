@@ -14,6 +14,7 @@ import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.services.ExchangeRateService;
 import com.pacioli.core.services.PieceService;
+import com.pacioli.core.utils.NormalizeCurrencyCode;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +74,8 @@ public class AIPieceProcessingService {
     private ExchangeRateService exchangeRateService;
     @Autowired
     private ObjectMapper objectMapper;
+
+    private NormalizeCurrencyCode normalizeCurrencyCode;
 
     @Scheduled(fixedRate = 60000)
     @Transactional
@@ -257,35 +260,70 @@ public class AIPieceProcessingService {
             String textValue = node.asText();
             log.debug("Text representation length: {}", textValue.length());
 
-            // Parse the JSON string from the outputText field
-            JsonNode parsedJson = objectMapper.readTree(textValue);
+            // First, validate that the string is not empty
+            if (textValue == null || textValue.trim().isEmpty()) {
+                log.error("❌ Empty output text from AI service");
+                return false;
+            }
+
+            // Try to parse the JSON string from the outputText field
+            JsonNode parsedJson;
+            try {
+                parsedJson = objectMapper.readTree(textValue);
+            } catch (Exception e) {
+                log.error("❌ Failed to parse JSON from outputText: {}", e.getMessage());
+                log.error("First 200 chars of text: {}", textValue.substring(0, Math.min(200, textValue.length())));
+                return false;
+            }
 
             // Look for ecritures field (case-insensitive)
-            JsonNode ecritures = parsedJson.get("ecritures");
-            if (ecritures == null) {
+            JsonNode ecritures = null;
+            if (parsedJson.has("ecritures")) {
+                ecritures = parsedJson.get("ecritures");
+            } else if (parsedJson.has("Ecritures")) {
                 ecritures = parsedJson.get("Ecritures");
             }
 
-            if (ecritures == null || !ecritures.isArray() || ecritures.size() == 0) {
-                log.info("❌ No valid ecritures found in response {}", parsedJson);
+            // Validate we found an ecritures array
+            if (ecritures == null) {
+                log.error("❌ No 'ecritures' or 'Ecritures' field found in JSON");
+                return false;
+            }
+
+            // Validate that ecritures is an array
+            if (!ecritures.isArray()) {
+                log.error("❌ The 'ecritures' field is not an array");
+                return false;
+            }
+
+            // Validate that the array is not empty
+            if (ecritures.size() == 0) {
+                log.error("❌ The 'ecritures' array is empty");
                 return false;
             }
 
             log.debug("Found {} ecritures to validate", ecritures.size());
 
             // Validate each ecriture entry
-            for (JsonNode entry : ecritures) {
+            boolean allValid = true;
+            for (int i = 0; i < ecritures.size(); i++) {
+                JsonNode entry = ecritures.get(i);
                 if (!validateEcritureFields(entry)) {
-                    log.info("❌ Invalid ecriture fields in entry: {}", entry);
-                    return false;
+                    log.error("❌ Invalid ecriture at index {}: {}", i, entry);
+                    allValid = false;
+                    // Don't return immediately, continue validation to log all issues
                 }
+            }
+
+            if (!allValid) {
+                return false;
             }
 
             log.info("✅ Successfully validated all ecritures");
             return true;
         } catch (Exception e) {
             // Use more detailed logging with the full stack trace
-            log.error("💥 Error parsing JSON: {}", e.getMessage(), e);
+            log.error("💥 Error validating ecritures: {}", e.getMessage(), e);
             // Log a portion of the input to help diagnose the issue
             if (node != null) {
                 String text = node.asText();
@@ -297,143 +335,203 @@ public class AIPieceProcessingService {
     }
 
     private boolean validateEcritureFields(JsonNode entry) {
-        // Basic field presence validation
-        if (entry == null ||
-                !entry.has("Date") || entry.get("Date").asText().isEmpty() ||
-                !entry.has("JournalCode") || entry.get("JournalCode").asText().isEmpty() ||
-                !entry.has("JournalLib") || entry.get("JournalLib").asText().isEmpty() ||
-                !entry.has("FactureNum") || entry.get("FactureNum").asText().isEmpty() ||
-                !entry.has("CompteNum") || entry.get("CompteNum").asText().isEmpty() ||
-                !entry.has("CompteLib") || entry.get("CompteLib").asText().isEmpty() ||
-                !entry.has("EcritLib") || entry.get("EcritLib").asText().isEmpty() ||
-                !entry.has("DebitAmt") ||
-                !entry.has("CreditAmt") ||
-                !entry.has("Devise") || entry.get("Devise").asText().isEmpty()) {
-
-            log.info("❌ Missing required fields in ecriture: {}", entry);
+        // Check for null entry
+        if (entry == null) {
+            log.error("❌ Ecriture entry is null");
             return false;
         }
 
-        try {
-            double debitVal = Double.parseDouble(entry.get("DebitAmt").asText());
-            double creditVal = Double.parseDouble(entry.get("CreditAmt").asText());
+        // Log the entry for debugging
+        log.debug("Validating ecriture: {}", entry);
 
-            if (Double.isInfinite(debitVal) || Double.isNaN(debitVal) ||
-                    Double.isInfinite(creditVal) || Double.isNaN(creditVal)) {
-                log.error("❌ Invalid number values: DebitAmt={}, CreditAmt={}", debitVal, creditVal);
+        // Validate required fields exist and aren't empty
+        String[] requiredStringFields = {
+                "Date", "JournalCode", "JournalLib", "FactureNum",
+                "CompteNum", "CompteLib", "EcritLib", "Devise"
+        };
+
+        for (String field : requiredStringFields) {
+            if (!entry.has(field)) {
+                log.error("❌ Missing required field: {}", field);
                 return false;
             }
 
-            return true;
-        } catch (NumberFormatException e) {
-            log.error("❌ Invalid number format in DebitAmt or CreditAmt: {}", e.getMessage());
-            log.error("Raw values - DebitAmt: '{}', CreditAmt: '{}'",
-                    entry.get("DebitAmt"), entry.get("CreditAmt"));
-            return false;
+            JsonNode fieldNode = entry.get(field);
+            if (fieldNode.isNull() || fieldNode.asText().trim().isEmpty()) {
+                log.error("❌ Required field is empty: {}", field);
+                return false;
+            }
         }
+
+        // Validate numeric fields (DebitAmt and CreditAmt)
+        String[] numericFields = {"DebitAmt", "CreditAmt"};
+        for (String field : numericFields) {
+            if (!entry.has(field)) {
+                log.error("❌ Missing required numeric field: {}", field);
+                return false;
+            }
+
+            // Get the raw value
+            JsonNode fieldNode = entry.get(field);
+            String rawValue = fieldNode.asText().trim();
+
+            try {
+                // Attempt to parse as double
+                double value = Double.parseDouble(rawValue);
+
+                // Check for invalid values
+                if (Double.isInfinite(value) || Double.isNaN(value)) {
+                    log.error("❌ Invalid numeric value for {}: {}", field, rawValue);
+                    return false;
+                }
+
+                // All good with this field
+                log.debug("Successfully validated numeric field {}: {}", field, value);
+            } catch (NumberFormatException e) {
+                log.error("❌ Field {} contains non-numeric value: '{}'", field, rawValue);
+                return false;
+            }
+        }
+
+        // All validations passed
+        return true;
     }
 
+    /**
+     * Processes the AI service output text and builds a PieceDTO
+     * This method has been enhanced to better handle the JSON structure from the AI service
+     */
     private PieceDTO buildPieceDTO(Piece piece, JsonNode aiResponse) throws JsonProcessingException {
-        JsonNode parsedJson = objectMapper.readTree(aiResponse.asText());
-        JsonNode ecrituresNode = parsedJson.get("ecritures");
-        if (ecrituresNode == null) {
-            ecrituresNode = parsedJson.get("Ecritures");
-        }
+        try {
+            // First, safely parse the JSON structure
+            log.info("⚙️ Processing AI response for piece {}", piece.getId());
 
-        JsonNode firstEntry = ecrituresNode.get(0);
+            // Parse the JSON text from the aiResponse node
+            String responseText = aiResponse.asText();
+            JsonNode parsedJson = objectMapper.readTree(responseText);
 
-        // Calculate and store the original amount from AI
-        double originalAmount = calculateLargestAmount(ecrituresNode);
-        piece.setAiAmount(originalAmount);
+            // Look for ecritures array (handles both "ecritures" and "Ecritures" case variants)
+            JsonNode ecrituresNode = parsedJson.get("ecritures");
+            if (ecrituresNode == null) {
+                ecrituresNode = parsedJson.get("Ecritures");
+            }
 
-        // Earlier in the method, after parsing the currency
-        if (firstEntry.has("Devise") && !firstEntry.get("Devise").isNull() && !firstEntry.get("Devise").asText().isEmpty()) {
-            String invoiceCurrencyCode = firstEntry.get("Devise").asText();
-            piece.setAiCurrency(invoiceCurrencyCode);
-            log.info("💱 Setting AI currency for piece {}: {}", piece.getId(), invoiceCurrencyCode);
-        } else {
-            log.info("💱 No currency information in AI response for piece {}", piece.getId());
-        }
-        // Save the updated piece with AI currency and amount
-        pieceRepository.save(piece);
+            if (ecrituresNode == null || !ecrituresNode.isArray() || ecrituresNode.size() == 0) {
+                throw new IllegalArgumentException("No valid ecritures array found in AI response");
+            }
 
-        // Get the dossier currency
-        Long dossierId = piece.getDossier().getId();
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier not found: " + dossierId));
+            log.info("📊 Found {} ecritures entries in AI response", ecrituresNode.size());
 
-        String dossierCurrencyCode = dossier.getCurrency() != null ?
-                dossier.getCurrency().getCode() : "MAD"; // Default to MAD for dossier only if not specified
+            // Get the first entry for invoice metadata
+            JsonNode firstEntry = ecrituresNode.get(0);
 
-        log.info("💱 Currency: Dossier {} has currency {}", dossierId, dossierCurrencyCode);
+            // Calculate and store the original amount from AI
+            double originalAmount = calculateLargestAmount(ecrituresNode);
+            log.info("💰 Calculated original amount: {}", originalAmount);
+            piece.setAiAmount(originalAmount);
 
-        // Get invoice date from the first entry
-        String invoiceDateStr = firstEntry.get("Date").asText();
-        LocalDate invoiceDate = parseDate(invoiceDateStr);
-        log.info("📅 Date: Invoice date is {}", invoiceDate);
+            // Process currency information
+            String invoiceCurrencyCode = null;
+            if (firstEntry.has("Devise") && !firstEntry.get("Devise").isNull() && !firstEntry.get("Devise").asText().isEmpty()) {
+                // Get the raw currency value
+                String rawCurrency = firstEntry.get("Devise").asText();
 
-        // Get invoice currency - might be null
-        String invoiceCurrencyCode = firstEntry.has("Devise") ? firstEntry.get("Devise").asText() : null;
-        if (invoiceCurrencyCode != null) {
-            log.info("💱 Currency: Invoice currency is {}", invoiceCurrencyCode);
-        } else {
-            log.info("💱 Currency: No invoice currency specified");
-        }
+                // Normalize it using the injected service
+                if (normalizeCurrencyCode == null) {
+                    // If the service is not injected, create a new instance
+                    log.warn("NormalizeCurrencyCode service not injected, creating new instance");
+                    normalizeCurrencyCode = new NormalizeCurrencyCode();
+                }
 
-        // Check if conversion is needed - only attempt if we have a currency
-        JsonNode convertedEcrituresNode;
-        if (invoiceCurrencyCode != null && !invoiceCurrencyCode.equals(dossierCurrencyCode)) {
-            Double exchangeRate = calculateExchangeRate(invoiceDate, invoiceCurrencyCode, dossierCurrencyCode);
-            LocalDate effectiveExchangeDate = determineEffectiveDate(invoiceDate);
+                invoiceCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
+                piece.setAiCurrency(invoiceCurrencyCode);
+                log.info("💱 Set AI currency for piece {}: {} (normalized from '{}')",
+                        piece.getId(), invoiceCurrencyCode, rawCurrency);
+            } else {
+                log.info("⚠️ No currency information found in AI response, using default USD");
+                invoiceCurrencyCode = "USD";
+                piece.setAiCurrency(invoiceCurrencyCode);
+            }
 
-            // Set values in the piece entity
-            piece.setExchangeRate(exchangeRate);
-            piece.setConvertedCurrency(dossierCurrencyCode);
-            piece.setExchangeRateDate(effectiveExchangeDate);
+            // Save the updated piece with AI currency and amount
             pieceRepository.save(piece);
 
-            log.info("💱 Currency conversion needed: {} to {}", invoiceCurrencyCode, dossierCurrencyCode);
-            convertedEcrituresNode = convertCurrencyIfNeeded(
-                    ecrituresNode,
-                    invoiceDate,
-                    invoiceCurrencyCode,
-                    dossierCurrencyCode
-            );
-        } else {
-            // Either no currency specified or same as dossier
-            log.info("💱 No currency conversion needed");
-            convertedEcrituresNode = ecrituresNode;
-        }
+            // Get the dossier currency
+            Long dossierId = piece.getDossier().getId();
+            Dossier dossier = dossierRepository.findById(dossierId)
+                    .orElseThrow(() -> new RuntimeException("Dossier not found: " + dossierId));
 
-        PieceDTO pieceDTO = new PieceDTO();
-        pieceDTO.setId(piece.getId());
-        pieceDTO.setFilename(piece.getFilename());
-        pieceDTO.setType(piece.getType());
-        pieceDTO.setUploadDate(piece.getUploadDate());
-        pieceDTO.setAmount(calculateLargestAmount(convertedEcrituresNode));
-        pieceDTO.setFactureData(buildFactureData(firstEntry));
-        pieceDTO.setEcritures(buildEcritures(convertedEcrituresNode));
-        pieceDTO.setDossierId(piece.getDossier().getId());
-        pieceDTO.setDossierName(piece.getDossier().getName());
+            String dossierCurrencyCode = dossier.getCurrency() != null ?
+                    normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode()) : "MAD";
 
-        // Set AI-related fields
-        pieceDTO.setAiCurrency(piece.getAiCurrency());
-        pieceDTO.setAiAmount(piece.getAiAmount());
+            log.info("💱 Dossier {} has currency {}", dossierId, dossierCurrencyCode);
 
-        // Add currency and exchange rate information to the DTO - only if present
-        if (invoiceCurrencyCode != null) {
+            // Get invoice date from the first entry
+            String invoiceDateStr = firstEntry.get("Date").asText();
+            LocalDate invoiceDate = parseDate(invoiceDateStr);
+            log.info("📅 Invoice date is {}", invoiceDate);
+
+            // Check if currency conversion is needed
+            JsonNode convertedEcrituresNode;
+            if (invoiceCurrencyCode != null && !invoiceCurrencyCode.equals(dossierCurrencyCode)) {
+                log.info("💱 Currency conversion needed: {} to {}", invoiceCurrencyCode, dossierCurrencyCode);
+
+                // Calculate exchange rate
+                Double exchangeRate = calculateExchangeRate(invoiceDate, invoiceCurrencyCode, dossierCurrencyCode);
+                LocalDate effectiveExchangeDate = determineEffectiveDate(invoiceDate);
+
+                // Set values in the piece entity
+                piece.setExchangeRate(exchangeRate);
+                piece.setConvertedCurrency(dossierCurrencyCode);
+                piece.setExchangeRateDate(effectiveExchangeDate);
+                pieceRepository.save(piece);
+
+                // Convert the currency values in ecritures
+                convertedEcrituresNode = convertCurrencyIfNeeded(
+                        ecrituresNode,
+                        invoiceDate,
+                        invoiceCurrencyCode,
+                        dossierCurrencyCode
+                );
+            } else {
+                log.info("💱 No currency conversion needed");
+                convertedEcrituresNode = ecrituresNode;
+            }
+
+            // Build and return the PieceDTO
+            PieceDTO pieceDTO = new PieceDTO();
+            pieceDTO.setId(piece.getId());
+            pieceDTO.setFilename(piece.getFilename());
+            pieceDTO.setType(piece.getType());
+            pieceDTO.setUploadDate(piece.getUploadDate());
+            pieceDTO.setAmount(calculateLargestAmount(convertedEcrituresNode));
+            pieceDTO.setFactureData(buildFactureData(firstEntry));
+            pieceDTO.setEcritures(buildEcritures(convertedEcrituresNode));
+            pieceDTO.setDossierId(piece.getDossier().getId());
+            pieceDTO.setDossierName(piece.getDossier().getName());
+
+            // Set AI-related fields
+            pieceDTO.setAiCurrency(piece.getAiCurrency());
+            pieceDTO.setAiAmount(piece.getAiAmount());
+
+            // Add currency and exchange rate information to the DTO
             pieceDTO.setOriginalCurrency(invoiceCurrencyCode);
             pieceDTO.setDossierCurrency(dossierCurrencyCode);
 
-            // If conversion was performed, add all exchange rate info
+            // If conversion was performed, add exchange rate info
             if (!invoiceCurrencyCode.equals(dossierCurrencyCode)) {
                 pieceDTO.setExchangeRate(piece.getExchangeRate());
                 pieceDTO.setConvertedCurrency(piece.getConvertedCurrency());
                 pieceDTO.setExchangeRateDate(piece.getExchangeRateDate());
             }
-        }
 
-        return pieceDTO;
+            log.info("✅ Successfully built PieceDTO for piece {}", piece.getId());
+            return pieceDTO;
+
+        } catch (Exception e) {
+            log.error("💥 Error building PieceDTO: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to build PieceDTO from AI response", e);
+        }
     }
     private JsonNode convertCurrencyIfNeeded(
             JsonNode ecrituresNode,
@@ -441,7 +539,11 @@ public class AIPieceProcessingService {
             String invoiceCurrencyCode,
             String dossierCurrencyCode
     ) {
-        // If currencies are the same, no conversion needed
+        // Normalize currency codes to ensure consistent comparisons
+        invoiceCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(invoiceCurrencyCode);
+        dossierCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(dossierCurrencyCode);
+
+        // If currencies are the same after normalization, no conversion needed
         if (invoiceCurrencyCode.equals(dossierCurrencyCode)) {
             return ecrituresNode;
         }
@@ -506,12 +608,12 @@ public class AIPieceProcessingService {
             convertedEntry.put("OriginalCreditAmt", creditAmt);
             convertedEntry.put("OriginalDevise", invoiceCurrencyCode);
 
-            // Store converted values
+            // Store converted values - round to 2 decimal places
             convertedEntry.put("DebitAmt", Math.round(convertedDebitAmt * 100.0) / 100.0);
             convertedEntry.put("CreditAmt", Math.round(convertedCreditAmt * 100.0) / 100.0);
             convertedEntry.put("Devise", dossierCurrencyCode);
 
-            // Store USD equivalents
+            // Store USD equivalents - round to 2 decimal places
             convertedEntry.put("UsdDebitAmt", Math.round(usdDebitAmt * 100.0) / 100.0);
             convertedEntry.put("UsdCreditAmt", Math.round(usdCreditAmt * 100.0) / 100.0);
 
@@ -525,6 +627,7 @@ public class AIPieceProcessingService {
 
         return convertedEcritures;
     }
+
     // Add this method to your service and call it to test
     public void testExchangeRateService() {
         LocalDate testDate = LocalDate.of(2024, 1, 1);
@@ -543,8 +646,15 @@ public class AIPieceProcessingService {
         }
     }
 
+    // Fixed calculateExchangeRate method with proper null handling
     private double calculateExchangeRate(LocalDate invoiceDate, String invoiceCurrencyCode, String dossierCurrencyCode) {
         try {
+            // If currencies are the same, no conversion needed
+            if (invoiceCurrencyCode.equals(dossierCurrencyCode)) {
+                log.info("💱 Same currency for invoice and dossier ({}), no conversion needed", invoiceCurrencyCode);
+                return 1.0;
+            }
+
             // Apply date rules to get the effective date for exchange rate lookup
             LocalDate effectiveDate = determineEffectiveDate(invoiceDate);
             log.info("📅 Using effective date for exchange rate: {} (original invoice date: {})",
@@ -561,11 +671,7 @@ public class AIPieceProcessingService {
                 log.error("Failed to get exchange rate for {} on date {}: {}",
                         invoiceCurrencyCode, effectiveDate, e.getMessage());
                 // Use a default fallback rate
-                invoiceCurrencyRate = new ExchangeRate();
-                invoiceCurrencyRate.setCurrencyCode(invoiceCurrencyCode);
-                invoiceCurrencyRate.setRate(10.0); // Default MAD/USD rate
-                invoiceCurrencyRate.setDate(effectiveDate);
-                invoiceCurrencyRate.setBaseCurrency("USD");
+                invoiceCurrencyRate = createFallbackExchangeRate(invoiceCurrencyCode, effectiveDate);
                 log.info("💱 Using fallback exchange rate for {}: {}", invoiceCurrencyCode, invoiceCurrencyRate.getRate());
             }
 
@@ -576,12 +682,19 @@ public class AIPieceProcessingService {
                 log.error("Failed to get exchange rate for {} on date {}: {}",
                         dossierCurrencyCode, effectiveDate, e.getMessage());
                 // Use a default fallback rate
-                dossierCurrencyRate = new ExchangeRate();
-                dossierCurrencyRate.setCurrencyCode(dossierCurrencyCode);
-                dossierCurrencyRate.setRate(1.0); // Default USD rate
-                dossierCurrencyRate.setDate(effectiveDate);
-                dossierCurrencyRate.setBaseCurrency("USD");
+                dossierCurrencyRate = createFallbackExchangeRate(dossierCurrencyCode, effectiveDate);
                 log.info("💱 Using fallback exchange rate for {}: {}", dossierCurrencyCode, dossierCurrencyRate.getRate());
+            }
+
+            // Make sure both rates are not null before calculating conversion
+            if (invoiceCurrencyRate == null) {
+                invoiceCurrencyRate = createFallbackExchangeRate(invoiceCurrencyCode, effectiveDate);
+                log.warn("💱 Using emergency fallback rate for invoice currency: {}", invoiceCurrencyCode);
+            }
+
+            if (dossierCurrencyRate == null) {
+                dossierCurrencyRate = createFallbackExchangeRate(dossierCurrencyCode, effectiveDate);
+                log.warn("💱 Using emergency fallback rate for dossier currency: {}", dossierCurrencyCode);
             }
 
             // Apply currency conversion rules
@@ -596,10 +709,44 @@ public class AIPieceProcessingService {
                 return 0.1; // 1 MAD = 0.1 USD
             } else if ("USD".equals(invoiceCurrencyCode) && "MAD".equals(dossierCurrencyCode)) {
                 return 10.0; // 1 USD = 10 MAD
+            } else if ("EUR".equals(invoiceCurrencyCode) && "USD".equals(dossierCurrencyCode)) {
+                return 1.1; // 1 EUR = 1.1 USD
+            } else if ("USD".equals(invoiceCurrencyCode) && "EUR".equals(dossierCurrencyCode)) {
+                return 0.91; // 1 USD = 0.91 EUR
             } else {
                 return 1.0; // Default to 1:1 for unknown currency pairs
             }
         }
+    }
+
+    // Helper method to create fallback exchange rates
+    private ExchangeRate createFallbackExchangeRate(String currencyCode, LocalDate date) {
+        ExchangeRate rate = new ExchangeRate();
+        rate.setCurrencyCode(currencyCode);
+        rate.setDate(date);
+        rate.setBaseCurrency("USD");
+
+        // Set fallback rates based on common currencies
+        switch (currencyCode) {
+            case "USD":
+                rate.setRate(1.0);
+                break;
+            case "EUR":
+                rate.setRate(1.1);
+                break;
+            case "MAD":
+                rate.setRate(10.0);
+                break;
+            case "GBP":
+                rate.setRate(1.3);
+                break;
+            default:
+                // For unknown currencies, default to 1:1 with USD
+                rate.setRate(1.0);
+                log.warn("No fallback rate known for currency {}, using 1.0", currencyCode);
+        }
+
+        return rate;
     }
 
     private LocalDate determineEffectiveDate(LocalDate invoiceDate) {
@@ -625,12 +772,29 @@ public class AIPieceProcessingService {
     }
 
 
+    // Fixed calculateConversionRate method with null safety
     private double calculateConversionRate(
             String invoiceCurrencyCode,
             String dossierCurrencyCode,
             ExchangeRate invoiceCurrencyRate,
             ExchangeRate dossierCurrencyRate
     ) {
+        // Safety check - shouldn't happen due to fallbacks in calling method
+        if (invoiceCurrencyRate == null || dossierCurrencyRate == null) {
+            log.error("💥 Null exchange rates in calculateConversionRate despite fallbacks");
+            log.error("💥 Invoice currency: {}, rate: {}", invoiceCurrencyCode, invoiceCurrencyRate);
+            log.error("💥 Dossier currency: {}, rate: {}", dossierCurrencyCode, dossierCurrencyRate);
+
+            // Emergency fallback values
+            if ("MAD".equals(invoiceCurrencyCode) && "USD".equals(dossierCurrencyCode)) {
+                return 0.1; // 1 MAD = 0.1 USD
+            } else if ("USD".equals(invoiceCurrencyCode) && "MAD".equals(dossierCurrencyCode)) {
+                return 10.0; // 1 USD = 10 MAD
+            } else {
+                return 1.0; // Default fallback
+            }
+        }
+
         // Case 1: If invoice currency is USD and dossier currency is not USD
         if ("USD".equals(invoiceCurrencyCode)) {
             log.info("💱 Case 1: Invoice currency is USD, using direct USD→{} rate", dossierCurrencyCode);
@@ -711,6 +875,8 @@ public class AIPieceProcessingService {
         return ecritures;
     }
 
+    // Update the buildFactureData method to normalize currency codes/symbols
+
     private FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
 
@@ -788,23 +954,30 @@ public class AIPieceProcessingService {
             factureData.setTotalTVA(factureData.getTotalTTC() - factureData.getTotalHT());
         }
 
-        // Set the currency information if available
+        // Set the currency information if available and normalize it
         if (entry.has("Devise")) {
-            factureData.setDevise(entry.get("Devise").asText());
-            factureData.setOriginalCurrency(entry.get("Devise").asText());
+            String rawCurrency = entry.get("Devise").asText();
+            String normalizedCurrency = normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
+
+            factureData.setDevise(normalizedCurrency);
+            factureData.setOriginalCurrency(normalizedCurrency);
+
+            log.info("Set normalized currency in FactureData: {} (from '{}')",
+                    normalizedCurrency, rawCurrency);
         }
 
         // Add currency conversion information if available
         if (entry.has("OriginalDevise")) {
-            factureData.setOriginalCurrency(entry.get("OriginalDevise").asText());
+            String rawCurrency = entry.get("OriginalDevise").asText();
+            factureData.setOriginalCurrency(normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency));
         }
 
         if (entry.has("ConvertedDevise") || entry.has("Devise")) {
-            factureData.setConvertedCurrency(
-                    entry.has("ConvertedDevise") ?
-                            entry.get("ConvertedDevise").asText() :
-                            entry.get("Devise").asText()
-            );
+            String rawCurrency = entry.has("ConvertedDevise") ?
+                    entry.get("ConvertedDevise").asText() :
+                    entry.get("Devise").asText();
+
+            factureData.setConvertedCurrency(normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency));
         }
 
         if (entry.has("ExchangeRate")) {

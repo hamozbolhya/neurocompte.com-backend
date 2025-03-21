@@ -64,6 +64,17 @@ public class Line {
     @JsonBackReference("account-lines")
     private Account account;
 
+    // In Line class
+    @Transient
+    public String getAccountNumber() {
+        return account != null ? account.getAccount() : null;
+    }
+
+    @Transient
+    public String getAccountLabel() {
+        return account != null ? account.getLabel() : null;
+    }
+
     private Double convertToDouble(Object value) {
         if (value instanceof Number) {
             return ((Number) value).doubleValue();

@@ -65,6 +65,8 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:5173", "https://neurocompta.com", "https://www.neurocompta.com", "http://146.190.141.243:3000", "http://146.190.141.243")); // Add your frontend origin
+        // Add this line to allow all origins (including mobile)
+        configuration.addAllowedOriginPattern("*");
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")); // Explicitly allow methods
         configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "X-Frame-Options")); // Allow headers
         // Specify exposed headers (for frontend access to certain headers)

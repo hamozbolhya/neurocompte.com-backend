@@ -14,10 +14,15 @@ import java.util.List;
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierId(Long dossierId);
-    List<Piece> findByDossierIdOrderByUploadDateDesc(Long dossierId);
-    @Query("SELECT DISTINCT p FROM Piece p LEFT JOIN FETCH p.ecritures WHERE p.dossier.id = :dossierId")
-    List<Piece> findPiecesWithEcritures(@Param("dossierId") Long dossierId);
-
+    //List<Piece> findByDossierIdOrderByUploadDateDesc(Long dossierId);
+    @Query("SELECT p FROM Piece p " +
+            "LEFT JOIN FETCH p.ecritures e " +
+            "LEFT JOIN FETCH e.journal j " +
+            "LEFT JOIN FETCH e.lines l " +
+            "LEFT JOIN FETCH l.account a " +
+            "WHERE p.dossier.id = :dossierId " +
+            "ORDER BY p.uploadDate DESC")
+    List<Piece> findByDossierIdWithDetailsOrderByUploadDateDesc(@Param("dossierId") Long dossierId);
     List<Piece> findTop20ByStatusOrderByUploadDateAsc(PieceStatus status);
     List<Piece> findTop20ByStatusInOrderByUploadDateAsc(Collection<PieceStatus> statuses);
 

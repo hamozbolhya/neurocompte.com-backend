@@ -46,5 +46,16 @@ public class Ecriture {
     @JsonDeserialize(using = FlexibleLocalDateDeserializer.class)
     private LocalDate exchangeRateDate; // Date of the exchange rate
 
+    // In Ecriture class
+    @Transient
+    public String getJournalName() {
+        return journal != null ? journal.getName() : null;
+    }
+
+    @Transient
+    public String getJournalType() {
+        return journal != null ? journal.getType() : null;
+    }
+
 
 }

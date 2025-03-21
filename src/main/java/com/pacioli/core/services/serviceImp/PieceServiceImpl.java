@@ -943,7 +943,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     public List<Piece> getPiecesByDossierIdSortedByDate(Long dossierId) {
-        return pieceRepository.findByDossierIdOrderByUploadDateDesc(dossierId);
+        return pieceRepository.findByDossierIdWithDetailsOrderByUploadDateDesc(dossierId);
     }
 
     @Transactional

@@ -45,6 +45,7 @@ public class Ecriture {
 
     @JsonDeserialize(using = FlexibleLocalDateDeserializer.class)
     private LocalDate exchangeRateDate; // Date of the exchange rate
+    private Boolean amountUpdated = false; // Default to false
 
     // In Ecriture class
     @Transient

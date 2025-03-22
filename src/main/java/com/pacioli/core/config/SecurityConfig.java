@@ -64,16 +64,30 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "https://neurocompta.com", "https://www.neurocompta.com", "http://146.190.141.243:3000", "http://146.190.141.243")); // Add your frontend origin
-        // Add this line to allow all origins (including mobile)
-        configuration.addAllowedOriginPattern("*");
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")); // Explicitly allow methods
-        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "X-Frame-Options")); // Allow headers
-        // Specify exposed headers (for frontend access to certain headers)
-        configuration.setExposedHeaders(List.of(
-                "Authorization", "Content-Disposition"
-        ));// Expose headers for frontend access
-        configuration.setAllowCredentials(true); // Allow cookies and credentials
+
+        // Option 1: Allow specific origins with credentials
+        configuration.setAllowedOrigins(List.of(
+                "http://localhost:5173",
+                "https://neurocompta.com",
+                "https://pacioli.neurocompta.com",
+                "http://146.190.141.243:3000",
+                "http://146.190.141.243",
+                "http://10.0.2.2:8081",   // Android emulator
+                "http://10.0.2.2:8080",   // Android emulator alternate
+                "http://localhost:8081"   // iOS simulator
+        ));
+        configuration.setAllowCredentials(true);
+
+        // Option 2: Allow any origin but disable credentials
+        // configuration.addAllowedOriginPattern("*");
+        // configuration.setAllowCredentials(false);
+
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of(
+                "Authorization", "Cache-Control", "Content-Type", "X-Frame-Options",
+                "Origin", "Accept", "X-Requested-With", "Platform"
+        ));
+        configuration.setExposedHeaders(List.of("Authorization", "Content-Disposition"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

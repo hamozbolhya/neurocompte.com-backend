@@ -27,6 +27,7 @@ public class PieceDTO {
     private String dossierCurrency;
     private Double exchangeRate;
 
+    private Boolean exchangeRateUpdated = false;
     // New field to store the currency from AI response
     private String aiCurrency;
     private Double aiAmount; // New field for AI amount

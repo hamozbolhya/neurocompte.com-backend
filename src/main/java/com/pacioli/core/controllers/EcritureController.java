@@ -149,6 +149,10 @@ public class EcritureController {
                         ecritureRequest.getConvertedCurrency(),
                         ecritureRequest.getExchangeRateDate());
             }
+            // Log the amountUpdated field if present
+            if (ecritureRequest.getAmountUpdated() != null) {
+                log.debug("Amount updated flag provided: {}", ecritureRequest.getAmountUpdated());
+            }
 
             Ecriture updatedEcriture = ecritureService.updateEcriture(ecritureId, ecritureRequest);
             return ResponseEntity.ok("L'écriture a été mise à jour avec succès.");

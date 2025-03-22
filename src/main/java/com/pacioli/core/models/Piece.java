@@ -48,6 +48,8 @@ public class Piece {
 
     @Column(name = "exchange_rate_date", nullable = true)
     private LocalDate exchangeRateDate;
+    @Column(name = "exchange_rate_updated", nullable = true)
+    private Boolean exchangeRateUpdated = false;
     @Transient
     private String filePath;
 

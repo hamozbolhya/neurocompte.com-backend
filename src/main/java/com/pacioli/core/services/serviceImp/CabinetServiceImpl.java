@@ -1,13 +1,18 @@
 package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.DTO.CabinetDTO;
+import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.DTO.RoleDTO;
 import com.pacioli.core.DTO.UserDTO;
+import com.pacioli.core.Exceptions.ResourceNotFoundException;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.User;
 import com.pacioli.core.repositories.CabinetRepository;
+import com.pacioli.core.repositories.DossierRepository;
+import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.CabinetService;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -22,9 +27,13 @@ public class CabinetServiceImpl implements CabinetService {
     @Autowired
     private CabinetRepository cabinetRepository;
 
+
     @Autowired
     private UserRepository userRepository;
-
+    @Autowired
+    private DossierRepository dossierRepository;
+    @Autowired
+    private PieceRepository pieceRepository;
     @Override
     public Cabinet addCabinet(Cabinet cabinet) {
         return cabinetRepository.save(cabinet);
@@ -146,4 +155,25 @@ public class CabinetServiceImpl implements CabinetService {
         return cabinetRepository.findByIce(ice);
     }
 
+    @Transactional
+    public CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail) {
+        // Find the cabinet
+        Cabinet cabinet = cabinetRepository.findById(cabinetId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cabinet not found with id: " + cabinetId));
+
+        // Get count of dossiers created by the user in this cabinet
+        Long dossierCount = dossierRepository.countByCreatorAndCabinetId(cabinetId);
+
+        // Get count of pieces uploaded by the user in this cabinet
+        Long pieceCount = pieceRepository.countByUploaderAndCabinetId(cabinetId);
+
+        // Build and return the DTO
+        return CabinetStatsDTO.builder()
+                .cabinetId(cabinetId)
+                .cabinetName(cabinet.getName())
+                .userEmail(userEmail)
+                .dossierCount(dossierCount)
+                .pieceCount(pieceCount)
+                .build();
+    }
 }

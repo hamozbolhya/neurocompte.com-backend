@@ -24,7 +24,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 @Configuration
@@ -62,7 +61,7 @@ public class SecurityConfig {
         return http.build();
     }
 
- /*   @Bean
+    @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
@@ -93,31 +92,8 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
-    }*/
- @Bean
- public CorsConfigurationSource corsConfigurationSource() {
-     CorsConfiguration configuration = new CorsConfiguration();
+    }
 
-     // Allow all origins for testing
-     configuration.setAllowedOriginPatterns(Collections.singletonList("*"));
-     configuration.setAllowCredentials(false); // Set to false when using wildcard origins
-
-     // Allow all common methods
-     configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"));
-
-     // Allow all headers
-     configuration.setAllowedHeaders(Arrays.asList("*"));
-
-     // Expose standard headers
-     configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Disposition", "Access-Control-Allow-Origin"));
-
-     // Allow preflight requests to be cached for longer
-     configuration.setMaxAge(3600L);
-
-     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-     source.registerCorsConfiguration("/**", configuration);
-     return source;
- }
 
     @Bean
     public OncePerRequestFilter frameOptionsFilter() {

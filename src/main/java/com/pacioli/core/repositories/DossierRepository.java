@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 public interface DossierRepository extends JpaRepository<Dossier, Long> {
@@ -49,4 +50,8 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
             "d.country.currency.name) " +
             "FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Page<DossierDTO> findDossierDTOsByCabinetId(@Param("cabinetId") Long cabinetId, Pageable pageable);
+
+    @Query("SELECT COUNT(d) FROM Dossier d WHERE d.cabinet.id = :cabinetId")
+    Long countByCreatorAndCabinetId(@Param("cabinetId") Long cabinetId);
+
 }

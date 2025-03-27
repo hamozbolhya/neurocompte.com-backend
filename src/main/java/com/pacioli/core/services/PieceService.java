@@ -1,6 +1,7 @@
 package com.pacioli.core.services;
 
 import com.pacioli.core.DTO.PieceDTO;
+import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.DTO.UpdatePieceStatusRequest;
 import com.pacioli.core.models.Piece;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,4 +22,9 @@ public interface PieceService {
     void notifyPiecesUpdate(Long dossierId);
 
     Piece updatePieceStatus(Long id, String request);
+
+    // New methods for statistics
+    PieceStatsDTO getPieceStatsByDossier(Long dossierId);
+
+    List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId);
 }

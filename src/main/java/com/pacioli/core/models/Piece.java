@@ -6,6 +6,8 @@ import com.pacioli.core.enums.PieceStatus;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.time.LocalDate;
 import java.util.Date;
@@ -13,6 +15,7 @@ import java.util.List;
 
 @Entity
 @Data
+@JsonIgnoreProperties(value = { "uploadDate" }, allowGetters = true)
 public class Piece {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,6 +31,9 @@ public class Piece {
     @Column(name = "original_file_name", nullable = true)
     private String originalFileName;
     private String type;
+    @Temporal(TemporalType.TIMESTAMP)
+    @Column(name = "upload_date")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "UTC")
     private Date uploadDate;
     private Double amount;
     @Enumerated(EnumType.STRING)

@@ -1,7 +1,7 @@
 package com.pacioli.core.DTO;
 
 import com.pacioli.core.enums.PieceStatus;
-import lombok.Builder;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -13,6 +13,7 @@ public class PieceDTO {
     private Long id;
     private String filename;
     private String type;
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "UTC")
     private Date uploadDate;
     private Double amount;
 

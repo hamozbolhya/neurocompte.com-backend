@@ -1,9 +1,11 @@
 package com.pacioli.core.controllers;
 
 import com.pacioli.core.DTO.CabinetDTO;
+import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.services.CabinetService;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.annotations.Parameter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -71,4 +73,14 @@ public class CabinetController {
             return ResponseEntity.status(404).body(e.getMessage());
         }
     }
+
+    @GetMapping("/{cabinetId}/stats/{userEmail}")
+    public ResponseEntity<CabinetStatsDTO> getCabinetStatsForUser(
+            @PathVariable Long cabinetId,
+            @PathVariable String userEmail) {
+
+        CabinetStatsDTO stats = cabinetService.getCabinetStatsForUser(cabinetId, userEmail);
+        return ResponseEntity.ok(stats);
+    }
+
 }

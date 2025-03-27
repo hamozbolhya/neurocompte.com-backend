@@ -3,6 +3,7 @@ package com.pacioli.core.controllers;
 import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.deser.DefaultDeserializationContext;
+import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.DTO.UpdatePieceStatusRequest;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Piece;
@@ -170,4 +171,16 @@ public class PieceController {
         }
     }
 
+
+    @GetMapping("/stats/dossier/{dossierId}")
+    public ResponseEntity<PieceStatsDTO> getPieceStatsByDossier(@PathVariable Long dossierId) {
+        PieceStatsDTO stats = pieceService.getPieceStatsByDossier(dossierId);
+        return ResponseEntity.ok(stats);
+    }
+
+    @GetMapping("/stats/cabinet/{cabinetId}")
+    public ResponseEntity<List<PieceStatsDTO>> getPieceStatsByCabinet(@PathVariable Long cabinetId) {
+        List<PieceStatsDTO> stats = pieceService.getPieceStatsByCabinet(cabinetId);
+        return ResponseEntity.ok(stats);
+    }
 }

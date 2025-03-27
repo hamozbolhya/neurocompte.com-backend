@@ -1,6 +1,7 @@
 package com.pacioli.core.services;
 
 import com.pacioli.core.DTO.CabinetDTO;
+import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
 import org.springframework.stereotype.Service;
 
@@ -20,5 +21,6 @@ public interface CabinetService {
 
     void unassignCabinetFromUser(UUID userId);
     Optional<Cabinet> findByIce(String ice);
+    CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail);
 
 }

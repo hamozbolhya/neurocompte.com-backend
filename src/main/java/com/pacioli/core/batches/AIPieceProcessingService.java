@@ -1116,15 +1116,39 @@ public class AIPieceProcessingService {
     }
     private LocalDate parseDate(String dateStr) {
         try {
-            // Handle dd/MM/yyyy format
-            if (dateStr.contains("/")) {
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-                return LocalDate.parse(dateStr, formatter);
+            // Trim any whitespace
+            dateStr = dateStr.trim();
+
+            // List of potential formatters to try
+            List<DateTimeFormatter> formatters = Arrays.asList(
+                    DateTimeFormatter.ofPattern("yyyy-MM-d"),   // Handle single-digit day
+                    DateTimeFormatter.ofPattern("yyyy-M-dd"),   // Handle single-digit month
+                    DateTimeFormatter.ofPattern("yyyy-M-d"),    // Handle single-digit month and day
+                    DateTimeFormatter.ofPattern("yyyy-MM-dd"),  // Standard format
+                    DateTimeFormatter.ofPattern("dd/MM/yyyy"),  // Alternative format
+                    DateTimeFormatter.ofPattern("yyyy-dd-MM")   // Alternate order
+            );
+
+            for (DateTimeFormatter formatter : formatters) {
+                try {
+                    LocalDate parsedDate = LocalDate.parse(dateStr, formatter);
+
+                    // Optionally log successful parsing
+                    log.debug("Successfully parsed date: {} using format {}", dateStr, formatter);
+
+                    return parsedDate;
+                } catch (DateTimeParseException e) {
+                    // Continue to next formatter
+                    continue;
+                }
             }
-            // Handle yyyy-MM-dd format
-            return LocalDate.parse(dateStr);
+
+            // If no formatter works, log and use current date
+            log.warn("❌ Could not parse date: {}. Using current date.", dateStr);
+            return LocalDate.now();
+
         } catch (Exception e) {
-            log.trace("📅 Date parsing failed for: {}. Using current date.", dateStr);
+            log.error("💥 Unexpected error parsing date {}: {}", dateStr, e.getMessage());
             return LocalDate.now();
         }
     }

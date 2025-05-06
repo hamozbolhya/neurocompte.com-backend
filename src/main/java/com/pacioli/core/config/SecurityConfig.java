@@ -58,6 +58,9 @@ public class SecurityConfig {
         // Add JwtRequestFilter before UsernamePasswordAuthenticationFilter
         http.addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
 
+        // Add the mobile app filter
+        http.addFilterBefore(mobileAppFilter(), UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 
@@ -65,7 +68,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Option 1: Allow specific origins with credentials
+        // Allow specific origins for web clients
         configuration.setAllowedOrigins(List.of(
                 "http://localhost:5173",
                 "https://neurocompta.com",
@@ -74,18 +77,14 @@ public class SecurityConfig {
                 "http://146.190.141.243",
                 "http://10.0.2.2:8081",   // Android emulator
                 "http://10.0.2.2:8080",   // Android emulator alternate
-                "http://localhost:8081"   // iOS simulator
+                "http://localhost:8081"    // iOS simulator
         ));
+
         configuration.setAllowCredentials(true);
-
-        // Option 2: Allow any origin but disable credentials
-        // configuration.addAllowedOriginPattern("*");
-        // configuration.setAllowCredentials(false);
-
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of(
                 "Authorization", "Cache-Control", "Content-Type", "X-Frame-Options",
-                "Origin", "Accept", "X-Requested-With", "Platform"
+                "Origin", "Accept", "X-Requested-With", "X-App-Platform", "Platform"
         ));
         configuration.setExposedHeaders(List.of("Authorization", "Content-Disposition"));
 
@@ -94,6 +93,36 @@ public class SecurityConfig {
         return source;
     }
 
+    @Bean
+    public OncePerRequestFilter mobileAppFilter() {
+        return new OncePerRequestFilter() {
+            @Override
+            protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+                    throws ServletException, IOException {
+
+                // Check for mobile app identifier header
+                String appPlatform = request.getHeader("X-App-Platform");
+
+                if (appPlatform != null && (appPlatform.equals("react-native-android") ||
+                        appPlatform.equals("react-native-ios"))) {
+                    // Mobile app request - set CORS headers directly for mobile app
+                    response.setHeader("Access-Control-Allow-Origin", "*");
+                    response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+                    response.setHeader("Access-Control-Allow-Headers",
+                            "Authorization, Cache-Control, Content-Type, X-Frame-Options, Origin, Accept, X-Requested-With, X-App-Platform, Platform");
+                    response.setHeader("Access-Control-Expose-Headers", "Authorization, Content-Disposition");
+
+                    // If it's a preflight request, return OK immediately
+                    if ("OPTIONS".equals(request.getMethod())) {
+                        response.setStatus(HttpServletResponse.SC_OK);
+                        return;
+                    }
+                }
+
+                filterChain.doFilter(request, response);
+            }
+        };
+    }
 
     @Bean
     public OncePerRequestFilter frameOptionsFilter() {

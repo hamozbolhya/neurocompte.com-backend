@@ -3,6 +3,7 @@ package com.pacioli.core.controllers;
 import com.pacioli.core.DTO.DossierDTO;
 import com.pacioli.core.DTO.DossierRequest;
 import com.pacioli.core.DTO.PaysDTO;
+import com.pacioli.core.Exceptions.CompanyAiException;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Exercise;
@@ -17,9 +18,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -36,28 +39,57 @@ public class DossierController {
     }
 
     // Endpoint to add a new dossier
+
+    /**
+     * Endpoint to create a new dossier
+     * If the Company AI service returns an error, the transaction will be rolled back and
+     * the error will be propagated to the client
+     */
     @Validated
     @PostMapping
     public ResponseEntity<DossierDTO> createDossier(@Valid @RequestBody DossierRequest request) {
-        // Validate request
-        if (request.getDossier() == null || request.getDossier().getCabinet() == null
-                || request.getDossier().getCabinet().getId() == null) {
-            throw new RuntimeException("Cabinet ID must not be null");
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Creating new dossier. Request: {}", requestId, request);
+
+        try {
+            // Validate request
+            if (request.getDossier() == null || request.getDossier().getCabinet() == null
+                    || request.getDossier().getCabinet().getId() == null) {
+                log.error("[{}] Validation failed: Cabinet ID must not be null", requestId);
+                throw new IllegalArgumentException("Cabinet ID must not be null");
+            }
+
+            log.debug("[{}] Incoming Dossier: {}", requestId, request.getDossier());
+            log.debug("[{}] Incoming Exercises: {}", requestId, request.getExercises());
+
+            // Convert DTO to entity
+            Dossier dossierEntity = convertToEntity(request.getDossier());
+
+            // Create dossier
+            Dossier createdDossier = dossierService.createDossier(dossierEntity, request.getExercises());
+            log.info("[{}] Dossier created successfully with ID: {}", requestId, createdDossier.getId());
+
+            // Convert back to DTO for response
+            return ResponseEntity.ok(convertToDTO(createdDossier));
+
+        } catch (CompanyAiException e) {
+            // Company AI service error - propagate to client with appropriate status code
+            log.error("[{}] Company AI service error: {}", requestId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
+
+        } catch (IllegalArgumentException e) {
+            // Validation errors
+            log.error("[{}] Validation error: {}", requestId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+
+        } catch (Exception e) {
+            // All other errors
+            log.error("[{}] Unexpected error creating dossier: {}", requestId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Une erreur inattendue est survenue lors de la création du dossier: " + e.getMessage(), e);
         }
-
-        System.out.println("Incoming Dossier: " + request.getDossier());
-        System.out.println("Incoming Exercises: " + request.getExercises());
-
-        // Convert DTO to entity
-        Dossier dossierEntity = convertToEntity(request.getDossier());
-
-        // Create dossier
-        Dossier createdDossier = dossierService.createDossier(dossierEntity, request.getExercises());
-
-        // Convert back to DTO for response
-        return ResponseEntity.ok(convertToDTO(createdDossier));
     }
-
     private Dossier convertToEntity(DossierDTO dto) {
         Dossier dossier = new Dossier();
         dossier.setName(dto.getName());
@@ -207,5 +239,27 @@ public class DossierController {
         DossierDTO updatedDossier = dossierService.updateDossier(id, dossierDetails);
 
         return ResponseEntity.ok(updatedDossier);
+    }
+
+
+    @DeleteMapping("/{dossierId}")
+    public ResponseEntity<?> deleteDossier(@PathVariable Long dossierId) {
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Deleting dossier with ID: {}", requestId, dossierId);
+
+        try {
+            // Call the service to delete the dossier and associated company in AI service
+            dossierService.deleteDossier(dossierId);
+            log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
+
+            return ResponseEntity.noContent().build();
+        } catch (RuntimeException ex) {
+            log.error("[{}] Error deleting dossier: {}", requestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+        } catch (Exception ex) {
+            log.error("[{}] Unexpected error during dossier deletion: {}", requestId, ex.getMessage(), ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
+        }
     }
 }

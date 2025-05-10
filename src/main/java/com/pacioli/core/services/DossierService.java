@@ -23,4 +23,11 @@ public interface DossierService {
     Page<DossierDTO> getDossiersByCabinetId(Long cabinetId, Pageable pageable);
 
     DossierDTO updateDossier(Long id, Dossier dossierDetails);
+
+    /**
+     * Delete a dossier and its associated company in the AI service
+     *
+     * @param dossierId The ID of the dossier to delete
+     */
+    void deleteDossier(Long dossierId);
 }

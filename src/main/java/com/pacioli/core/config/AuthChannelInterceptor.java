@@ -31,33 +31,36 @@ public class AuthChannelInterceptor implements ChannelInterceptor {
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
-        if (StompCommand.CONNECT.equals(accessor.getCommand()) ||
-                StompCommand.SUBSCRIBE.equals(accessor.getCommand()) ||
-                StompCommand.MESSAGE.equals(accessor.getCommand())) {
+        if (accessor != null &&
+                (StompCommand.CONNECT.equals(accessor.getCommand()) ||
+                        StompCommand.SUBSCRIBE.equals(accessor.getCommand()) ||
+                        StompCommand.MESSAGE.equals(accessor.getCommand()))) {
 
             String token = accessor.getFirstNativeHeader("Authorization");
+
             if (token != null && token.startsWith("Bearer ")) {
                 token = token.substring(7);
                 try {
                     String username = jwtUtil.extractUsername(token);
-                    List<GrantedAuthority> authorities = Arrays.asList(new SimpleGrantedAuthority("ROLE_USER"));
+                    List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
                     UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(username, null, authorities);
                     SecurityContextHolder.getContext().setAuthentication(auth);
                     accessor.setUser(auth);
                 } catch (ExpiredJwtException e) {
-                    log.warn("Expired JWT token in WebSocket connection: {}", e.getMessage());
-                    // Two options here:
-
-                    // Option 1: Allow connection but mark as unauthenticated (anonymous)
-                    // This lets the connection proceed but you can check auth status in your handlers
-
-                    // Option 2: Let the exception propagate - client will receive an error
-                    // and should refresh the token and reconnect
-                    throw e; // Comment this line for Option 1
+                    log.warn("Expired JWT in WebSocket message: {}", e.getMessage());
+                    // Rejet du message avec exception claire côté client
+                    throw new org.springframework.messaging.MessageDeliveryException("JWT expired");
+                } catch (Exception e) {
+                    log.warn("Invalid JWT in WebSocket message: {}", e.getMessage());
+                    throw new org.springframework.messaging.MessageDeliveryException("JWT invalid");
                 }
+            } else {
+                log.warn("No Authorization header in WebSocket request");
+                throw new org.springframework.messaging.MessageDeliveryException("Missing Authorization header");
             }
         }
+
         return message;
     }
 }

@@ -25,7 +25,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -195,6 +199,7 @@ public class PieceServiceImpl implements PieceService {
 
     private List<MultipartFile> convertPdfToImages(MultipartFile pdfFile) throws IOException {
         List<MultipartFile> imageFiles = new ArrayList<>();
+        final long MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB in bytes
 
         try {
             // Log that we're starting conversion
@@ -213,22 +218,54 @@ public class PieceServiceImpl implements PieceService {
                         (page + 1), image.getWidth(), image.getHeight());
 
                 ByteArrayOutputStream imageStream = new ByteArrayOutputStream();
-                ImageIO.write(image, "png", imageStream);
 
-                byte[] imageBytes = imageStream.toByteArray();
-                log.info("Page {} converted to PNG. Size: {} bytes", (page + 1), imageBytes.length);
+                // Start with high quality compression
+                float quality = 1.0f;
+                byte[] imageBytes;
 
-                String imageName = "page-" + (page + 1) + ".png";
+                // Compress until size is below MAX_SIZE_BYTES
+                do {
+                    imageStream.reset(); // Clear the stream for retry
+
+                    // Use JPEGImageWriter for better compression control
+                    Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+                    ImageWriter writer = writers.next();
+
+                    ImageWriteParam param = writer.getDefaultWriteParam();
+                    param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                    param.setCompressionQuality(quality);
+
+                    ImageOutputStream ios = ImageIO.createImageOutputStream(imageStream);
+                    writer.setOutput(ios);
+                    writer.write(null, new IIOImage(image, null, null), param);
+                    writer.dispose();
+                    ios.close();
+
+                    imageBytes = imageStream.toByteArray();
+                    log.info("Page {} compressed with quality={}, size={} bytes",
+                            (page + 1), quality, imageBytes.length);
+
+                    // Reduce quality for next iteration if needed
+                    quality -= 0.1f;
+                } while (imageBytes.length > MAX_SIZE_BYTES && quality > 0.1f);
+
+                // If still too large after compression attempts, log a warning
+                if (imageBytes.length > MAX_SIZE_BYTES) {
+                    log.warn("Page {} still exceeds max size after compression: {} bytes",
+                            (page + 1), imageBytes.length);
+                }
+
+                String imageName = "page-" + (page + 1) + ".jpg"; // Changed to .jpg since we're using JPEG format
 
                 MultipartFile imageFile = new InMemoryMultipartFile(
                         imageName,
                         imageName,
-                        "image/png",
+                        "image/jpeg", // Changed content type to JPEG
                         imageBytes
                 );
 
                 imageFiles.add(imageFile);
-                log.info("Added image file to list: {}", imageName);
+                log.info("Added image file to list: {} (size: {} bytes)", imageName, imageBytes.length);
             }
 
             document.close();

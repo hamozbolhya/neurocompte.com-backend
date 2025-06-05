@@ -12,6 +12,7 @@ import lombok.ToString;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.Objects;
 
 @Entity
 @Data
@@ -65,14 +66,17 @@ public class Line {
     private Account account;
 
     // In Line class
-    @Transient
-    public String getAccountNumber() {
-        return account != null ? account.getAccount() : null;
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Line line = (Line) o;
+        return Objects.equals(id, line.id);
     }
 
-    @Transient
-    public String getAccountLabel() {
-        return account != null ? account.getLabel() : null;
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
     }
 
     private Double convertToDouble(Object value) {

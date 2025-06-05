@@ -14,6 +14,7 @@ import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.services.ExchangeRateService;
 import com.pacioli.core.services.PieceService;
+import com.pacioli.core.services.serviceImp.DuplicateDetectionService;
 import com.pacioli.core.utils.NormalizeCurrencyCode;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CompletableFuture;
@@ -39,10 +42,7 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -77,17 +77,29 @@ public class AIPieceProcessingService {
 
     private NormalizeCurrencyCode normalizeCurrencyCode;
 
+    @Autowired
+    private DuplicateDetectionService duplicateDetectionService;
+
+    // Update the processPieceBatch method to exclude duplicates
     @Scheduled(fixedRate = 60000)
     @Transactional
     public void processPieceBatch() {
-        // Only get UPLOADED pieces for new processing
+        // Only get UPLOADED pieces for new processing (excluding duplicates)
         List<Piece> pendingPieces;
-        pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED);
+        pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED)
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .collect(Collectors.toList());
+
         if(pendingPieces.size() == 0) {
-            pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING);
+            pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING)
+                    .stream()
+                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                    .collect(Collectors.toList());
         }
+
         log.info("⭐️ Starting batch processing");
-        log.info("Found {} new pieces to process", pendingPieces.size());
+        log.info("Found {} new pieces to process (excluding duplicates)", pendingPieces.size());
 
         ExecutorService executor = Executors.newFixedThreadPool(BATCH_SIZE);
         List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -113,29 +125,42 @@ public class AIPieceProcessingService {
         }
     }
 
+    // Also update the attemptAIProcessing method to always notify
+    // Also update the attemptAIProcessing method to always notify
     private void attemptAIProcessing(Piece piece, int attempt) throws InterruptedException {
         // Reload piece from DB to get current status
         Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
-
-        // Skip if already processed
-        if (currentPiece.getStatus() == PieceStatus.PROCESSED) {
-            return;
-        }
-
-        if (attempt > 4) {
-            rejectPiece(currentPiece, "Failed after 4 AI attempts");
-            return;
-        }
-
-        // Only update if UPLOADED
-        if (currentPiece.getStatus() == PieceStatus.UPLOADED) {
-            currentPiece.setStatus(PieceStatus.PROCESSING);
-            pieceRepository.save(currentPiece);
-            log.info("DOSSIER ID 1 {}", currentPiece.getDossier().getId());
-            pieceService.getPiecesByDossier(currentPiece.getDossier().getId());
-        }
+        Long dossierId = currentPiece.getDossier().getId();
 
         try {
+            // Skip if already processed or is a duplicate
+            if (currentPiece.getStatus() == PieceStatus.PROCESSED ||
+                    currentPiece.getStatus() == PieceStatus.DUPLICATE ||
+                    duplicateDetectionService.isDuplicate(currentPiece)) {
+                log.info("⏭️ Skipping piece {} - status: {}, isDuplicate: {}",
+                        currentPiece.getId(), currentPiece.getStatus(), currentPiece.getIsDuplicate());
+                return;
+            }
+
+            if (attempt > 4) {
+                rejectPiece(currentPiece, "Failed after 4 AI attempts");
+                return;
+            }
+
+            // Only update if UPLOADED
+            if (currentPiece.getStatus() == PieceStatus.UPLOADED) {
+                currentPiece.setStatus(PieceStatus.PROCESSING);
+                pieceRepository.save(currentPiece);
+                log.info("DOSSIER ID 1 {}", currentPiece.getDossier().getId());
+
+                // Notify that piece is now processing
+                try {
+                    pieceService.notifyPiecesUpdate(dossierId);
+                } catch (Exception e) {
+                    log.warn("Failed to notify processing status: {}", e.getMessage());
+                }
+            }
+
             String jsonResponse = callAIService(currentPiece.getFilename());
             JsonNode root = objectMapper.readTree(jsonResponse);
 
@@ -151,12 +176,15 @@ public class AIPieceProcessingService {
             }
 
             PieceDTO pieceDTO = buildPieceDTO(currentPiece, root.get("outputText"));
+
+            // The saveEcrituresAndFacture method will now handle comprehensive duplicate detection
+            // and WebSocket notification
             pieceService.saveEcrituresAndFacture(
                     currentPiece.getId(),
                     currentPiece.getDossier().getId(),
                     objectMapper.writeValueAsString(pieceDTO)
             );
-            pieceService.getPiecesByDossier(currentPiece.getDossier().getId());
+
         } catch (Exception e) {
             if (attempt < 4) {
                 Thread.sleep(30000);
@@ -172,8 +200,14 @@ public class AIPieceProcessingService {
         log.error("Rejecting piece {}: {}", piece.getId(), reason);
         piece.setStatus(PieceStatus.REJECTED);
         pieceRepository.save(piece);
-        log.info("DOSSIER ID 2 {}", piece.getDossier().getId());
-        pieceService.getPiecesByDossier(piece.getDossier().getId());
+
+        // Always notify WebSocket when piece is rejected
+        try {
+            log.info("DOSSIER ID 2 {}", piece.getDossier().getId());
+            pieceService.notifyPiecesUpdate(piece.getDossier().getId());
+        } catch (Exception e) {
+            log.error("Failed to notify WebSocket for rejected piece {}: {}", piece.getId(), e.getMessage());
+        }
     }
 
 

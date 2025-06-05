@@ -12,6 +12,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 @Entity
 @Data
@@ -38,6 +39,22 @@ public class Piece {
     private Double amount;
     @Enumerated(EnumType.STRING)
     private PieceStatus status; // New Status field
+
+    // Duplicate detection field
+    @Column(name = "is_duplicate", nullable = false)
+    private Boolean isDuplicate = false;
+
+    // Reference to original piece if this is a duplicate
+    @ManyToOne
+    @JoinColumn(name = "original_piece_id", nullable = true)
+    @JsonBackReference("original-piece-duplicates")
+    private Piece originalPiece;
+
+    // List of duplicate pieces referencing this piece as original
+    @OneToMany(mappedBy = "originalPiece", cascade = CascadeType.ALL)
+    @JsonManagedReference("original-piece-duplicates")
+    @ToString.Exclude
+    private List<Piece> duplicatePieces;
 
     // AI currency and amount fields
     @Column(name = "ai_currency", nullable = true)
@@ -67,6 +84,22 @@ public class Piece {
     @OneToMany(mappedBy = "piece", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference("piece-ecritures") // Unique reference for Ecritures
     @ToString.Exclude  // Prevent circular reference in toString
-
     private List<Ecriture> ecritures;
+
+
+    // Add these custom hashCode() and equals() methods to your model classes to prevent circular references
+
+    // In Piece.java
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Piece piece = (Piece) o;
+        return Objects.equals(id, piece.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

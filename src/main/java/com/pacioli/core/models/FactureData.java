@@ -7,6 +7,7 @@ import lombok.ToString;
 
 import java.time.LocalDate;
 import java.util.Date;
+import java.util.Objects;
 
 @Entity
 @Data
@@ -47,4 +48,17 @@ public class FactureData {
     private Double usdTotalTTC;              // USD equivalent of TTC
     private Double usdTotalHT;               // USD equivalent of HT
     private Double usdTotalTVA;              // USD equivalent of TVA
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        FactureData that = (FactureData) o;
+        return Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

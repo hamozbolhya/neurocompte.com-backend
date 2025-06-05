@@ -12,6 +12,8 @@ import java.util.List;
 public class PieceDTO {
     private Long id;
     private String filename;
+    private String originalFileName;
+
     private String type;
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "UTC")
     private Date uploadDate;
@@ -36,4 +38,9 @@ public class PieceDTO {
     // New fields for tracking exchange rate details
     private String convertedCurrency; // The currency the amount was converted to
     private LocalDate exchangeRateDate; // The date used for the exchange rate
+
+    private Boolean isDuplicate;
+
+    private Long originalPieceId;
+    private String originalPieceName;
 }

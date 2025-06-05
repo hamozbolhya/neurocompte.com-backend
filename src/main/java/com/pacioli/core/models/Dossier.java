@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.ToString;
 
 import java.util.List;
+import java.util.Objects;
 
 @Entity
 @Data
@@ -56,6 +57,19 @@ public class Dossier {
     @JoinColumn(name = "country_id")
     private Country country;
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Dossier dossier = (Dossier) o;
+        return Objects.equals(id, dossier.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
+
     // For backward compatibility - Deprecated but maintained for transition
     @Deprecated
     @Transient
@@ -70,12 +84,6 @@ public class Dossier {
         return pays;
     }
 
-    // For backward compatibility - Deprecated but maintained for transition
-    @Deprecated
-    public void setPays(Pays pays) {
-        // This is now handled by the country relationship
-        // This method is kept for backward compatibility
-    }
 
     // Helper class for the transient pays property
     @Data

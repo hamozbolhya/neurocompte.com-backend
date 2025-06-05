@@ -1,5 +1,6 @@
 package com.pacioli.core.DTO;
 
+import com.pacioli.core.models.Piece;
 import lombok.Data;
 import java.util.List;
 
@@ -10,6 +11,6 @@ public class EcrituresDTO2 {
         private String uniqueEntryNumber;
         private String entryDate;
         private JournalDTO journal;
-        private List<LineDTO> lines;
-        private PieceDTO piece; // Add this field
+        private List<LineDTO> lines; // ← ADD THIS FIELD
+        private Piece piece;
 }

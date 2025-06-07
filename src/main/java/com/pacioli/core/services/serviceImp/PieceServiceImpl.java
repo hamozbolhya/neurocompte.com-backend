@@ -64,7 +64,7 @@ public class PieceServiceImpl implements PieceService {
     @Value("${file.upload.dir:Files/}")
     private String uploadDir;
 
-    @Value("${app.ai.api-url}")
+    @Value("${ai.service.url}")
     private String aiApiBaseUrl;
 
     @Value("${ai.service.api-key}")
@@ -292,8 +292,6 @@ public class PieceServiceImpl implements PieceService {
             log.info("  - Size: {} bytes", file.getSize());
 
             // Get necessary data for the API call
-            String bucket = "invoice";
-            String stage = "dev";
             String dossierId = String.valueOf(dossierID);
 
             try {
@@ -310,7 +308,7 @@ public class PieceServiceImpl implements PieceService {
                 }
 
                 // Keep the %2F format as before but eliminate page suffixes
-                String urlPath = baseUrl + "/" + stage + "/" + bucket + "/" + dossierId;
+                String urlPath = baseUrl + "/" + dossierId;
                 //old --> String urlPath = baseUrl + "/" + stage + "/" + bucket + "/" + country + dossierId;
                 String finalUrl = urlPath + "%2F" + filename;  // Keep using %2F as it was working before
 

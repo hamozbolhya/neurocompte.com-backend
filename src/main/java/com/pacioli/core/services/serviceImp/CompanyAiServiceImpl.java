@@ -34,7 +34,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         HttpEntity<Company> requestEntity = new HttpEntity<>(company, headers);
 
-        String url = properties.getBaseUrl() + "/company";
+        String url = properties.getBaseUrl();
         log.debug("API Request [{}] - URL: {}, Headers: {}, Body: {}", requestId, url, headers, company);
 
         try {
@@ -94,7 +94,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         HttpEntity<Company> requestEntity = new HttpEntity<>(company, headers);
 
-        String url = properties.getBaseUrl() + "/company/" + companyId;
+        String url = properties.getBaseUrl() + "/" + companyId;
         log.debug("API Request [{}] - URL: {}, Headers: {}, Body: {}", requestId, url, headers, company);
 
         try {
@@ -153,7 +153,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         HttpEntity<?> requestEntity = new HttpEntity<>(headers);
 
-        String url = properties.getBaseUrl() + "/company/" + companyId;
+        String url = properties.getBaseUrl() + "/" + companyId;
         log.debug("API Request [{}] - URL: {}, Headers: {}", requestId, url, headers);
 
         try {

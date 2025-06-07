@@ -69,7 +69,7 @@ public class HistoireServiceImpl implements HistoireService {
             String nameOnly = "balance.csv";
 
             // Compose final URL manually using %2F
-            String finalUrl = baseUrl + "/dev/history/" + folder + "%2F" + nameOnly;
+            String finalUrl = baseUrl + "/" + folder + "%2F" + nameOnly;
             log.info("[{}] Final AI URL: {}, name of file {}", requestId, finalUrl, nameOnly);
 
             // Setup connection

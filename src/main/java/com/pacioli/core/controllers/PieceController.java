@@ -1,16 +1,11 @@
 package com.pacioli.core.controllers;
 
-import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.deser.DefaultDeserializationContext;
 import com.pacioli.core.DTO.*;
-import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Piece;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.PieceService;
-//import org.springframework.core.io.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -64,8 +59,8 @@ public class PieceController {
             @RequestPart("file") MultipartFile file,
             @RequestParam("dossier_id") Long dossierId,
             @RequestParam("country") String country
-            ) throws IOException {
-        log.info("peiceData: {}, dossier_id:{}" , pieceData, dossierId);
+    ) throws IOException {
+        log.info("peiceData: {}, dossier_id:{}", pieceData, dossierId);
         Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId, country);
         return ResponseEntity.ok(savedPiece);
     }
@@ -84,7 +79,7 @@ public class PieceController {
 
     @GetMapping
     public ResponseEntity<List<PieceDTO>> getPieces(@RequestParam(required = false) Long dossierId) {
-        if(dossierId != null) {
+        if (dossierId != null) {
             List<Piece> pieces = pieceService.getPiecesByDossier(dossierId);
 
             // Convert to DTOs with original piece information
@@ -204,6 +199,7 @@ public class PieceController {
         }
         return ResponseEntity.ok(new ArrayList<>());
     }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePiece(@PathVariable Long id) {
         pieceService.deletePiece(id);
@@ -295,5 +291,24 @@ public class PieceController {
     public ResponseEntity<List<PieceStatsDTO>> getPieceStatsByCabinet(@PathVariable Long cabinetId) {
         List<PieceStatsDTO> stats = pieceService.getPieceStatsByCabinet(cabinetId);
         return ResponseEntity.ok(stats);
+    }
+
+    @GetMapping("/{pieceId}/files")
+    public ResponseEntity<byte[]> getPieceFiles(@PathVariable Long pieceId) {
+        try {
+            byte[] zipContent = pieceService.getPieceFilesAsZip(pieceId);
+
+            if (zipContent == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_TYPE, "application/zip")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"piece_" + pieceId + "_files.zip\"")
+                    .body(zipContent);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 }

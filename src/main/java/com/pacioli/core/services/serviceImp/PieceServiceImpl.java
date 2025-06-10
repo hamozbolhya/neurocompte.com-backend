@@ -40,6 +40,8 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Slf4j
 @Service
@@ -972,6 +974,68 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId) {
         return pieceRepository.getPieceStatsByCabinetId(cabinetId);
+    }
+
+
+    @Override
+    public byte[] getPieceFilesAsZip(Long pieceId) {
+        try {
+            // Get requested piece
+            Optional<Piece> pieceOpt = pieceRepository.findById(pieceId);
+            if (!pieceOpt.isPresent()) {
+                return null;
+            }
+
+            Piece requestedPiece = pieceOpt.get();
+            List<Piece> allFiles = new ArrayList<>();
+
+            // Get original piece
+            Piece originalPiece;
+            if (requestedPiece.getIsDuplicate() && requestedPiece.getOriginalPiece() != null) {
+                originalPiece = requestedPiece.getOriginalPiece();
+            } else {
+                originalPiece = requestedPiece;
+            }
+            allFiles.add(originalPiece);
+
+            // Get all duplicates
+            List<Piece> duplicates = pieceRepository.findByOriginalPieceId(originalPiece.getId());
+            allFiles.addAll(duplicates);
+
+            // Create ZIP
+            return createZipFromPieces(allFiles);
+
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private byte[] createZipFromPieces(List<Piece> pieces) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ZipOutputStream zos = new ZipOutputStream(baos);
+
+        for (Piece piece : pieces) {
+            // Read file from upload directory
+            Path filePath = Paths.get(uploadDir, piece.getFilename());
+
+            if (Files.exists(filePath)) {
+                byte[] fileContent = Files.readAllBytes(filePath);
+
+                // Create entry name
+                String entryName = piece.getIsDuplicate() ?
+                        "duplicate_" + piece.getOriginalFileName() :
+                        "original_" + piece.getOriginalFileName();
+
+                // Add to ZIP
+                ZipEntry entry = new ZipEntry(entryName);
+                zos.putNextEntry(entry);
+                zos.write(fileContent);
+                zos.closeEntry();
+            }
+        }
+
+        zos.close();
+        return baos.toByteArray();
     }
 
 }

@@ -28,4 +28,6 @@ public interface PieceService {
     PieceStatsDTO getPieceStatsByDossier(Long dossierId);
 
     List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId);
+
+    byte[] getPieceFilesAsZip(Long pieceId);
 }

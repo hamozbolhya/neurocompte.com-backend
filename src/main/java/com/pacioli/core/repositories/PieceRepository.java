@@ -18,6 +18,9 @@ import java.util.Optional;
 public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierId(Long dossierId);
 
+    // ADD THIS METHOD:
+    List<Piece> findByOriginalPieceId(Long originalPieceId);
+
     @Query("SELECT p FROM Piece p " +
             "LEFT JOIN FETCH p.ecritures e " +
             "LEFT JOIN FETCH e.journal j " +
@@ -28,8 +31,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierIdWithDetailsOrderByUploadDateDesc(@Param("dossierId") Long dossierId);
 
     List<Piece> findTop20ByStatusOrderByUploadDateAsc(PieceStatus status);
-
-    List<Piece> findTop20ByStatusInOrderByUploadDateAsc(Collection<PieceStatus> statuses);
 
     /**
      * Count the number of pieces uploaded by a specific user in a specific cabinet

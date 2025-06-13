@@ -17,7 +17,7 @@ import java.util.Optional;
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierId(Long dossierId);
-
+    List<Piece> findAllByDossierIdAndOriginalFileName(Long dossierId, String originalFileName);
     // ADD THIS METHOD:
     List<Piece> findByOriginalPieceId(Long originalPieceId);
 

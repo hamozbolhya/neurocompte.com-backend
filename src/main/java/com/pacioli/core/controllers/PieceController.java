@@ -40,9 +40,6 @@ public class PieceController {
 
     private final DossierService dossierService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     public PieceController(PieceService pieceService, DossierService dossierService) {
         this.pieceService = pieceService;
         this.dossierService = dossierService;

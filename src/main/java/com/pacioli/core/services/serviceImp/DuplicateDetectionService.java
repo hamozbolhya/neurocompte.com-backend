@@ -1,8 +1,8 @@
 package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.enums.PieceStatus;
-import com.pacioli.core.models.Piece;
 import com.pacioli.core.models.Ecriture;
+import com.pacioli.core.models.Piece;
 import com.pacioli.core.repositories.PieceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,21 +24,23 @@ public class DuplicateDetectionService {
      * Check for technical duplicates based on original filename and similar patterns
      * This should be called during piece upload (savePiece method)
      *
-     * @param dossierId The dossier ID
+     * @param dossierId        The dossier ID
      * @param originalFileName The original filename of the uploaded file
      * @return Optional containing the original piece if duplicate found
      */
     public Optional<Piece> checkTechnicalDuplicate(Long dossierId, String originalFileName) {
         log.info("🔍 Checking for technical duplicate: dossier={}, filename={}", dossierId, originalFileName);
 
-        // Check 1: Exact filename match
-        Optional<Piece> exactMatch = pieceRepository.findByDossierIdAndOriginalFileName(dossierId, originalFileName);
-        if (exactMatch.isPresent()) {
-            log.warn("⚠️ Exact filename duplicate detected for file: {} in dossier: {}", originalFileName, dossierId);
-            return exactMatch;
+        // ✅ Check 1: Exact filename match using List
+        List<Piece> matches = pieceRepository.findAllByDossierIdAndOriginalFileName(dossierId, originalFileName);
+        if (!matches.isEmpty()) {
+            Piece firstMatch = matches.get(0); // Use the first found
+            log.warn("⚠️ Exact filename duplicate detected: {} match(es) found for file: {} in dossier: {}",
+                    matches.size(), originalFileName, dossierId);
+            return Optional.of(firstMatch);
         }
 
-        // Check 2: Similar filename patterns (for renamed files)
+        // ✅ Check 2: Similar filename patterns (for renamed files)
         Optional<Piece> similarMatch = checkSimilarFilenames(dossierId, originalFileName);
         if (similarMatch.isPresent()) {
             log.warn("⚠️ Similar filename pattern detected for file: {} in dossier: {}", originalFileName, dossierId);
@@ -48,6 +50,7 @@ public class DuplicateDetectionService {
         log.info("✅ No technical duplicate found for file: {}", originalFileName);
         return Optional.empty();
     }
+
 
     /**
      * Check for similar filename patterns to detect renamed files
@@ -309,7 +312,7 @@ public class DuplicateDetectionService {
      * Mark a piece as duplicate and link it to the original piece
      *
      * @param duplicatePiece The piece to mark as duplicate
-     * @param originalPiece The original piece this is a duplicate of
+     * @param originalPiece  The original piece this is a duplicate of
      */
     public void markAsDuplicate(Piece duplicatePiece, Piece originalPiece) {
         log.info("🔗 Marking piece {} as duplicate of piece {}", duplicatePiece.getId(), originalPiece.getId());
@@ -338,7 +341,7 @@ public class DuplicateDetectionService {
      * Utility method to generate duplicate message for logging/UI
      *
      * @param duplicatePiece The duplicate piece
-     * @param originalPiece The original piece
+     * @param originalPiece  The original piece
      * @return Formatted message explaining the duplicate
      */
     public String generateDuplicateMessage(Piece duplicatePiece, Piece originalPiece) {

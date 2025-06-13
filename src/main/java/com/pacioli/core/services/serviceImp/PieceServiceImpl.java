@@ -28,6 +28,7 @@ import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.math.BigDecimal;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
@@ -92,9 +93,9 @@ public class PieceServiceImpl implements PieceService {
             log.info("Piece deserialized: {}", piece.getOriginalFileName());
 
             // Step 2: Check for technical duplicates BEFORE processing
-            Optional<Piece> technicalDuplicate = duplicateDetectionService.checkTechnicalDuplicate(dossierId, piece.getOriginalFileName());
+            //Optional<Piece> technicalDuplicate = duplicateDetectionService.checkTechnicalDuplicate(dossierId, piece.getOriginalFileName());
 
-            if (technicalDuplicate.isPresent()) {
+         /*   if (technicalDuplicate.isPresent()) {
                 log.warn("🚫 Technical duplicate detected, marking as duplicate");
                 duplicateDetectionService.markAsDuplicate(piece, technicalDuplicate.get());
 
@@ -105,7 +106,7 @@ public class PieceServiceImpl implements PieceService {
                 Piece savedPiece = pieceRepository.save(piece);
                 log.info("Duplicate piece saved with ID: {}", savedPiece.getId());
                 return savedPiece;
-            }
+            }*/
 
             // Step 3: Fetch Dossier from the database
             Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
@@ -441,91 +442,109 @@ public class PieceServiceImpl implements PieceService {
     private void saveFactureDataForPiece(Piece piece, String pieceData) {
         FactureData factureData = deserializeFactureData(pieceData);
 
-        if (factureData != null) {
-            // Attach FactureData to the existing Piece
-            factureData.setPiece(piece);
+        if (factureData == null) {
+            log.warn("⚠️ No FactureData found in the pieceData for piece {}", piece.getId());
+            return;
+        }
 
-            // Try to extract Invoice Date from the AI data
-            try {
-                // Parse the pieceData JSON to extract the Date field
-                JsonNode rootNode = objectMapper.readTree(pieceData);
-                JsonNode ecrituresNode = rootNode.get("ecritures");
+        factureData.setPiece(piece); // Always associate the piece
 
-                // Check for case variations of "ecritures"
-                if (ecrituresNode == null) {
-                    ecrituresNode = rootNode.get("Ecritures");
+        // 👉 Extract and validate ecritures
+        try {
+            JsonNode rootNode = objectMapper.readTree(pieceData);
+            JsonNode ecrituresNode = rootNode.get("ecritures");
+            if (ecrituresNode == null) ecrituresNode = rootNode.get("Ecritures");
+
+            if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                BigDecimal totalDebit = BigDecimal.ZERO;
+                BigDecimal totalCredit = BigDecimal.ZERO;
+
+                for (JsonNode entry : ecrituresNode) {
+                    String tvaRate = entry.has("TVARate") ? entry.get("TVARate").asText() : "0";
+                    if (tvaRate == null || tvaRate.trim().isEmpty()) tvaRate = "0";
+
+                    BigDecimal debit = new BigDecimal(entry.get("DebitAmt").asText("0").replace(",", "."));
+                    BigDecimal credit = new BigDecimal(entry.get("CreditAmt").asText("0").replace(",", "."));
+                    totalDebit = totalDebit.add(debit);
+                    totalCredit = totalCredit.add(credit);
                 }
 
-                if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                    // Get the first entry's Date field
-                    JsonNode firstEntry = ecrituresNode.get(0);
-                    if (firstEntry != null && firstEntry.has("Date")) {
-                        String dateStr = firstEntry.get("Date").asText();
-                        log.info("Found date in AI data: {}", dateStr);
-
-                        // Convert string date to Date object
-                        try {
-                            LocalDate localDate = parseDate(dateStr);
-                            Date invoiceDate = java.sql.Date.valueOf(localDate);
-                            factureData.setInvoiceDate(invoiceDate);
-                            log.info("Set invoice date to: {}", invoiceDate);
-                        } catch (Exception e) {
-                            log.error("Failed to convert date string to Date object: {}", e.getMessage(), e);
-                        }
-                    } else {
-                        log.warn("First entry does not have a Date field");
-                    }
+                if (totalDebit.compareTo(totalCredit) != 0) {
+                    log.warn("❗ Imbalanced accounting: Debit={} ≠ Credit={}", totalDebit, totalCredit);
                 } else {
-                    log.warn("No ecritures found in the data or empty ecritures array");
+                    log.info("✅ Accounting is balanced: {} = {}", totalDebit, totalCredit);
+                }
+            } else {
+                log.warn("⚠️ No ecritures found or empty array for piece {}", piece.getId());
+            }
+        } catch (Exception e) {
+            log.error("❌ Error processing ecritures for piece {}: {}", piece.getId(), e.getMessage(), e);
+        }
+
+        // 👉 Set ICE if missing
+        if (factureData.getIce() == null || factureData.getIce().isEmpty()) {
+            try {
+                Dossier dossier = piece.getDossier();
+                if (dossier != null && dossier.getICE() != null) {
+                    factureData.setIce(dossier.getICE());
+                    log.info("ℹ️ Set ICE from dossier: {}", dossier.getICE());
                 }
             } catch (Exception e) {
-                log.error("Error extracting invoice date from AI data: {}", e.getMessage(), e);
+                log.error("❌ Failed to set ICE from dossier for piece {}: {}", piece.getId(), e.getMessage(), e);
             }
+        }
 
-            // Set ICE from dossier if not already set
-            if (factureData.getIce() == null || factureData.getIce().isEmpty()) {
-                try {
-                    Dossier dossier = piece.getDossier();
-                    if (dossier != null && dossier.getICE() != null) {
-                        factureData.setIce(dossier.getICE());
-                        log.info("Set ICE from dossier: {}", dossier.getICE());
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to set ICE from dossier: {}", e.getMessage(), e);
-                }
-            }
+        // 👉 Set exchange info if missing
+        if (piece.getExchangeRate() != null && factureData.getExchangeRate() == null) {
+            factureData.setExchangeRate(piece.getExchangeRate());
+            factureData.setOriginalCurrency(piece.getAiCurrency());
+            factureData.setConvertedCurrency(piece.getConvertedCurrency());
+            factureData.setExchangeRateDate(piece.getExchangeRateDate());
 
-            // Copy currency conversion information from the piece if available
-            if (piece.getExchangeRate() != null && factureData.getExchangeRate() == null) {
-                factureData.setExchangeRate(piece.getExchangeRate());
-                factureData.setOriginalCurrency(piece.getAiCurrency());
-                factureData.setConvertedCurrency(piece.getConvertedCurrency());
-                factureData.setExchangeRateDate(piece.getExchangeRateDate());
+            double rate = piece.getExchangeRate();
 
-                // If we have exchange rate but no converted amounts, calculate them now
-                double rate = factureData.getExchangeRate();
+            if (factureData.getTotalTTC() != null && factureData.getConvertedTotalTTC() == null)
+                factureData.setConvertedTotalTTC(factureData.getTotalTTC() * rate);
+            if (factureData.getTotalHT() != null && factureData.getConvertedTotalHT() == null)
+                factureData.setConvertedTotalHT(factureData.getTotalHT() * rate);
+            if (factureData.getTotalTVA() != null && factureData.getConvertedTotalTVA() == null)
+                factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
+        }
 
-                if (factureData.getTotalTTC() != null && factureData.getConvertedTotalTTC() == null) {
-                    factureData.setConvertedTotalTTC(factureData.getTotalTTC() * rate);
-                }
+        // 👉 Save or update FactureData
+        Optional<FactureData> existingOpt = factureDataRepository.findByPiece(piece);
 
-                if (factureData.getTotalHT() != null && factureData.getConvertedTotalHT() == null) {
-                    factureData.setConvertedTotalHT(factureData.getTotalHT() * rate);
-                }
+        if (existingOpt.isPresent()) {
+            FactureData existing = existingOpt.get();
 
-                if (factureData.getTotalTVA() != null && factureData.getConvertedTotalTVA() == null) {
-                    factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
-                }
-            }
+            existing.setInvoiceNumber(factureData.getInvoiceNumber());
+            existing.setInvoiceDate(factureData.getInvoiceDate());
+            existing.setIce(factureData.getIce());
+            existing.setExchangeRate(factureData.getExchangeRate());
+            existing.setOriginalCurrency(factureData.getOriginalCurrency());
+            existing.setConvertedCurrency(factureData.getConvertedCurrency());
+            existing.setExchangeRateDate(factureData.getExchangeRateDate());
+            existing.setConvertedTotalHT(factureData.getConvertedTotalHT());
+            existing.setConvertedTotalTTC(factureData.getConvertedTotalTTC());
+            existing.setConvertedTotalTVA(factureData.getConvertedTotalTVA());
+            existing.setTotalHT(factureData.getTotalHT());
+            existing.setTotalTTC(factureData.getTotalTTC());
+            existing.setTotalTVA(factureData.getTotalTVA());
+            existing.setDevise(factureData.getDevise());
+            existing.setTaxRate(factureData.getTaxRate());
+            existing.setUsdTotalHT(factureData.getUsdTotalHT());
+            existing.setUsdTotalTTC(factureData.getUsdTotalTTC());
+            existing.setUsdTotalTVA(factureData.getUsdTotalTVA());
 
-            // Log FactureData before saving
-            log.info("Saving FactureData: invoiceNumber={}, invoiceDate={}, ice={}", factureData.getInvoiceNumber(), factureData.getInvoiceDate(), factureData.getIce());
-
-            factureDataRepository.save(factureData); // Save FactureData
+            factureDataRepository.save(existing);
+            log.info("📝 Updated existing FactureData for piece {}", piece.getId());
         } else {
-            log.warn("No FactureData found in the pieceData");
+            factureData.setPiece(piece); // Re-set just in case
+            factureDataRepository.save(factureData);
+            log.info("✅ Created new FactureData for piece {}", piece.getId());
         }
     }
+
 
     // Helper method to parse dates from various formats
     private LocalDate parseDate(String dateStr) {
@@ -547,19 +566,47 @@ public class PieceServiceImpl implements PieceService {
 
     private FactureData deserializeFactureData(String pieceData) {
         try {
-            // Parse the entire pieceData JSON to get the factureData part only
             JsonNode rootNode = objectMapper.readTree(pieceData);
-            JsonNode factureDataNode = rootNode.get("factureData"); // Extract only "factureData"
 
+            // ✅ Case 1: "factureData" exists in JSON
+            JsonNode factureDataNode = rootNode.get("factureData");
             if (factureDataNode != null && !factureDataNode.isNull()) {
-                return objectMapper.treeToValue(factureDataNode, FactureData.class); // Convert JSON node to FactureData
-            } else {
-                return null; // If factureData is not present, return null
+                return objectMapper.treeToValue(factureDataNode, FactureData.class);
             }
+
+            // ✅ Case 2: try to extract from "Ecritures" if no "factureData"
+            JsonNode ecrituresNode = rootNode.get("ecritures");
+            if (ecrituresNode == null) ecrituresNode = rootNode.get("Ecritures");
+
+            if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                FactureData fd = new FactureData();
+
+                // Get the first entry to extract base values
+                JsonNode first = ecrituresNode.get(0);
+
+                fd.setInvoiceNumber(first.has("FactureNum") ? first.get("FactureNum").asText() : null);
+                fd.setDevise(first.has("Devise") ? first.get("Devise").asText() : "MAD");
+
+                String tvaRateStr = first.has("TVARate") ? first.get("TVARate").asText() : "0";
+                if (tvaRateStr == null || tvaRateStr.trim().isEmpty()) tvaRateStr = "0";
+                try {
+                    fd.setTaxRate(Double.parseDouble(tvaRateStr.replace("%", "").trim()));
+                } catch (NumberFormatException e) {
+                    fd.setTaxRate(0.0);
+                }
+
+                // Optionally: calculate totalTTC, totalHT, totalTVA here if needed
+
+                return fd;
+            }
+
+            return null;
+
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse 'factureData' JSON: " + e.getMessage());
+            throw new IllegalArgumentException("Failed to parse factureData or ecritures: " + e.getMessage(), e);
         }
     }
+
 
     @Transactional
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {

@@ -49,8 +49,6 @@ import java.util.stream.Collectors;
 @EnableScheduling
 public class AIPieceProcessingService {
     private static final int BATCH_SIZE = 20;
-    private static final int MAX_RETRIES = 3;
-    private static final long RETRY_DELAY = 5000;
 
     @Value("${ai.service.url}")
     private String aiServiceUrl;
@@ -125,8 +123,6 @@ public class AIPieceProcessingService {
         }
     }
 
-    // Also update the attemptAIProcessing method to always notify
-    // Also update the attemptAIProcessing method to always notify
     private void attemptAIProcessing(Piece piece, int attempt) throws InterruptedException {
         // Reload piece from DB to get current status
         Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);

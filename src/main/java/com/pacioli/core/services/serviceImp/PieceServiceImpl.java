@@ -379,17 +379,17 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
+    public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         // ** Step 1: Fetch the Piece by ID **
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         Piece piece = pieceRepository.findById(pieceId).orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
 
         try {
             // ** Step 2: Save FactureData first to enable duplicate detection **
-            saveFactureDataForPiece(piece, pieceData);
+            saveFactureDataForPiece(piece, pieceData, originalAiResponse);
 
             // ** Step 3: Save Ecritures temporarily to enable comprehensive duplicate detection **
-            saveEcrituresForPiece(piece, dossierId, pieceData);
+            saveEcrituresForPiece(piece, dossierId, pieceData, originalAiResponse);
 
             // ** Step 4: Perform comprehensive duplicate check BEFORE setting status to PROCESSED **
             Optional<Piece> comprehensiveDuplicate = duplicateDetectionService.performComprehensiveDuplicateCheck(piece);
@@ -415,7 +415,7 @@ public class PieceServiceImpl implements PieceService {
 
             // ** Step 5: Update the amount and status of the Piece (only if not duplicate) **
             piece.setStatus(PieceStatus.PROCESSED);
-            piece.setAmount(calculateAmountFromEcritures(pieceData, dossier)); // Calculate amount from Ecritures
+            piece.setAmount(calculateAmountFromEcritures(pieceData, dossier, originalAiResponse)); // Updated method
             piece = pieceRepository.save(piece); // Save changes to the Piece
 
             log.info("✅ Piece {} successfully processed without duplicates", piece.getId());
@@ -439,7 +439,7 @@ public class PieceServiceImpl implements PieceService {
         return piece;
     }
 
-    private void saveFactureDataForPiece(Piece piece, String pieceData) {
+    private void saveFactureDataForPiece(Piece piece, String pieceData, JsonNode originalAiResponse) {
         FactureData factureData = deserializeFactureData(pieceData);
 
         if (factureData == null) {
@@ -449,22 +449,40 @@ public class PieceServiceImpl implements PieceService {
 
         factureData.setPiece(piece); // Always associate the piece
 
-        // 👉 Extract and validate ecritures
+        // Parse original AI response to get exact string values
         try {
-            JsonNode rootNode = objectMapper.readTree(pieceData);
-            JsonNode ecrituresNode = rootNode.get("ecritures");
-            if (ecrituresNode == null) ecrituresNode = rootNode.get("Ecritures");
+            String responseText = originalAiResponse.asText();
+            JsonNode parsedOriginal = objectMapper.readTree(responseText);
+            JsonNode originalEcritures = parsedOriginal.get("ecritures");
+            if (originalEcritures == null) {
+                originalEcritures = parsedOriginal.get("Ecritures");
+            }
 
-            if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+            if (originalEcritures != null && originalEcritures.isArray() && originalEcritures.size() > 0) {
+                JsonNode firstEntry = originalEcritures.get(0);
+
+                // Set amounts using exact precision from original AI response
+                if (firstEntry.has("TotalTTC")) {
+                    factureData.setTotalTTCExact(firstEntry.get("TotalTTC").asText());
+                }
+                if (firstEntry.has("TotalHT")) {
+                    factureData.setTotalHTExact(firstEntry.get("TotalHT").asText());
+                }
+                if (firstEntry.has("TotalTVA")) {
+                    factureData.setTotalTVAExact(firstEntry.get("TotalTVA").asText());
+                }
+
+                // Validate accounting balance using BigDecimal
                 BigDecimal totalDebit = BigDecimal.ZERO;
                 BigDecimal totalCredit = BigDecimal.ZERO;
 
-                for (JsonNode entry : ecrituresNode) {
-                    String tvaRate = entry.has("TVARate") ? entry.get("TVARate").asText() : "0";
-                    if (tvaRate == null || tvaRate.trim().isEmpty()) tvaRate = "0";
+                for (JsonNode entry : originalEcritures) {
+                    String debitStr = entry.get("DebitAmt").asText("0");
+                    String creditStr = entry.get("CreditAmt").asText("0");
 
-                    BigDecimal debit = new BigDecimal(entry.get("DebitAmt").asText("0").replace(",", "."));
-                    BigDecimal credit = new BigDecimal(entry.get("CreditAmt").asText("0").replace(",", "."));
+                    BigDecimal debit = new BigDecimal(debitStr.replace(",", "."));
+                    BigDecimal credit = new BigDecimal(creditStr.replace(",", "."));
+
                     totalDebit = totalDebit.add(debit);
                     totalCredit = totalCredit.add(credit);
                 }
@@ -474,11 +492,9 @@ public class PieceServiceImpl implements PieceService {
                 } else {
                     log.info("✅ Accounting is balanced: {} = {}", totalDebit, totalCredit);
                 }
-            } else {
-                log.warn("⚠️ No ecritures found or empty array for piece {}", piece.getId());
             }
         } catch (Exception e) {
-            log.error("❌ Error processing ecritures for piece {}: {}", piece.getId(), e.getMessage(), e);
+            log.error("❌ Error processing original AI response for piece {}: {}", piece.getId(), e.getMessage(), e);
         }
 
         // 👉 Set ICE if missing
@@ -494,7 +510,7 @@ public class PieceServiceImpl implements PieceService {
             }
         }
 
-        // 👉 Set exchange info if missing
+        // 👉 Set exchange info if missing (existing logic remains the same)
         if (piece.getExchangeRate() != null && factureData.getExchangeRate() == null) {
             factureData.setExchangeRate(piece.getExchangeRate());
             factureData.setOriginalCurrency(piece.getAiCurrency());
@@ -511,12 +527,12 @@ public class PieceServiceImpl implements PieceService {
                 factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
         }
 
-        // 👉 Save or update FactureData
+        // 👉 Save or update FactureData (existing logic remains the same)
         Optional<FactureData> existingOpt = factureDataRepository.findByPiece(piece);
 
         if (existingOpt.isPresent()) {
             FactureData existing = existingOpt.get();
-
+            // Update all fields including the new exact fields
             existing.setInvoiceNumber(factureData.getInvoiceNumber());
             existing.setInvoiceDate(factureData.getInvoiceDate());
             existing.setIce(factureData.getIce());
@@ -536,16 +552,19 @@ public class PieceServiceImpl implements PieceService {
             existing.setUsdTotalTTC(factureData.getUsdTotalTTC());
             existing.setUsdTotalTVA(factureData.getUsdTotalTVA());
 
+            // SET THE NEW EXACT FIELDS
+            existing.setTotalTTCExact(factureData.getTotalTTCExact());
+            existing.setTotalHTExact(factureData.getTotalHTExact());
+            existing.setTotalTVAExact(factureData.getTotalTVAExact());
+
             factureDataRepository.save(existing);
             log.info("📝 Updated existing FactureData for piece {}", piece.getId());
         } else {
-            factureData.setPiece(piece); // Re-set just in case
+            factureData.setPiece(piece);
             factureDataRepository.save(factureData);
             log.info("✅ Created new FactureData for piece {}", piece.getId());
         }
     }
-
-
     // Helper method to parse dates from various formats
     private LocalDate parseDate(String dateStr) {
         try {
@@ -608,58 +627,122 @@ public class PieceServiceImpl implements PieceService {
     }
 
 
+// REPLACE your existing saveEcrituresForPiece method with this:
+
     @Transactional
-    private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {
+    private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         // Fetch the Dossier explicitly
-        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         log.info("Fetched Dossier ID: {}", dossier.getId());
 
+        // Parse original AI response to get exact string values
+        JsonNode originalEcritures = null;
+        try {
+            String responseText = originalAiResponse.asText();
+            JsonNode parsedOriginal = objectMapper.readTree(responseText);
+            originalEcritures = parsedOriginal.get("ecritures");
+            if (originalEcritures == null) {
+                originalEcritures = parsedOriginal.get("Ecritures");
+            }
+        } catch (Exception e) {
+            log.error("Error parsing original AI response: {}", e.getMessage(), e);
+        }
+
         // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream().collect(Collectors.toMap(Account::getAccount, Function.identity()));
+        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
+                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
-        for (Ecriture ecriture : deserializeEcritures(pieceData, dossier)) {
+        List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
+
+        for (int i = 0; i < ecritures.size(); i++) {
+            Ecriture ecriture = ecritures.get(i);
             ecriture.setPiece(piece);
 
-            // Find or create Journal
-            Journal journal = journals.stream().filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName())).findFirst().orElseGet(() -> {
-                log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                Journal newJournal = new Journal(ecriture.getJournal().getName(), ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
-                Journal savedJournal = journalRepository.save(newJournal);
-                journals.add(savedJournal); // Add to the list to prevent redundant creations
-                return savedJournal;
-            });
+            // Find or create Journal (existing logic)
+            Journal journal = journals.stream()
+                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
+                        Journal newJournal = new Journal(ecriture.getJournal().getName(),
+                                ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
+                        Journal savedJournal = journalRepository.save(newJournal);
+                        journals.add(savedJournal);
+                        return savedJournal;
+                    });
             ecriture.setJournal(journal);
 
-            log.info("Ecriture before saving: {}", ecriture);
-
             try {
-                log.info("Attempting to save Ecriture: {}", ecriture);
                 Ecriture savedEcriture = ecritureRepository.save(ecriture);
-                log.info("Saved Ecriture: {}", savedEcriture);
 
-                // Modify just the account creation part in your saveEcrituresForPiece method:
-
-// Replace the current account handling code with this:
-                for (Line line : ecriture.getLines()) {
+                // Process lines with exact precision from original AI response
+                for (int j = 0; j < ecriture.getLines().size(); j++) {
+                    Line line = ecriture.getLines().get(j);
                     line.setEcriture(savedEcriture);
 
-                    // Get account number from the line
-                    String accountNumber = line.getAccount().getAccount();
+                    // Use exact precision from original AI response if available
+                    if (originalEcritures != null && j < originalEcritures.size()) {
+                        JsonNode originalEntry = originalEcritures.get(j);
 
-                    // Check if we already have it in our in-memory map
+                        // Set amounts using exact string values
+                        if (originalEntry.has("OriginalDebitAmt")) {
+                            // Currency conversion case
+                            line.setOriginalDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                            line.setDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                            line.setConvertedDebitExact(originalEntry.get("DebitAmt").asText());
+
+                            line.setOriginalCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                            line.setCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                            line.setConvertedCreditExact(originalEntry.get("CreditAmt").asText());
+                        } else {
+                            // No conversion case
+                            line.setDebitExact(originalEntry.get("DebitAmt").asText());
+                            line.setCreditExact(originalEntry.get("CreditAmt").asText());
+                        }
+
+                        // Set USD amounts if available
+                        if (originalEntry.has("UsdDebitAmt")) {
+                            line.setUsdDebitExact(originalEntry.get("UsdDebitAmt").asText());
+                        }
+                        if (originalEntry.has("UsdCreditAmt")) {
+                            line.setUsdCreditExact(originalEntry.get("UsdCreditAmt").asText());
+                        }
+
+                        // Set exchange rate
+                        if (originalEntry.has("ExchangeRate")) {
+                            line.setExchangeRateExact(originalEntry.get("ExchangeRate").asText());
+                        }
+
+                        // Set currencies
+                        if (originalEntry.has("OriginalDevise")) {
+                            line.setOriginalCurrency(originalEntry.get("OriginalDevise").asText());
+                        }
+                        if (originalEntry.has("Devise")) {
+                            line.setConvertedCurrency(originalEntry.get("Devise").asText());
+                        }
+                        // Set exchange rate date
+                        if (originalEntry.has("ExchangeRateDate")) {
+                            try {
+                                line.setExchangeRateDate(originalEntry.get("ExchangeRateDate").asText());
+                            } catch (Exception e) {
+                                log.trace("Error parsing exchange rate date: {}", e.getMessage());
+                            }
+                        }
+                    }
+
+                    // Handle account creation with existing logic (no changes needed here)
+                    String accountNumber = line.getAccount().getAccount();
                     Account account = accountMap.get(accountNumber);
 
                     if (account == null) {
-                        // Not in memory, try to get from database
                         account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
 
                         if (account == null) {
-                            // Account doesn't exist yet, try to create it with error handling
                             try {
-                                // Create new account
                                 Account newAccount = new Account();
                                 newAccount.setAccount(accountNumber);
                                 newAccount.setLabel(line.getAccount().getLabel());
@@ -669,38 +752,29 @@ public class PieceServiceImpl implements PieceService {
 
                                 log.info("Creating new Account: {}", newAccount);
                                 account = accountRepository.save(newAccount);
-
-                                // Add to our map for future lookups
                                 accountMap.put(accountNumber, account);
                             } catch (DataIntegrityViolationException e) {
-                                // Another thread/process created the account just before us
                                 log.info("Account creation conflict detected. Retrying fetch for account: {}", accountNumber);
 
-                                // Sleep briefly to allow the transaction to complete
                                 try {
                                     Thread.sleep(50);
                                 } catch (InterruptedException ie) {
                                     Thread.currentThread().interrupt();
                                 }
 
-                                // Try to fetch the account again
                                 account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
 
                                 if (account == null) {
-                                    // This should be very rare - means we still can't find it after waiting
                                     throw new RuntimeException("Failed to find or create account after concurrent creation: " + accountNumber, e);
                                 }
 
-                                // Add to our map for future lookups
                                 accountMap.put(accountNumber, account);
                             }
                         } else {
-                            // Found in database, add to map
                             accountMap.put(accountNumber, account);
                         }
                     }
 
-                    // Set the account to the line
                     line.setAccount(account);
                 }
 
@@ -709,12 +783,10 @@ public class PieceServiceImpl implements PieceService {
 
             } catch (Exception e) {
                 log.error("Error saving Ecriture: {}", e.getMessage(), e);
-                throw e; // Rethrow to propagate the exception
+                throw e;
             }
         }
     }
-
-
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
         try {
             JsonNode rootNode = objectMapper.readTree(pieceData);
@@ -774,13 +846,46 @@ public class PieceServiceImpl implements PieceService {
     }
 
 
-    private Double calculateAmountFromEcritures(String pieceData, Dossier dossier) {
+    private Double calculateAmountFromEcritures(String pieceData, Dossier dossier, JsonNode originalAiResponse) {
+        try {
+            // Try to get exact amounts from original AI response first
+            if (originalAiResponse != null) {
+                String responseText = originalAiResponse.asText();
+                JsonNode parsedOriginal = objectMapper.readTree(responseText);
+                JsonNode originalEcritures = parsedOriginal.get("ecritures");
+                if (originalEcritures == null) {
+                    originalEcritures = parsedOriginal.get("Ecritures");
+                }
+
+                if (originalEcritures != null && originalEcritures.isArray()) {
+                    BigDecimal maxAmount = BigDecimal.ZERO;
+
+                    for (JsonNode entry : originalEcritures) {
+                        String debitStr = entry.get("DebitAmt").asText("0");
+                        String creditStr = entry.get("CreditAmt").asText("0");
+
+                        BigDecimal debit = new BigDecimal(debitStr);
+                        BigDecimal credit = new BigDecimal(creditStr);
+
+                        maxAmount = maxAmount.max(debit.max(credit));
+                    }
+
+                    return maxAmount.doubleValue();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Error getting exact amount from original AI response, falling back to regular parsing: {}", e.getMessage());
+        }
+
+        // Fallback to existing logic
         List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
 
-        return ecritures.stream().flatMap(e -> e.getLines().stream()).flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit())) // Include both Debit and Credit
-                .max().orElse(0.0);
+        return ecritures.stream()
+                .flatMap(e -> e.getLines().stream())
+                .flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit()))
+                .max()
+                .orElse(0.0);
     }
-
     /**
      * Deserializes the Piece from the provided data.
      */

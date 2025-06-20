@@ -2,6 +2,7 @@ package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.DTO.Company;
 import com.pacioli.core.DTO.DossierDTO;
+import com.pacioli.core.DTO.PaysDTO;
 import com.pacioli.core.Exceptions.CompanyAiException;
 import com.pacioli.core.Exceptions.ExerciseDateConflictException;
 import com.pacioli.core.models.*;
@@ -66,17 +67,30 @@ public class DossierServiceImpl implements DossierService {
             // Update country relationship
             existingDossier.setCountry(dossier.getCountry());
 
+            // Update decimal precision
+            if (dossier.getDecimalPrecision() != null) {
+                existingDossier.setDecimalPrecision(dossier.getDecimalPrecision());
+                log.info("[{}] Updated decimal precision to: {}", requestId, dossier.getDecimalPrecision());
+            }
+
             dossier = existingDossier;
         } else {
             // If no Dossier with the same name exists, check the Cabinet
             Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
                     .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
             dossier.setCabinet(cabinet);
+
+            // Set default decimal precision if not provided for new dossiers
+            if (dossier.getDecimalPrecision() == null) {
+                dossier.setDecimalPrecision(2);
+                log.info("[{}] Set default decimal precision to: 2", requestId);
+            }
         }
 
         // Save or update the Dossier
         Dossier savedDossier = dossierRepository.save(dossier);
-        log.info("[{}] Dossier saved with ID: {}", requestId, savedDossier.getId());
+        log.info("[{}] Dossier saved with ID: {} and decimal precision: {}",
+                requestId, savedDossier.getId(), savedDossier.getDecimalPrecision());
 
         // Create the list of default journals (only for new dossiers)
         if (isNewDossier) {
@@ -194,7 +208,7 @@ public class DossierServiceImpl implements DossierService {
             throw new IllegalArgumentException("Les dates de l'exercice se chevauchent avec celles d'exercices existants");
         }
 
-        // Fetch all "écritures" for the dossier
+        // Fetch all "écritures" for the dossier and exercise
         List<Ecriture> ecritures = ecritureRepository.findByDossierAndExerciseId(dossier.getId(), updatedExercise.getId());
 
         // Check if any "écriture" falls outside the new date range
@@ -300,6 +314,11 @@ public class DossierServiceImpl implements DossierService {
         if (dossierDetails.getCountry() != null) {
             existingDossier.setCountry(dossierDetails.getCountry());
         }
+        // Update decimal precision if provided
+        if (dossierDetails.getDecimalPrecision() != null) {
+            existingDossier.setDecimalPrecision(dossierDetails.getDecimalPrecision());
+            log.info("[{}] Updated decimal precision to: {}", requestId, dossierDetails.getDecimalPrecision());
+        }
 
         Dossier savedDossier = dossierRepository.save(existingDossier);
         log.info("[{}] Dossier updated successfully with ID: {}", requestId, savedDossier.getId());
@@ -341,6 +360,30 @@ public class DossierServiceImpl implements DossierService {
         dto.setCity(savedDossier.getCity());
         dto.setPhone(savedDossier.getPhone());
         dto.setEmail(savedDossier.getEmail());
+        dto.setDecimalPrecision(savedDossier.getDecimalPrecision());
+
+        // Set pays object from country relationship including currency
+        if (savedDossier.getCountry() != null) {
+            PaysDTO paysDTO = new PaysDTO();
+            paysDTO.setCountry(savedDossier.getCountry().getName());
+            paysDTO.setCode(savedDossier.getCountry().getCode());
+
+            // Add currency information if available
+            if (savedDossier.getCountry().getCurrency() != null) {
+                PaysDTO.CurrencyDTO currencyDTO = new PaysDTO.CurrencyDTO();
+                currencyDTO.setCode(savedDossier.getCountry().getCurrency().getCode());
+                currencyDTO.setName(savedDossier.getCountry().getCurrency().getName());
+                paysDTO.setCurrency(currencyDTO);
+            }
+
+            dto.setPays(paysDTO);
+        }
+
+        // Set cabinet DTO
+        DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
+        cabinetDTO.setId(savedDossier.getCabinet().getId());
+        dto.setCabinet(cabinetDTO);
+
         return dto;
     }
 

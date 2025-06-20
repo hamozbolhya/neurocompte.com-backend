@@ -29,11 +29,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.CompletableFuture;
-
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -42,6 +37,13 @@ import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,6 +51,8 @@ import java.util.stream.Collectors;
 @EnableScheduling
 public class AIPieceProcessingService {
     private static final int BATCH_SIZE = 20;
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY = 5000;
 
     @Value("${ai.service.url}")
     private String aiServiceUrl;
@@ -89,7 +93,7 @@ public class AIPieceProcessingService {
                 .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
                 .collect(Collectors.toList());
 
-        if(pendingPieces.size() == 0) {
+        if (pendingPieces.size() == 0) {
             pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING)
                     .stream()
                     .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
@@ -123,6 +127,8 @@ public class AIPieceProcessingService {
         }
     }
 
+    // Also update the attemptAIProcessing method to always notify
+    // Also update the attemptAIProcessing method to always notify
     private void attemptAIProcessing(Piece piece, int attempt) throws InterruptedException {
         // Reload piece from DB to get current status
         Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
@@ -178,7 +184,8 @@ public class AIPieceProcessingService {
             pieceService.saveEcrituresAndFacture(
                     currentPiece.getId(),
                     currentPiece.getDossier().getId(),
-                    objectMapper.writeValueAsString(pieceDTO)
+                    objectMapper.writeValueAsString(pieceDTO),
+                    root.get("outputText") // ADD THIS PARAMETER - the original AI response
             );
 
         } catch (Exception e) {
@@ -232,7 +239,9 @@ public class AIPieceProcessingService {
             pieceService.saveEcrituresAndFacture(
                     piece.getId(),
                     piece.getDossier().getId(),
-                    objectMapper.writeValueAsString(pieceDTO)
+                    objectMapper.writeValueAsString(pieceDTO),
+                    root.get("outputText")
+
             );
             log.info("DOSSIER ID 4 {}", piece.getDossier().getId());
             pieceService.getPiecesByDossier(piece.getDossier().getId());
@@ -563,6 +572,7 @@ public class AIPieceProcessingService {
             throw new RuntimeException("Failed to build PieceDTO from AI response", e);
         }
     }
+
     private JsonNode convertCurrencyIfNeeded(
             JsonNode ecrituresNode,
             LocalDate invoiceDate,
@@ -1069,6 +1079,7 @@ public class AIPieceProcessingService {
             return null;
         }
     }
+
     private JournalDTO buildJournal(JsonNode entry) {
         JournalDTO journal = new JournalDTO();
         journal.setName(entry.get("JournalCode").asText());
@@ -1144,6 +1155,7 @@ public class AIPieceProcessingService {
         }
         return lines;
     }
+
     private LocalDate parseDate(String dateStr) {
         try {
             // Trim any whitespace

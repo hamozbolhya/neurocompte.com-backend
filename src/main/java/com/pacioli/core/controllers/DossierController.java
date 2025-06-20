@@ -90,6 +90,7 @@ public class DossierController {
                     "Une erreur inattendue est survenue lors de la création du dossier: " + e.getMessage(), e);
         }
     }
+
     private Dossier convertToEntity(DossierDTO dto) {
         Dossier dossier = new Dossier();
         dossier.setName(dto.getName());
@@ -98,6 +99,17 @@ public class DossierController {
         dossier.setCity(dto.getCity());
         dossier.setPhone(dto.getPhone());
         dossier.setEmail(dto.getEmail());
+
+        // Set decimal precision with validation
+        if (dto.getDecimalPrecision() != null) {
+            // Validate range (0-10)
+            int precision = Math.max(0, Math.min(10, dto.getDecimalPrecision()));
+            dossier.setDecimalPrecision(precision);
+            log.info("Setting decimal precision to: {}", precision);
+        } else {
+            dossier.setDecimalPrecision(2); // Default
+            log.info("Using default decimal precision: 2");
+        }
 
         // Set country relationship from pays object
         if (dto.getPays() != null && dto.getPays().getCode() != null) {
@@ -127,6 +139,9 @@ public class DossierController {
         dto.setCity(entity.getCity());
         dto.setPhone(entity.getPhone());
         dto.setEmail(entity.getEmail());
+
+        // Set decimal precision
+        dto.setDecimalPrecision(entity.getDecimalPrecision());
 
         // Set pays object from country relationship including currency
         if (entity.getCountry() != null) {
@@ -233,14 +248,19 @@ public class DossierController {
     @PutMapping("/details/{id}")
     public ResponseEntity<DossierDTO> updateDossier(
             @PathVariable Long id,
-            @RequestBody Dossier dossierDetails) {
+            @RequestBody DossierDTO dossierDetails) {
+
+        log.info("Updating dossier with ID: {} and details: {}", id, dossierDetails);
+
+        // Convert DTO to entity for the update
+        Dossier dossierEntity = convertToEntity(dossierDetails);
+        dossierEntity.setId(id); // Ensure the ID is set for update
 
         // Update the dossier
-        DossierDTO updatedDossier = dossierService.updateDossier(id, dossierDetails);
+        DossierDTO updatedDossier = dossierService.updateDossier(id, dossierEntity);
 
         return ResponseEntity.ok(updatedDossier);
     }
-
 
     @DeleteMapping("/{dossierId}")
     public ResponseEntity<?> deleteDossier(@PathVariable Long dossierId) {

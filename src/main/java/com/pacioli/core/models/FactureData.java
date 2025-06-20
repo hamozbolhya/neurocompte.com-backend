@@ -8,6 +8,7 @@ import lombok.ToString;
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.Objects;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -33,6 +34,16 @@ public class FactureData {
     private String ice;              // ICE
     private String devise;           // Original currency
 
+    // ADD THESE NEW FIELDS FOR EXACT PRECISION
+    @Column(name = "total_ttc_exact")
+    private String totalTTCExact;    // Store exact string from AI
+
+    @Column(name = "total_ht_exact")
+    private String totalHTExact;     // Store exact string from AI
+
+    @Column(name = "total_tva_exact")
+    private String totalTVAExact;    // Store exact string from AI
+
     // Exchange rate information
     private Double exchangeRate;             // Exchange rate used for conversion
     private String originalCurrency;         // Original currency code
@@ -44,10 +55,43 @@ public class FactureData {
     private Double convertedTotalHT;         // Converted Montant HT
     private Double convertedTotalTVA;        // Converted Montant TVA
 
+    // ADD THESE NEW FIELDS FOR EXACT PRECISION IN CONVERTED AMOUNTS
+    @Column(name = "converted_total_ttc_exact")
+    private String convertedTotalTTCExact;
+
+    @Column(name = "converted_total_ht_exact")
+    private String convertedTotalHTExact;
+
+    @Column(name = "converted_total_tva_exact")
+    private String convertedTotalTVAExact;
+
     // USD equivalents (optional)
     private Double usdTotalTTC;              // USD equivalent of TTC
     private Double usdTotalHT;               // USD equivalent of HT
     private Double usdTotalTVA;              // USD equivalent of TVA
+
+    // ADD THESE NEW FIELDS FOR EXACT PRECISION IN USD AMOUNTS
+    @Column(name = "usd_total_ttc_exact")
+    private String usdTotalTTCExact;
+
+    @Column(name = "usd_total_ht_exact")
+    private String usdTotalHTExact;
+
+    @Column(name = "usd_total_tva_exact")
+    private String usdTotalTVAExact;
+
+    // HELPER METHODS TO GET BIGDECIMAL VALUES
+    public BigDecimal getTotalTTCAsBigDecimal() {
+        return totalTTCExact != null ? new BigDecimal(totalTTCExact) : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getTotalHTAsBigDecimal() {
+        return totalHTExact != null ? new BigDecimal(totalHTExact) : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getTotalTVAAsBigDecimal() {
+        return totalTVAExact != null ? new BigDecimal(totalTVAExact) : BigDecimal.ZERO;
+    }
 
     @Override
     public boolean equals(Object o) {

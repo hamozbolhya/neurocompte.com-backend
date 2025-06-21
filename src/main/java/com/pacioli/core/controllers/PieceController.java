@@ -234,13 +234,13 @@ public class PieceController {
         dto.setAmount(piece.getAmount());
         dto.setDossierId(piece.getDossier().getId());
         dto.setDossierName(piece.getDossier().getName());
+        dto.setIsForced(piece.getIsForced());
         // Add duplicate information
         dto.setIsDuplicate(piece.getIsDuplicate());
         if (piece.getOriginalPiece() != null) {
             dto.setOriginalPieceId(piece.getOriginalPiece().getId());
             dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
         }
-        dto.setIsForced(piece.getIsForced());
         // Add AI currency and amount info
         dto.setAiCurrency(piece.getAiCurrency());
         dto.setAiAmount(piece.getAiAmount());

@@ -116,14 +116,13 @@ public class DuplicateDetectionService {
         return result;
     }
 
-    /**
-     * Check for functional duplicates based on invoice data and ecriture data
-     * This should be called after AI processing when FactureData is available
-     *
-     * @param piece The piece to check for duplicates
-     * @return Optional containing the original piece if duplicate found
-     */
     public Optional<Piece> checkFunctionalDuplicate(Piece piece) {
+
+        if (Boolean.TRUE.equals(piece.getIsForced())) {
+            log.info("⏭ Pièce {} ignorée dans checkFunctionalDuplicate (isForced=true)", piece.getId());
+            return Optional.empty();
+        }
+
         Long dossierId = piece.getDossier().getId();
 
         // Check 1: Invoice-based duplicates (if FactureData is available)
@@ -212,14 +211,12 @@ public class DuplicateDetectionService {
         return Optional.empty();
     }
 
-    /**
-     * Comprehensive duplicate check that should be called before setting piece status to PROCESSED
-     * This method checks all possible duplicate scenarios
-     *
-     * @param piece The piece to check for duplicates
-     * @return Optional containing the original piece if any duplicate found
-     */
     public Optional<Piece> performComprehensiveDuplicateCheck(Piece piece) {
+        if (Boolean.TRUE.equals(piece.getIsForced())) {
+            log.info("⏭ Pièce {} ignorée dans performComprehensiveDuplicateCheck (isForced=true)", piece.getId());
+            return Optional.empty();
+        }
+
         log.info("🔍 Performing comprehensive duplicate check for piece {}", piece.getId());
 
         // Check 1: Technical duplicates (filename-based)
@@ -248,10 +245,12 @@ public class DuplicateDetectionService {
         return Optional.empty();
     }
 
-    /**
-     * Check for ecriture duplicates with amount tolerance to handle rounding differences
-     */
     private Optional<Piece> checkEcritureDuplicateWithTolerance(Piece piece) {
+        if (Boolean.TRUE.equals(piece.getIsForced())) {
+            log.info("⏭ Pièce {} ignorée dans checkEcritureDuplicateWithTolerance (isForced=true)", piece.getId());
+            return Optional.empty();
+        }
+
         if (piece.getEcritures() == null || piece.getEcritures().isEmpty()) {
             return Optional.empty();
         }
@@ -291,9 +290,6 @@ public class DuplicateDetectionService {
         return Optional.empty();
     }
 
-    /**
-     * Calculate the maximum amount from an ecriture's lines
-     */
     private Double calculateMaxAmountFromEcriture(Ecriture ecriture) {
         if (ecriture.getLines() == null || ecriture.getLines().isEmpty()) {
             return 0.0;
@@ -308,12 +304,6 @@ public class DuplicateDetectionService {
                 .orElse(0.0);
     }
 
-    /**
-     * Mark a piece as duplicate and link it to the original piece
-     *
-     * @param duplicatePiece The piece to mark as duplicate
-     * @param originalPiece  The original piece this is a duplicate of
-     */
     public void markAsDuplicate(Piece duplicatePiece, Piece originalPiece) {
         log.info("🔗 Marking piece {} as duplicate of piece {}", duplicatePiece.getId(), originalPiece.getId());
 
@@ -327,28 +317,7 @@ public class DuplicateDetectionService {
         log.info("✅ Successfully marked piece {} as duplicate", duplicatePiece.getId());
     }
 
-    /**
-     * Check if a piece is a duplicate
-     *
-     * @param piece The piece to check
-     * @return true if the piece is a duplicate
-     */
     public boolean isDuplicate(Piece piece) {
         return piece.getIsDuplicate() != null && piece.getIsDuplicate();
-    }
-
-    /**
-     * Utility method to generate duplicate message for logging/UI
-     *
-     * @param duplicatePiece The duplicate piece
-     * @param originalPiece  The original piece
-     * @return Formatted message explaining the duplicate
-     */
-    public String generateDuplicateMessage(Piece duplicatePiece, Piece originalPiece) {
-        return String.format("Piece '%s' is a duplicate of piece '%s' (ID: %d) uploaded on %s",
-                duplicatePiece.getOriginalFileName(),
-                originalPiece.getOriginalFileName(),
-                originalPiece.getId(),
-                originalPiece.getUploadDate());
     }
 }

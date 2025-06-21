@@ -12,7 +12,6 @@ public interface PieceService {
     Piece getPieceById(Long id);
     List<Piece> getPiecesByDossierIdSortedByDate(Long id);
     List<Piece> getPiecesByDossier(Long dossierId);
-    List<Piece> getAllPieces();
     void deletePiece(Long id);
 
     Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException;
@@ -24,10 +23,11 @@ public interface PieceService {
     default Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
         return saveEcrituresAndFacture(pieceId, dossierId, pieceData, null);
     }
-
     void notifyPiecesUpdate(Long dossierId);
     Piece updatePieceStatus(Long id, String request);
     PieceStatsDTO getPieceStatsByDossier(Long dossierId);
     List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId);
     byte[] getPieceFilesAsZip(Long pieceId);
+
+    Piece forcePieceNotDuplicate(Long pieceId);
 }

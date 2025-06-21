@@ -41,6 +41,8 @@ public class PieceDTO {
 
     private Boolean isDuplicate;
 
+    private Boolean isForced;
+
     private Long originalPieceId;
     private String originalPieceName;
 }

@@ -1,12 +1,10 @@
 package com.pacioli.core.controllers;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pacioli.core.DTO.*;
 import com.pacioli.core.models.Piece;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.PieceService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -78,116 +76,14 @@ public class PieceController {
     public ResponseEntity<List<PieceDTO>> getPieces(@RequestParam(required = false) Long dossierId) {
         if (dossierId != null) {
             List<Piece> pieces = pieceService.getPiecesByDossier(dossierId);
-
             // Convert to DTOs with original piece information
             List<PieceDTO> pieceDTOs = pieces.stream()
                     .map(piece -> {
-                        PieceDTO dto = new PieceDTO();
-                        dto.setId(piece.getId());
-                        dto.setFilename(piece.getFilename());
-                        dto.setOriginalFileName(piece.getOriginalFileName()); // Original filename
-                        dto.setType(piece.getType());
-                        dto.setStatus(piece.getStatus());
-                        dto.setUploadDate(piece.getUploadDate());
-                        dto.setAmount(piece.getAmount());
-                        dto.setDossierId(piece.getDossier().getId());
-                        dto.setDossierName(piece.getDossier().getName());
-
-                        // Add duplicate information
-                        dto.setIsDuplicate(piece.getIsDuplicate());
-                        if (piece.getOriginalPiece() != null) {
-                            dto.setOriginalPieceId(piece.getOriginalPiece().getId());
-                            dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
-                        }
-
-                        // Add AI currency and amount info
-                        dto.setAiCurrency(piece.getAiCurrency());
-                        dto.setAiAmount(piece.getAiAmount());
-
-                        // Add exchange rate info
-                        dto.setExchangeRate(piece.getExchangeRate());
-                        dto.setConvertedCurrency(piece.getConvertedCurrency());
-                        dto.setExchangeRateDate(piece.getExchangeRateDate());
-                        dto.setExchangeRateUpdated(piece.getExchangeRateUpdated());
-
+                        PieceDTO dto = getPieceDTO(piece);
                         // Add FactureData if exists
-                        if (piece.getFactureData() != null) {
-                            FactureDataDTO factureDataDTO = new FactureDataDTO();
-                            factureDataDTO.setInvoiceNumber(piece.getFactureData().getInvoiceNumber());
-                            factureDataDTO.setTotalTVA(piece.getFactureData().getTotalTVA());
-                            factureDataDTO.setTaxRate(piece.getFactureData().getTaxRate());
-                            factureDataDTO.setInvoiceDate(piece.getFactureData().getInvoiceDate());
-
-                            // Add currency information
-                            factureDataDTO.setDevise(piece.getFactureData().getDevise());
-                            factureDataDTO.setOriginalCurrency(piece.getFactureData().getOriginalCurrency());
-                            factureDataDTO.setConvertedCurrency(piece.getFactureData().getConvertedCurrency());
-                            factureDataDTO.setExchangeRate(piece.getFactureData().getExchangeRate());
-
-                            dto.setFactureData(factureDataDTO);
-                        }
-
+                        addFactureDataIfExists(piece, dto);
                         // Add Ecritures if exists - UPDATED WITH LINES MAPPING
-                        if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
-                            List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
-                                    .map(ecriture -> {
-                                        EcrituresDTO2 dto2 = new EcrituresDTO2();
-                                        dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
-                                        dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
-
-                                        // Add journal information
-                                        if (ecriture.getJournal() != null) {
-                                            JournalDTO journalDTO = new JournalDTO();
-                                            journalDTO.setName(ecriture.getJournal().getName());
-                                            journalDTO.setType(ecriture.getJournal().getType());
-                                            dto2.setJournal(journalDTO);
-                                        }
-
-                                        // ← ADD THIS: Map lines with account information
-                                        if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
-                                            List<LineDTO> linesDTOs = ecriture.getLines().stream()
-                                                    .map(line -> {
-                                                        LineDTO lineDTO = new LineDTO();
-                                                        lineDTO.setId(line.getId());
-                                                        lineDTO.setLabel(line.getLabel());
-                                                        lineDTO.setDebit(line.getDebit());
-                                                        lineDTO.setCredit(line.getCredit());
-
-                                                        // Add account information
-                                                        if (line.getAccount() != null) {
-                                                            AccountDTO accountDTO = new AccountDTO();
-                                                            accountDTO.setId(line.getAccount().getId());
-                                                            accountDTO.setAccount(line.getAccount().getAccount());
-                                                            accountDTO.setLabel(line.getAccount().getLabel());
-                                                            // Add type if Account entity has getType() method
-                                                            // accountDTO.setType(line.getAccount().getType());
-                                                            lineDTO.setAccount(accountDTO);
-                                                        }
-
-                                                        // Add currency information if available
-                                                        lineDTO.setOriginalDebit(line.getOriginalDebit());
-                                                        lineDTO.setOriginalCredit(line.getOriginalCredit());
-                                                        lineDTO.setOriginalCurrency(line.getOriginalCurrency());
-                                                        lineDTO.setConvertedDebit(line.getConvertedDebit());
-                                                        lineDTO.setConvertedCredit(line.getConvertedCredit());
-                                                        lineDTO.setConvertedCurrency(line.getConvertedCurrency());
-                                                        lineDTO.setExchangeRate(line.getExchangeRate());
-                                                        lineDTO.setExchangeRateDate(line.getExchangeRateDate());
-                                                        lineDTO.setUsdDebit(line.getUsdDebit());
-                                                        lineDTO.setUsdCredit(line.getUsdCredit());
-
-                                                        return lineDTO;
-                                                    })
-                                                    .collect(Collectors.toList());
-                                            dto2.setLines(linesDTOs);
-                                        }
-
-                                        return dto2;
-                                    })
-                                    .collect(Collectors.toList());
-                            dto.setEcritures(ecrituresDTOs);
-                        }
-
+                        extracted(piece, dto);
                         return dto;
                     })
                     .collect(Collectors.toList());
@@ -308,4 +204,122 @@ public class PieceController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
+    private static void addFactureDataIfExists(Piece piece, PieceDTO dto) {
+        if (piece.getFactureData() != null) {
+            FactureDataDTO factureDataDTO = new FactureDataDTO();
+            factureDataDTO.setInvoiceNumber(piece.getFactureData().getInvoiceNumber());
+            factureDataDTO.setTotalTVA(piece.getFactureData().getTotalTVA());
+            factureDataDTO.setTaxRate(piece.getFactureData().getTaxRate());
+            factureDataDTO.setInvoiceDate(piece.getFactureData().getInvoiceDate());
+
+            // Add currency information
+            factureDataDTO.setDevise(piece.getFactureData().getDevise());
+            factureDataDTO.setOriginalCurrency(piece.getFactureData().getOriginalCurrency());
+            factureDataDTO.setConvertedCurrency(piece.getFactureData().getConvertedCurrency());
+            factureDataDTO.setExchangeRate(piece.getFactureData().getExchangeRate());
+
+            dto.setFactureData(factureDataDTO);
+        }
+    }
+
+    private static PieceDTO getPieceDTO(Piece piece) {
+        PieceDTO dto = new PieceDTO();
+        dto.setId(piece.getId());
+        dto.setFilename(piece.getFilename());
+        dto.setOriginalFileName(piece.getOriginalFileName()); // Original filename
+        dto.setType(piece.getType());
+        dto.setStatus(piece.getStatus());
+        dto.setUploadDate(piece.getUploadDate());
+        dto.setAmount(piece.getAmount());
+        dto.setDossierId(piece.getDossier().getId());
+        dto.setDossierName(piece.getDossier().getName());
+        // Add duplicate information
+        dto.setIsDuplicate(piece.getIsDuplicate());
+        if (piece.getOriginalPiece() != null) {
+            dto.setOriginalPieceId(piece.getOriginalPiece().getId());
+            dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+        }
+        dto.setIsForced(piece.getIsForced());
+        // Add AI currency and amount info
+        dto.setAiCurrency(piece.getAiCurrency());
+        dto.setAiAmount(piece.getAiAmount());
+
+        // Add exchange rate info
+        dto.setExchangeRate(piece.getExchangeRate());
+        dto.setConvertedCurrency(piece.getConvertedCurrency());
+        dto.setExchangeRateDate(piece.getExchangeRateDate());
+        dto.setExchangeRateUpdated(piece.getExchangeRateUpdated());
+        return dto;
+    }
+
+    private static void extracted(Piece piece, PieceDTO dto) {
+        if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
+            List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
+                    .map(ecriture -> {
+                        EcrituresDTO2 dto2 = new EcrituresDTO2();
+                        dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
+                        dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+
+                        // Add journal information
+                        if (ecriture.getJournal() != null) {
+                            JournalDTO journalDTO = new JournalDTO();
+                            journalDTO.setName(ecriture.getJournal().getName());
+                            journalDTO.setType(ecriture.getJournal().getType());
+                            dto2.setJournal(journalDTO);
+                        }
+
+                        // ← ADD THIS: Map lines with account information
+                        if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
+                            List<LineDTO> linesDTOs = ecriture.getLines().stream()
+                                    .map(line -> {
+                                        LineDTO lineDTO = new LineDTO();
+                                        lineDTO.setId(line.getId());
+                                        lineDTO.setLabel(line.getLabel());
+                                        lineDTO.setDebit(line.getDebit());
+                                        lineDTO.setCredit(line.getCredit());
+
+                                        // Add account information
+                                        if (line.getAccount() != null) {
+                                            AccountDTO accountDTO = new AccountDTO();
+                                            accountDTO.setId(line.getAccount().getId());
+                                            accountDTO.setAccount(line.getAccount().getAccount());
+                                            accountDTO.setLabel(line.getAccount().getLabel());
+                                            // Add type if Account entity has getType() method
+                                            // accountDTO.setType(line.getAccount().getType());
+                                            lineDTO.setAccount(accountDTO);
+                                        }
+
+                                        // Add currency information if available
+                                        lineDTO.setOriginalDebit(line.getOriginalDebit());
+                                        lineDTO.setOriginalCredit(line.getOriginalCredit());
+                                        lineDTO.setOriginalCurrency(line.getOriginalCurrency());
+                                        lineDTO.setConvertedDebit(line.getConvertedDebit());
+                                        lineDTO.setConvertedCredit(line.getConvertedCredit());
+                                        lineDTO.setConvertedCurrency(line.getConvertedCurrency());
+                                        lineDTO.setExchangeRate(line.getExchangeRate());
+                                        lineDTO.setExchangeRateDate(line.getExchangeRateDate());
+                                        lineDTO.setUsdDebit(line.getUsdDebit());
+                                        lineDTO.setUsdCredit(line.getUsdCredit());
+
+                                        return lineDTO;
+                                    })
+                                    .collect(Collectors.toList());
+                            dto2.setLines(linesDTOs);
+                        }
+
+                        return dto2;
+                    })
+                    .collect(Collectors.toList());
+            dto.setEcritures(ecrituresDTOs);
+        }
+    }
+
+    @PatchMapping("/{id}/force-not-duplicate")
+    public ResponseEntity<Piece> forceNotDuplicate(@PathVariable Long id) {
+        Piece updated = pieceService.forcePieceNotDuplicate(id);
+        return ResponseEntity.ok(updated);
+    }
+
+
 }

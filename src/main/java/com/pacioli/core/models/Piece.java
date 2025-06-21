@@ -43,6 +43,9 @@ public class Piece {
     // Duplicate detection field
     @Column(name = "is_duplicate", nullable = false)
     private Boolean isDuplicate = false;
+    // Force as a not duplication
+    @Column(name = "is_forced", nullable = false)
+    private Boolean isForced = false;
 
     // Reference to original piece if this is a duplicate
     @ManyToOne

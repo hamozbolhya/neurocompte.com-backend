@@ -565,6 +565,7 @@ public class PieceServiceImpl implements PieceService {
             log.info("✅ Created new FactureData for piece {}", piece.getId());
         }
     }
+
     // Helper method to parse dates from various formats
     private LocalDate parseDate(String dateStr) {
         try {
@@ -787,6 +788,7 @@ public class PieceServiceImpl implements PieceService {
             }
         }
     }
+
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
         try {
             JsonNode rootNode = objectMapper.readTree(pieceData);
@@ -886,6 +888,7 @@ public class PieceServiceImpl implements PieceService {
                 .max()
                 .orElse(0.0);
     }
+
     /**
      * Deserializes the Piece from the provided data.
      */
@@ -1039,11 +1042,6 @@ public class PieceServiceImpl implements PieceService {
     }
 
     @Override
-    public List<Piece> getAllPieces() {
-        return pieceRepository.findAll();
-    }
-
-    @Override
     @Transactional
     public void deletePiece(Long id) {
         pieceRepository.deleteById(id);
@@ -1190,5 +1188,41 @@ public class PieceServiceImpl implements PieceService {
         return baos.toByteArray();
     }
 
-}
 
+    @Override
+    @Transactional
+    public Piece forcePieceNotDuplicate(Long pieceId) {
+        Piece piece = pieceRepository.findById(pieceId)
+                .orElseThrow(() -> new IllegalArgumentException("Piece not found with ID: " + pieceId));
+        // ✅ Vérifie que la pièce est bien en statut DUPLICATE
+        if (!Boolean.TRUE.equals(piece.getIsDuplicate()) || piece.getStatus() != PieceStatus.DUPLICATE) {
+            throw new IllegalStateException("Seules les pièces dupliquées peuvent être forcées à être considérées comme non dupliquées.");
+        }
+        // ✅ Set force flag
+        piece.setIsForced(true);
+        piece.setIsDuplicate(false);
+        // ✅ Reset data fields
+        piece.setAmount(null);
+        piece.setStatus(PieceStatus.UPLOADED);
+        piece.setAiAmount(null);
+        piece.setAiCurrency(null);
+        piece.setExchangeRate(null);
+        piece.setConvertedCurrency(null);
+        piece.setExchangeRateDate(null);
+        piece.setExchangeRateUpdated(false);
+        // ✅ Delete factureData if exists
+        if (piece.getFactureData() != null) {
+            factureDataRepository.delete(piece.getFactureData());
+            piece.setFactureData(null);
+        }
+        // ✅ Delete ecritures and lines
+        if (piece.getEcritures() != null) {
+            for (Ecriture ecriture : piece.getEcritures()) {
+                lineRepository.deleteAll(ecriture.getLines());
+            }
+            ecritureRepository.deleteAll(piece.getEcritures());
+            piece.getEcritures().clear(); // ✅ vide la liste proprement
+        }
+        return pieceRepository.save(piece);
+    }
+}

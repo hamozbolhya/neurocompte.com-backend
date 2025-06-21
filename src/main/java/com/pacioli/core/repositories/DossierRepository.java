@@ -13,10 +13,8 @@ import java.util.Optional;
 
 @Repository
 public interface DossierRepository extends JpaRepository<Dossier, Long> {
-    boolean existsByName(String name);
     Optional<Dossier> findByName(String name);
 
-    // For single Dossier fetch - Updated to include currency information AND decimal precision
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
             "d.id, " +
             "d.name, " +
@@ -29,13 +27,10 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
             "d.country.code, " +
             "d.country.currency.code, " +
             "d.country.currency.name, " +
-            "d.decimalPrecision) " +  // ADD THIS LINE
+            "d.decimalPrecision) " +
             "FROM Dossier d WHERE d.id = :id")
     Optional<DossierDTO> findDossierById(@Param("id") Long id);
 
-    Page<Dossier> findByCabinetId(Long cabinetId, Pageable pageable);
-
-    // For paginated results - Updated to include currency information AND decimal precision
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
             "d.id, " +
             "d.name, " +

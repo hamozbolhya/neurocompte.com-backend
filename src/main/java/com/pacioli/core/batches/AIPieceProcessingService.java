@@ -128,7 +128,6 @@ public class AIPieceProcessingService {
     }
 
     // Also update the attemptAIProcessing method to always notify
-    // Also update the attemptAIProcessing method to always notify
     private void attemptAIProcessing(Piece piece, int attempt) throws InterruptedException {
         // Reload piece from DB to get current status
         Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
@@ -548,7 +547,13 @@ public class AIPieceProcessingService {
             pieceDTO.setEcritures(buildEcritures(convertedEcrituresNode));
             pieceDTO.setDossierId(piece.getDossier().getId());
             pieceDTO.setDossierName(piece.getDossier().getName());
+            pieceDTO.setIsDuplicate(piece.getIsDuplicate());
+            pieceDTO.setIsForced(piece.getIsForced());
 
+            if (piece.getOriginalPiece() != null) {
+                pieceDTO.setOriginalPieceId(piece.getOriginalPiece().getId());
+                pieceDTO.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+            }
             // Set AI-related fields
             pieceDTO.setAiCurrency(piece.getAiCurrency());
             pieceDTO.setAiAmount(piece.getAiAmount());

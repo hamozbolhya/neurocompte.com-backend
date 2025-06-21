@@ -955,7 +955,7 @@ public class PieceServiceImpl implements PieceService {
                             dto.setAmount(piece.getAmount());
                             dto.setDossierId(piece.getDossier().getId());
                             dto.setDossierName(piece.getDossier().getName());
-
+                            dto.setIsForced(piece.getIsForced());
                             // Add duplicate information to DTO
                             dto.setIsDuplicate(piece.getIsDuplicate());
                             if (piece.getOriginalPiece() != null) {

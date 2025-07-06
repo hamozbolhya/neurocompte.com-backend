@@ -191,19 +191,26 @@ public class PieceServiceImpl implements PieceService {
 
         log.info("Has PDF extension: {}, Has PDF content type: {}", hasExtension, hasContentType);
 
-        // Also try to peek at first few bytes if content type and extension checks fail
+        // Only check header if both filename and content-type checks fail
         if (!hasExtension && !hasContentType) {
             try {
+                // Use a BufferedInputStream to support mark/reset
+                InputStream inputStream = file.getInputStream();
+                if (!inputStream.markSupported()) {
+                    inputStream = new BufferedInputStream(inputStream);
+                }
+
+                inputStream.mark(5); // Mark the position
                 byte[] header = new byte[5];
-                file.getInputStream().read(header);
-                String headerStr = new String(header);
-                boolean hasPdfHeader = headerStr.startsWith("%PDF-");
-                log.info("Has PDF header: {}", hasPdfHeader);
+                int bytesRead = inputStream.read(header);
+                inputStream.reset(); // Reset to the marked position
 
-                // Reset input stream for future readers
-                file.getInputStream().reset();
-
-                return hasPdfHeader;
+                if (bytesRead >= 5) {
+                    String headerStr = new String(header);
+                    boolean hasPdfHeader = headerStr.startsWith("%PDF-");
+                    log.info("Has PDF header: {}", hasPdfHeader);
+                    return hasPdfHeader;
+                }
             } catch (Exception e) {
                 log.warn("Error checking file header: {}", e.getMessage());
             }
@@ -627,16 +634,12 @@ public class PieceServiceImpl implements PieceService {
         }
     }
 
-
-// REPLACE your existing saveEcrituresForPiece method with this:
-
     @Transactional
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         // Fetch the Dossier explicitly
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         log.info("Fetched Dossier ID: {}", dossier.getId());
 
         // Parse original AI response to get exact string values
@@ -653,8 +656,7 @@ public class PieceServiceImpl implements PieceService {
         }
 
         // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
-                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
+        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream().collect(Collectors.toMap(Account::getAccount, Function.identity()));
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
         List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -664,17 +666,13 @@ public class PieceServiceImpl implements PieceService {
             ecriture.setPiece(piece);
 
             // Find or create Journal (existing logic)
-            Journal journal = journals.stream()
-                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                        Journal newJournal = new Journal(ecriture.getJournal().getName(),
-                                ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
-                        Journal savedJournal = journalRepository.save(newJournal);
-                        journals.add(savedJournal);
-                        return savedJournal;
-                    });
+            Journal journal = journals.stream().filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName())).findFirst().orElseGet(() -> {
+                log.info("Creating new Journal: {}", ecriture.getJournal().getName());
+                Journal newJournal = new Journal(ecriture.getJournal().getName(), ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
+                Journal savedJournal = journalRepository.save(newJournal);
+                journals.add(savedJournal);
+                return savedJournal;
+            });
             ecriture.setJournal(journal);
 
             try {
@@ -735,47 +733,9 @@ public class PieceServiceImpl implements PieceService {
                         }
                     }
 
-                    // Handle account creation with existing logic (no changes needed here)
+                    // FIXED: Handle account creation with proper duplicate prevention
                     String accountNumber = line.getAccount().getAccount();
-                    Account account = accountMap.get(accountNumber);
-
-                    if (account == null) {
-                        account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
-
-                        if (account == null) {
-                            try {
-                                Account newAccount = new Account();
-                                newAccount.setAccount(accountNumber);
-                                newAccount.setLabel(line.getAccount().getLabel());
-                                newAccount.setDossier(dossier);
-                                newAccount.setJournal(journal);
-                                newAccount.setHasEntries(true);
-
-                                log.info("Creating new Account: {}", newAccount);
-                                account = accountRepository.save(newAccount);
-                                accountMap.put(accountNumber, account);
-                            } catch (DataIntegrityViolationException e) {
-                                log.info("Account creation conflict detected. Retrying fetch for account: {}", accountNumber);
-
-                                try {
-                                    Thread.sleep(50);
-                                } catch (InterruptedException ie) {
-                                    Thread.currentThread().interrupt();
-                                }
-
-                                account = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
-
-                                if (account == null) {
-                                    throw new RuntimeException("Failed to find or create account after concurrent creation: " + accountNumber, e);
-                                }
-
-                                accountMap.put(accountNumber, account);
-                            }
-                        } else {
-                            accountMap.put(accountNumber, account);
-                        }
-                    }
-
+                    Account account = findOrCreateAccount(accountNumber, dossier, journal, line.getAccount().getLabel(), accountMap);
                     line.setAccount(account);
                 }
 
@@ -787,6 +747,72 @@ public class PieceServiceImpl implements PieceService {
                 throw e;
             }
         }
+    }
+
+    /**
+     * Thread-safe method to find or create an account
+     */
+    private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal, String accountLabel, Map<String, Account> accountMap) {
+        // First check in-memory cache
+        Account account = accountMap.get(accountNumber);
+        if (account != null) {
+            return account;
+        }
+
+        // Try to find existing account in database with proper Optional handling
+        Optional<Account> existingAccount = Optional.ofNullable(accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId()));
+        if (existingAccount.isPresent()) {
+            account = existingAccount.get();
+            accountMap.put(accountNumber, account);
+            return account;
+        }
+
+        // Account doesn't exist, try to create it with retry logic for concurrent scenarios
+        int maxRetries = 3;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                Account newAccount = new Account();
+                newAccount.setAccount(accountNumber);
+                newAccount.setLabel(accountLabel);
+                newAccount.setDossier(dossier);
+                newAccount.setJournal(journal);
+                newAccount.setHasEntries(true);
+
+                log.info("Creating new Account (attempt {}): {}", attempt, accountNumber);
+                account = accountRepository.save(newAccount);
+                accountMap.put(accountNumber, account);
+                return account;
+
+            } catch (DataIntegrityViolationException e) {
+                log.warn("Account creation conflict detected on attempt {} for account: {}", attempt, accountNumber);
+
+                if (attempt == maxRetries) {
+                    log.error("Failed to create account after {} attempts: {}", maxRetries, accountNumber);
+                    throw new RuntimeException("Failed to create account after " + maxRetries + " attempts: " + accountNumber, e);
+                }
+
+                // Wait a bit and retry to fetch the account that might have been created by another thread
+                try {
+                    Thread.sleep(100 + (attempt * 50)); // Exponential backoff
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Thread interrupted while waiting to retry account creation", ie);
+                }
+
+                // Try to fetch the account again - it might have been created by another thread
+                Optional<Account> retryAccount = Optional.ofNullable(accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId()));
+                if (retryAccount.isPresent()) {
+                    account = retryAccount.get();
+                    accountMap.put(accountNumber, account);
+                    return account;
+                }
+
+                // If we still can't find it, continue to next attempt
+                log.warn("Account still not found after conflict, retrying creation...");
+            }
+        }
+
+        throw new RuntimeException("Failed to find or create account: " + accountNumber);
     }
 
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
@@ -882,11 +908,7 @@ public class PieceServiceImpl implements PieceService {
         // Fallback to existing logic
         List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
 
-        return ecritures.stream()
-                .flatMap(e -> e.getLines().stream())
-                .flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit()))
-                .max()
-                .orElse(0.0);
+        return ecritures.stream().flatMap(e -> e.getLines().stream()).flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit())).max().orElse(0.0);
     }
 
     /**
@@ -942,82 +964,78 @@ public class PieceServiceImpl implements PieceService {
                 }
             });
 
-            List<PieceDTO> dtos = pieces.stream()
-                    .map(piece -> {
-                        try {
-                            PieceDTO dto = new PieceDTO();
-                            dto.setId(piece.getId());
-                            dto.setFilename(piece.getFilename());
-                            dto.setOriginalFileName(piece.getOriginalFileName());
-                            dto.setType(piece.getType());
-                            dto.setStatus(piece.getStatus());
-                            dto.setUploadDate(piece.getUploadDate());
-                            dto.setAmount(piece.getAmount());
-                            dto.setDossierId(piece.getDossier().getId());
-                            dto.setDossierName(piece.getDossier().getName());
-                            dto.setIsForced(piece.getIsForced());
-                            // Add duplicate information to DTO
-                            dto.setIsDuplicate(piece.getIsDuplicate());
-                            if (piece.getOriginalPiece() != null) {
-                                dto.setOriginalPieceId(piece.getOriginalPiece().getId());
-                                dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+            List<PieceDTO> dtos = pieces.stream().map(piece -> {
+                try {
+                    PieceDTO dto = new PieceDTO();
+                    dto.setId(piece.getId());
+                    dto.setFilename(piece.getFilename());
+                    dto.setOriginalFileName(piece.getOriginalFileName());
+                    dto.setType(piece.getType());
+                    dto.setStatus(piece.getStatus());
+                    dto.setUploadDate(piece.getUploadDate());
+                    dto.setAmount(piece.getAmount());
+                    dto.setDossierId(piece.getDossier().getId());
+                    dto.setDossierName(piece.getDossier().getName());
+                    dto.setIsForced(piece.getIsForced());
+                    // Add duplicate information to DTO
+                    dto.setIsDuplicate(piece.getIsDuplicate());
+                    if (piece.getOriginalPiece() != null) {
+                        dto.setOriginalPieceId(piece.getOriginalPiece().getId());
+                        dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+                    }
+
+                    // Add AI currency and amount info
+                    dto.setAiCurrency(piece.getAiCurrency());
+                    dto.setAiAmount(piece.getAiAmount());
+
+                    if (piece.getFactureData() != null) {
+                        FactureDataDTO factureDataDTO = new FactureDataDTO();
+                        factureDataDTO.setInvoiceNumber(piece.getFactureData().getInvoiceNumber());
+                        factureDataDTO.setTotalTVA(piece.getFactureData().getTotalTVA());
+                        factureDataDTO.setTaxRate(piece.getFactureData().getTaxRate());
+                        factureDataDTO.setInvoiceDate(piece.getFactureData().getInvoiceDate());
+
+                        // Add currency information
+                        factureDataDTO.setDevise(piece.getFactureData().getDevise());
+                        factureDataDTO.setOriginalCurrency(piece.getFactureData().getOriginalCurrency());
+                        factureDataDTO.setConvertedCurrency(piece.getFactureData().getConvertedCurrency());
+                        factureDataDTO.setExchangeRate(piece.getFactureData().getExchangeRate());
+
+                        dto.setFactureData(factureDataDTO);
+                    }
+
+                    if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
+                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream().map(ecriture -> {
+                            EcrituresDTO2 dto2 = new EcrituresDTO2();
+                            dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
+                            dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+
+                            // Add journal information
+                            if (ecriture.getJournal() != null) {
+                                JournalDTO journalDTO = new JournalDTO();
+                                journalDTO.setName(ecriture.getJournal().getName());
+                                journalDTO.setType(ecriture.getJournal().getType());
+                                dto2.setJournal(journalDTO);
                             }
 
-                            // Add AI currency and amount info
-                            dto.setAiCurrency(piece.getAiCurrency());
-                            dto.setAiAmount(piece.getAiAmount());
+                            return dto2;
+                        }).collect(Collectors.toList());
+                        dto.setEcritures(ecrituresDTOs);
+                    }
 
-                            if (piece.getFactureData() != null) {
-                                FactureDataDTO factureDataDTO = new FactureDataDTO();
-                                factureDataDTO.setInvoiceNumber(piece.getFactureData().getInvoiceNumber());
-                                factureDataDTO.setTotalTVA(piece.getFactureData().getTotalTVA());
-                                factureDataDTO.setTaxRate(piece.getFactureData().getTaxRate());
-                                factureDataDTO.setInvoiceDate(piece.getFactureData().getInvoiceDate());
-
-                                // Add currency information
-                                factureDataDTO.setDevise(piece.getFactureData().getDevise());
-                                factureDataDTO.setOriginalCurrency(piece.getFactureData().getOriginalCurrency());
-                                factureDataDTO.setConvertedCurrency(piece.getFactureData().getConvertedCurrency());
-                                factureDataDTO.setExchangeRate(piece.getFactureData().getExchangeRate());
-
-                                dto.setFactureData(factureDataDTO);
-                            }
-
-                            if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
-                                List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
-                                        .map(ecriture -> {
-                                            EcrituresDTO2 dto2 = new EcrituresDTO2();
-                                            dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
-                                            dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
-
-                                            // Add journal information
-                                            if (ecriture.getJournal() != null) {
-                                                JournalDTO journalDTO = new JournalDTO();
-                                                journalDTO.setName(ecriture.getJournal().getName());
-                                                journalDTO.setType(ecriture.getJournal().getType());
-                                                dto2.setJournal(journalDTO);
-                                            }
-
-                                            return dto2;
-                                        })
-                                        .collect(Collectors.toList());
-                                dto.setEcritures(ecrituresDTOs);
-                            }
-
-                            return dto;
-                        } catch (Exception e) {
-                            log.error("Error mapping piece {} to DTO: {}", piece.getId(), e.getMessage());
-                            // Return minimal DTO with error info
-                            PieceDTO errorDto = new PieceDTO();
-                            errorDto.setId(piece.getId());
-                            errorDto.setFilename(piece.getFilename());
-                            errorDto.setOriginalFileName(piece.getOriginalFileName());
-                            errorDto.setStatus(piece.getStatus());
-                            errorDto.setDossierId(piece.getDossier().getId());
-                            return errorDto;
-                        }
-                    })
-                    .collect(Collectors.toList());
+                    return dto;
+                } catch (Exception e) {
+                    log.error("Error mapping piece {} to DTO: {}", piece.getId(), e.getMessage());
+                    // Return minimal DTO with error info
+                    PieceDTO errorDto = new PieceDTO();
+                    errorDto.setId(piece.getId());
+                    errorDto.setFilename(piece.getFilename());
+                    errorDto.setOriginalFileName(piece.getOriginalFileName());
+                    errorDto.setStatus(piece.getStatus());
+                    errorDto.setDossierId(piece.getDossier().getId());
+                    return errorDto;
+                }
+            }).collect(Collectors.toList());
 
             // Send WebSocket message
             messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, dtos);
@@ -1172,9 +1190,7 @@ public class PieceServiceImpl implements PieceService {
                 byte[] fileContent = Files.readAllBytes(filePath);
 
                 // Create entry name
-                String entryName = piece.getIsDuplicate() ?
-                        "duplicate_" + piece.getOriginalFileName() :
-                        "original_" + piece.getOriginalFileName();
+                String entryName = piece.getIsDuplicate() ? "duplicate_" + piece.getOriginalFileName() : "original_" + piece.getOriginalFileName();
 
                 // Add to ZIP
                 ZipEntry entry = new ZipEntry(entryName);
@@ -1192,8 +1208,7 @@ public class PieceServiceImpl implements PieceService {
     @Override
     @Transactional
     public Piece forcePieceNotDuplicate(Long pieceId) {
-        Piece piece = pieceRepository.findById(pieceId)
-                .orElseThrow(() -> new IllegalArgumentException("Piece not found with ID: " + pieceId));
+        Piece piece = pieceRepository.findById(pieceId).orElseThrow(() -> new IllegalArgumentException("Piece not found with ID: " + pieceId));
         // ✅ Vérifie que la pièce est bien en statut DUPLICATE
         if (!Boolean.TRUE.equals(piece.getIsDuplicate()) || piece.getStatus() != PieceStatus.DUPLICATE) {
             throw new IllegalStateException("Seules les pièces dupliquées peuvent être forcées à être considérées comme non dupliquées.");

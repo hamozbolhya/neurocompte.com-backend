@@ -2,6 +2,7 @@ package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.DTO.UpdateUserInfoRequest;
 import com.pacioli.core.DTO.UserInfo;
+import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Role;
 import com.pacioli.core.models.User;
 import com.pacioli.core.repositories.RoleRepository;
@@ -31,6 +32,18 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserInfo createUser(UserInfo userInfo) {
+        // Check if username already exists
+        Optional<User> existingUserByUsername = userRepository.findByUsername(userInfo.getUsername());
+        if (existingUserByUsername.isPresent()) {
+            throw new IllegalArgumentException("Ce nom d'utilisateur est déjà utilisé");
+        }
+
+        // Check if email already exists
+        Optional<User> existingUserByEmail = userRepository.findByEmail(userInfo.getEmail());
+        if (existingUserByEmail.isPresent()) {
+            throw new IllegalArgumentException("Cette adresse email est déjà utilisée");
+        }
+
         // Encrypt the password using BCrypt
         String encodedPassword = passwordEncoder.encode(userInfo.getPassword());
 
@@ -38,9 +51,16 @@ public class UserServiceImpl implements UserService {
         User newUser = new User();
         newUser.setUsername(userInfo.getUsername());
         newUser.setEmail(userInfo.getEmail());
-        newUser.setPassword(encodedPassword); // Save the encoded password
-        newUser.setActive(true); // Default to active
-        newUser.setRoles(new HashSet<>()); // Initialize empty roles
+        newUser.setPassword(encodedPassword);
+        newUser.setActive(true);
+        newUser.setRoles(new HashSet<>());
+
+        // Set the cabinet if cabinetId is provided
+        if (userInfo.getCabinetId() != null) {
+            Cabinet cabinet = new Cabinet();
+            cabinet.setId(userInfo.getCabinetId());
+            newUser.setCabinet(cabinet);
+        }
 
         // Retrieve the roles by roleIds and assign them to the user
         if (userInfo.getRoleIds() != null && !userInfo.getRoleIds().isEmpty()) {
@@ -65,9 +85,6 @@ public class UserServiceImpl implements UserService {
 
         return savedUserInfo;
     }
-
-
-
 
     @Override
     public UserInfo assignRolesToUser(String userId, List<String> roleIds) {

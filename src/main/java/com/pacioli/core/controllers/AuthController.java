@@ -124,8 +124,4 @@ public class AuthController {
 
         return "Mot de passe changé avec succès.";
     }
-
-
-
-
 }

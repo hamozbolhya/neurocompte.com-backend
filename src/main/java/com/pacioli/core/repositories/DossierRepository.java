@@ -27,7 +27,8 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
             "d.country.code, " +
             "d.country.currency.code, " +
             "d.country.currency.name, " +
-            "d.decimalPrecision) " +
+            "d.decimalPrecision, " +
+            "d.activity) " +
             "FROM Dossier d WHERE d.id = :id")
     Optional<DossierDTO> findDossierById(@Param("id") Long id);
 
@@ -43,7 +44,8 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
             "d.country.code, " +
             "d.country.currency.code, " +
             "d.country.currency.name, " +
-            "d.decimalPrecision) " +  // ADD THIS LINE
+            "d.decimalPrecision, " +
+            "d.activity) " +
             "FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Page<DossierDTO> findDossierDTOsByCabinetId(@Param("cabinetId") Long cabinetId, Pageable pageable);
 

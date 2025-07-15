@@ -51,6 +51,7 @@ public class Dossier {
     private String city;
     private String phone;
     private String email;
+    private String activity;
 
     // Replace the country string fields with a proper ManyToOne relationship
     @ManyToOne

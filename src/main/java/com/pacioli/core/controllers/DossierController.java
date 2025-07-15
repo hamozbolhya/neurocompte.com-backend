@@ -99,7 +99,7 @@ public class DossierController {
         dossier.setCity(dto.getCity());
         dossier.setPhone(dto.getPhone());
         dossier.setEmail(dto.getEmail());
-
+        dossier.setActivity(dto.getActivity());
         // Set decimal precision with validation
         if (dto.getDecimalPrecision() != null) {
             // Validate range (0-10)
@@ -139,6 +139,7 @@ public class DossierController {
         dto.setCity(entity.getCity());
         dto.setPhone(entity.getPhone());
         dto.setEmail(entity.getEmail());
+        dto.setActivity(entity.getActivity());
 
         // Set decimal precision
         dto.setDecimalPrecision(entity.getDecimalPrecision());
@@ -280,6 +281,31 @@ public class DossierController {
             log.error("[{}] Unexpected error during dossier deletion: {}", requestId, ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
+        }
+    }
+
+    // Add this new endpoint to DossierController
+    @PutMapping("/{dossierId}/activity")
+    public ResponseEntity<DossierDTO> updateActivity(
+            @PathVariable Long dossierId,
+            @RequestBody Map<String, String> request) {
+
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Updating activity for dossier ID: {}", requestId, dossierId);
+
+        try {
+            String activity = request.get("activity");
+            DossierDTO updatedDossier = dossierService.updateActivity(dossierId, activity);
+            log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
+
+            return ResponseEntity.ok(updatedDossier);
+        } catch (RuntimeException ex) {
+            log.error("[{}] Error updating activity: {}", requestId, ex.getMessage());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        } catch (Exception ex) {
+            log.error("[{}] Unexpected error: {}", requestId, ex.getMessage(), ex);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Une erreur inattendue est survenue: " + ex.getMessage());
         }
     }
 }

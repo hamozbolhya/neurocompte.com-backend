@@ -17,6 +17,7 @@ public class DossierDTO {
     private String city;
     private String phone;
     private String email;
+    private String activity;
     private PaysDTO pays;
     private CabinetDTO cabinet;
     private List<Exercise> exercises = new ArrayList<>();
@@ -29,10 +30,9 @@ public class DossierDTO {
         private Long id;
     }
 
-    // Updated constructor for JPQL queries with decimal precision
     public DossierDTO(Long id, String name, String ICE, String address, String city, String phone, String email,
                       String countryName, String countryCode, String currencyCode, String currencyName,
-                      Integer decimalPrecision) {
+                      Integer decimalPrecision, String activity) {
         this.id = id;
         this.name = name;
         this.ICE = ICE;
@@ -40,6 +40,7 @@ public class DossierDTO {
         this.city = city;
         this.phone = phone;
         this.email = email;
+        this.activity = activity;
         this.decimalPrecision = decimalPrecision != null ? decimalPrecision : 2;
 
         // Create pays object with country and currency info
@@ -63,10 +64,10 @@ public class DossierDTO {
         this.cabinet = new CabinetDTO();
     }
 
-    // Backward compatibility constructor (without decimal precision)
+    // Backward compatibility constructor (without decimal precision and activity)
     public DossierDTO(Long id, String name, String ICE, String address, String city, String phone, String email,
                       String countryName, String countryCode, String currencyCode, String currencyName) {
-        this(id, name, ICE, address, city, phone, email, countryName, countryCode, currencyCode, currencyName, 2);
+        this(id, name, ICE, address, city, phone, email, countryName, countryCode, currencyCode, currencyName, 2, null);
     }
 
     // Default constructor

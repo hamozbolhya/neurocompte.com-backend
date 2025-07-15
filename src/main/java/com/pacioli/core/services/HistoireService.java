@@ -10,14 +10,14 @@ public interface HistoireService {
     /**
      * Upload a historical file to the AI service
      *
-     * @param fileName The name with which the file should be stored
+     * @param dossierId The dossier ID
      * @param file The file to upload
+     * @param fileType The type of file ("balance" or "fec")
      * @return Success message if upload is successful
      * @throws IllegalArgumentException if file validation fails
      * @throws RuntimeException if upload fails
      */
-    String uploadHistoriqueFile(String fileName, MultipartFile file);
-
+    String uploadHistoriqueFile(String dossierId, MultipartFile file, String fileType);
     /**
      * Validate if the uploaded file meets the requirements
      *

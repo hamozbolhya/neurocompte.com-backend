@@ -44,12 +44,13 @@ public class HistoireServiceImpl implements HistoireService {
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
     @Override
-    public String uploadHistoriqueFile(String fileName, MultipartFile file) {
+    public String uploadHistoriqueFile(String dossierId, MultipartFile file, String fileType) {
         String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Starting AI file upload for: {}", requestId, fileName);
+        log.info("[{}] Starting AI file upload for dossier: {} with file type: {}", requestId, dossierId, fileType);
 
         try {
             validateFile(file);
+            validateFileType(fileType);
 
             // Ensure base URL exists and clean it
             String baseUrl = histoireAiProperties.getBaseUrl();
@@ -58,19 +59,19 @@ public class HistoireServiceImpl implements HistoireService {
             }
             baseUrl = baseUrl.replaceAll("/+$", "");
 
-            // Split folder and filename
-            String[] parts = fileName.split("/", 2);
-            if (parts.length != 2) {
-                throw new IllegalArgumentException("Le nom du fichier doit contenir un dossier et un nom de fichier, séparés par un '/' ");
+            // Determine filename based on file type
+            String fileName;
+            if ("balance".equals(fileType)) {
+                fileName = "balance.csv";
+            } else if ("fec".equals(fileType)) {
+                fileName = "fec.csv";
+            } else {
+                throw new IllegalArgumentException("Type de fichier invalide. Utilisez 'balance' ou 'fec'");
             }
 
-            String folder = parts[0];
-            // Replace the original filename with "balance.csv"
-            String nameOnly = "balance.csv";
-
             // Compose final URL manually using %2F
-            String finalUrl = baseUrl + "/" + folder + "%2F" + nameOnly;
-            log.info("[{}] Final AI URL: {}, name of file {}", requestId, finalUrl, nameOnly);
+            String finalUrl = baseUrl + "/" + dossierId + "%2F" + fileName;
+            log.info("[{}] Final AI URL: {}, filename: {}", requestId, finalUrl, fileName);
 
             // Setup connection
             URL url = new URL(finalUrl);
@@ -111,6 +112,16 @@ public class HistoireServiceImpl implements HistoireService {
         }
     }
 
+    // Add this validation method
+    private void validateFileType(String fileType) {
+        if (fileType == null || fileType.trim().isEmpty()) {
+            throw new IllegalArgumentException("Le type de fichier est requis");
+        }
+
+        if (!"balance".equals(fileType) && !"fec".equals(fileType)) {
+            throw new IllegalArgumentException("Type de fichier invalide. Les types acceptés sont: 'balance' ou 'fec'");
+        }
+    }
 
     @Override
     public void validateFile(MultipartFile file) {

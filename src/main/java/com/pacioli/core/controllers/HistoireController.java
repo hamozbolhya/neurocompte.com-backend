@@ -29,16 +29,18 @@ public class HistoireController {
     @PutMapping(value = "/**", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> uploadHistorique(
             @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "fileType", required = true) String fileType,
             HttpServletRequest request) {
 
         String requestId = UUID.randomUUID().toString();
 
         // Extract the filename from the request URI
         String requestUri = request.getRequestURI();
-        String fileName = requestUri.substring("/api/histoire/".length());
+        String pathAfterApi = requestUri.substring("/api/histoire/".length());
+        String dossierId = pathAfterApi.split("/")[0];
 
-        log.info("[{}] Request to upload historical file: {} (extracted path: {})",
-                requestId, file.getOriginalFilename(), fileName);
+        log.info("[{}] Request to upload historical file: {} with type: {} for dossier: {}",
+                requestId, file.getOriginalFilename(), fileType, dossierId);
 
         // Log request details for debugging
         log.debug("[{}] Full request URI: {}", requestId, requestUri);
@@ -47,10 +49,9 @@ public class HistoireController {
 
         try {
             // Upload file through service
-            String result = histoireService.uploadHistoriqueFile(fileName, file);
+            String result = histoireService.uploadHistoriqueFile(dossierId, file, fileType);
             log.info("[{}] File upload completed successfully", requestId);
 
-            // Return successful response
             return ResponseEntity.ok(result);
 
         } catch (IllegalArgumentException e) {

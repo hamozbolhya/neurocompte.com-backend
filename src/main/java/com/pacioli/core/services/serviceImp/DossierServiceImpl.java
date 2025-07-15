@@ -420,4 +420,23 @@ public class DossierServiceImpl implements DossierService {
         dossierRepository.deleteById(dossierId);
         log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
     }
+
+    // Add this method to DossierServiceImpl
+    @Override
+    @Transactional
+    public DossierDTO updateActivity(Long dossierId, String activity) {
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Updating activity for dossier ID: {} to: {}", requestId, dossierId, activity);
+
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + dossierId));
+
+        dossier.setActivity(activity);
+        Dossier savedDossier = dossierRepository.save(dossier);
+
+        log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
+
+        // Convert to DTO and return (reuse existing conversion logic)
+        return getTheDossierById(dossierId);
+    }
 }

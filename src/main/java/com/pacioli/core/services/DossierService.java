@@ -30,4 +30,6 @@ public interface DossierService {
      * @param dossierId The ID of the dossier to delete
      */
     void deleteDossier(Long dossierId);
+    DossierDTO updateActivity(Long dossierId, String activity);
+
 }

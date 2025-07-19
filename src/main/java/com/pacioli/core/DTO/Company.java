@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Optional;
+
 /**
  * DTO for representing a company in the AI service
  */
@@ -29,4 +31,6 @@ public class Company {
      * Country code in ISO format (3 characters)
      */
     private String country;
+
+    private String activity;
 }

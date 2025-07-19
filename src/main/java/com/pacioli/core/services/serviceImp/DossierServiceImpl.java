@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -116,12 +117,13 @@ public class DossierServiceImpl implements DossierService {
         }
 
         // Call the AI Company API - use POST for new, PUT for existing
-        String countryCode = savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : "MAR";
+        String countryCode = savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : "NOT_FOUND";
 
         Company company = new Company();
         company.setId(savedDossier.getId());
         company.setName(savedDossier.getName());
         company.setCountry(countryCode);
+        company.setActivity(savedDossier.getActivity());
 
         try {
             if (isNewDossier) {

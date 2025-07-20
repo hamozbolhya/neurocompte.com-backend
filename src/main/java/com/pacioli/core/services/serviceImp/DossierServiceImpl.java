@@ -435,10 +435,25 @@ public class DossierServiceImpl implements DossierService {
 
         dossier.setActivity(activity);
         Dossier savedDossier = dossierRepository.save(dossier);
-
         log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
 
-        // Convert to DTO and return (reuse existing conversion logic)
+        // === NEW: Update AI with the modified company data ===
+        try {
+            Company company = new Company();
+            company.setId(savedDossier.getId());
+            company.setName(savedDossier.getName());
+            company.setCountry(savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : null);
+            company.setActivity(savedDossier.getActivity());
+
+            Company updatedCompany = companyAiService.updateCompany(savedDossier.getId(), company);
+            log.info("[{}] Company AI updated successfully for dossier ID: {}, company data {}", requestId, dossierId, company);
+        } catch (Exception ex) {
+            log.warn("[{}] Failed to update AI service for dossier ID: {}: {}", requestId, dossierId, ex.getMessage());
+            // Continue gracefully – do not block DB update due to AI service failure
+        }
+
+        // Return the updated DTO
         return getTheDossierById(dossierId);
     }
+
 }

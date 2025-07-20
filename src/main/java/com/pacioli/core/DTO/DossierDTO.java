@@ -1,6 +1,7 @@
 package com.pacioli.core.DTO;
 
 import com.pacioli.core.models.Exercise;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -18,6 +19,7 @@ public class DossierDTO {
     private String phone;
     private String email;
     private String activity;
+    @NotNull(message = "Le pays est requis")
     private PaysDTO pays;
     private CabinetDTO cabinet;
     private List<Exercise> exercises = new ArrayList<>();

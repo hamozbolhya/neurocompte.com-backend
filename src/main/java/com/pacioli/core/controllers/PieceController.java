@@ -60,9 +60,6 @@ public class PieceController {
         return ResponseEntity.ok(savedPiece);
     }
 
-    /**
-     * Endpoint to save Ecritures and Facture Data for a given Piece.
-     */
     @PostMapping("/save-ecritures-and-facture")
     public ResponseEntity<Piece> saveEcrituresAndFacture(
             @RequestBody String pieceData,

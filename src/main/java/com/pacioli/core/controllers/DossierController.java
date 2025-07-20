@@ -38,13 +38,6 @@ public class DossierController {
         this.dossierService = dossierService;
     }
 
-    // Endpoint to add a new dossier
-
-    /**
-     * Endpoint to create a new dossier
-     * If the Company AI service returns an error, the transaction will be rolled back and
-     * the error will be propagated to the client
-     */
     @Validated
     @PostMapping
     public ResponseEntity<DossierDTO> createDossier(@Valid @RequestBody DossierRequest request) {
@@ -53,8 +46,7 @@ public class DossierController {
 
         try {
             // Validate request
-            if (request.getDossier() == null || request.getDossier().getCabinet() == null
-                    || request.getDossier().getCabinet().getId() == null) {
+            if (request.getDossier() == null || request.getDossier().getCabinet() == null || request.getDossier().getCabinet().getId() == null) {
                 log.error("[{}] Validation failed: Cabinet ID must not be null", requestId);
                 throw new IllegalArgumentException("Cabinet ID must not be null");
             }
@@ -65,6 +57,11 @@ public class DossierController {
             // Convert DTO to entity
             Dossier dossierEntity = convertToEntity(request.getDossier());
 
+           // ✅ Add this country validation here
+            if (dossierEntity.getCountry() == null || dossierEntity.getCountry().getCode() == null || dossierEntity.getCountry().getCode().isBlank()) {
+                log.error("[{}] Validation failed: Country is required", requestId);
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le pays est requis pour créer un dossier.");
+            }
             // Create dossier
             Dossier createdDossier = dossierService.createDossier(dossierEntity, request.getExercises());
             log.info("[{}] Dossier created successfully with ID: {}", requestId, createdDossier.getId());
@@ -75,8 +72,7 @@ public class DossierController {
         } catch (CompanyAiException e) {
             // Company AI service error - propagate to client with appropriate status code
             log.error("[{}] Company AI service error: {}", requestId, e.getMessage(), e);
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                    "Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
 
         } catch (IllegalArgumentException e) {
             // Validation errors
@@ -86,8 +82,7 @@ public class DossierController {
         } catch (Exception e) {
             // All other errors
             log.error("[{}] Unexpected error creating dossier: {}", requestId, e.getMessage(), e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Une erreur inattendue est survenue lors de la création du dossier: " + e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur inattendue est survenue lors de la création du dossier: " + e.getMessage(), e);
         }
     }
 
@@ -114,8 +109,7 @@ public class DossierController {
         // Set country relationship from pays object
         if (dto.getPays() != null && dto.getPays().getCode() != null) {
             // Find country by code
-            countryRepository.findByCode(dto.getPays().getCode())
-                    .ifPresent(dossier::setCountry);
+            countryRepository.findByCode(dto.getPays().getCode()).ifPresent(dossier::setCountry);
         }
 
         Cabinet cabinet = new Cabinet();
@@ -182,24 +176,17 @@ public class DossierController {
     }
 
     @GetMapping
-    public Page<Dossier> getDossiers(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "5") int size) {
+    public Page<Dossier> getDossiers(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "5") int size) {
         return dossierService.getDossiers(PageRequest.of(page, size));
     }
 
     @GetMapping("/cabinet/{cabinetId}")
-    public Page<DossierDTO> getDossiersByCabinetId(
-            @PathVariable Long cabinetId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "5") int size) {
+    public Page<DossierDTO> getDossiersByCabinetId(@PathVariable Long cabinetId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "5") int size) {
         return dossierService.getDossiersByCabinetId(cabinetId, PageRequest.of(page, size));
     }
 
     @PutMapping("/{dossierId}/exercises")
-    public ResponseEntity<Object> updateExercises(
-            @PathVariable Long dossierId,
-            @Valid @RequestBody List<Exercise> updatedExercises) {
+    public ResponseEntity<Object> updateExercises(@PathVariable Long dossierId, @Valid @RequestBody List<Exercise> updatedExercises) {
         try {
             log.info("Request Body: {}", updatedExercises);
 
@@ -216,15 +203,12 @@ public class DossierController {
         } catch (Exception ex) {
             log.error("Unexpected error: {}", ex.getMessage(), ex);
             // Return the unexpected error message in the response body
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ex.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
         }
     }
 
     @DeleteMapping("/{dossierId}/exercises")
-    public ResponseEntity<?> deleteExercises(
-            @PathVariable Long dossierId,
-            @RequestBody List<Long> exerciseIds) {
+    public ResponseEntity<?> deleteExercises(@PathVariable Long dossierId, @RequestBody List<Long> exerciseIds) {
         try {
             log.info("Delete Request for Dossier ID: {}, Exercises: {}", dossierId, exerciseIds);
 
@@ -241,15 +225,12 @@ public class DossierController {
         } catch (Exception ex) {
             log.error("Unexpected error during deletion: {}", ex.getMessage(), ex);
             // Return a general error response
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Une erreur inattendue est survenue : " + ex.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue : " + ex.getMessage());
         }
     }
 
     @PutMapping("/details/{id}")
-    public ResponseEntity<DossierDTO> updateDossier(
-            @PathVariable Long id,
-            @RequestBody DossierDTO dossierDetails) {
+    public ResponseEntity<DossierDTO> updateDossier(@PathVariable Long id, @RequestBody DossierDTO dossierDetails) {
 
         log.info("Updating dossier with ID: {} and details: {}", id, dossierDetails);
 
@@ -279,16 +260,13 @@ public class DossierController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
         } catch (Exception ex) {
             log.error("[{}] Unexpected error during dossier deletion: {}", requestId, ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
         }
     }
 
     // Add this new endpoint to DossierController
     @PutMapping("/{dossierId}/activity")
-    public ResponseEntity<DossierDTO> updateActivity(
-            @PathVariable Long dossierId,
-            @RequestBody Map<String, String> request) {
+    public ResponseEntity<DossierDTO> updateActivity(@PathVariable Long dossierId, @RequestBody Map<String, String> request) {
 
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Updating activity for dossier ID: {}", requestId, dossierId);
@@ -304,8 +282,7 @@ public class DossierController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         } catch (Exception ex) {
             log.error("[{}] Unexpected error: {}", requestId, ex.getMessage(), ex);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Une erreur inattendue est survenue: " + ex.getMessage());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur inattendue est survenue: " + ex.getMessage());
         }
     }
 }

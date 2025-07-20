@@ -11,6 +11,7 @@ import java.util.List;
 public interface DossierService {
 
     Dossier createDossier(Dossier dossier, List<Exercise> exercicesData);
+
     Dossier getDossierById(Long dossierId);
 
     DossierDTO getTheDossierById(Long dossierId);
@@ -18,18 +19,15 @@ public interface DossierService {
     Page<Dossier> getDossiers(Pageable pageable);
 
     Dossier updateExercises(Long dossierId, List<Exercise> updatedExercises);
+
     void deleteExercises(Long dossierId, List<Long> exerciseIds);
 
     Page<DossierDTO> getDossiersByCabinetId(Long cabinetId, Pageable pageable);
 
     DossierDTO updateDossier(Long id, Dossier dossierDetails);
 
-    /**
-     * Delete a dossier and its associated company in the AI service
-     *
-     * @param dossierId The ID of the dossier to delete
-     */
     void deleteDossier(Long dossierId);
+
     DossierDTO updateActivity(Long dossierId, String activity);
 
 }

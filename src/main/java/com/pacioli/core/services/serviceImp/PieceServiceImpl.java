@@ -92,22 +92,6 @@ public class PieceServiceImpl implements PieceService {
             Piece piece = deserializePiece(pieceData, dossierId);
             log.info("Piece deserialized: {}", piece.getOriginalFileName());
 
-            // Step 2: Check for technical duplicates BEFORE processing
-            //Optional<Piece> technicalDuplicate = duplicateDetectionService.checkTechnicalDuplicate(dossierId, piece.getOriginalFileName());
-
-         /*   if (technicalDuplicate.isPresent()) {
-                log.warn("🚫 Technical duplicate detected, marking as duplicate");
-                duplicateDetectionService.markAsDuplicate(piece, technicalDuplicate.get());
-
-                // Still save the piece but with DUPLICATE status
-                piece.setUploadDate(new Date());
-                piece.setStatus(PieceStatus.DUPLICATE);
-
-                Piece savedPiece = pieceRepository.save(piece);
-                log.info("Duplicate piece saved with ID: {}", savedPiece.getId());
-                return savedPiece;
-            }*/
-
             // Step 3: Fetch Dossier from the database
             Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
             log.info("Dossier found with ID: {}", dossierId);

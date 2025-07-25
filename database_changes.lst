@@ -1,0 +1,18 @@
+ALTER TABLE ecriture
+ADD COLUMN manually_updated BOOLEAN DEFAULT FALSE NOT NULL,
+ADD COLUMN manual_update_date DATE;
+
+-- Add manual update tracking to line table
+ALTER TABLE line
+ADD COLUMN manually_updated BOOLEAN DEFAULT FALSE NOT NULL,
+ADD COLUMN manual_update_date DATE;
+
+
+ALTER TABLE ecriture ADD COLUMN manually_updated BOOLEAN DEFAULT FALSE NOT NULL;
+ALTER TABLE line ADD COLUMN manually_updated BOOLEAN DEFAULT FALSE NOT NULL;
+
+	UPDATE line SET manually_updated = false WHERE manually_updated IS NULL;
+UPDATE ecriture SET manually_updated = false WHERE manually_updated IS NULL;
+
+ALTER TABLE line ALTER COLUMN manually_updated SET DEFAULT false;
+ALTER TABLE ecriture ALTER COLUMN manually_updated SET DEFAULT false;

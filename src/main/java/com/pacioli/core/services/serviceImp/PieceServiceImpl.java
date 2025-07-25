@@ -619,7 +619,7 @@ public class PieceServiceImpl implements PieceService {
     }
 
     @Transactional
-    private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
+    public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         // Fetch the Dossier explicitly
@@ -649,6 +649,14 @@ public class PieceServiceImpl implements PieceService {
             Ecriture ecriture = ecritures.get(i);
             ecriture.setPiece(piece);
 
+            if (ecriture.getManuallyUpdated() == null) {
+                ecriture.setManuallyUpdated(false);
+            }
+
+            if (ecriture.getManuallyUpdated() == null) {
+                ecriture.setManuallyUpdated(false);
+            }
+
             // Find or create Journal (existing logic)
             Journal journal = journals.stream().filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName())).findFirst().orElseGet(() -> {
                 log.info("Creating new Journal: {}", ecriture.getJournal().getName());
@@ -666,7 +674,12 @@ public class PieceServiceImpl implements PieceService {
                 for (int j = 0; j < ecriture.getLines().size(); j++) {
                     Line line = ecriture.getLines().get(j);
                     line.setEcriture(savedEcriture);
-
+                    if (line.getManuallyUpdated() == null) {
+                        line.setManuallyUpdated(false);
+                    }
+                    if (line.getManuallyUpdated() == null) {
+                        line.setManuallyUpdated(false);
+                    }
                     // Use exact precision from original AI response if available
                     if (originalEcritures != null && j < originalEcritures.size()) {
                         JsonNode originalEntry = originalEcritures.get(j);
@@ -817,11 +830,16 @@ public class PieceServiceImpl implements PieceService {
             List<Ecriture> ecritures = new ArrayList<>();
             for (JsonNode ecritureNode : ecrituresNode) {
                 Ecriture ecriture = objectMapper.treeToValue(ecritureNode, Ecriture.class);
+                if (ecriture.getManuallyUpdated() == null) {
+                    ecriture.setManuallyUpdated(false);
+                }
 
                 if (ecriture.getLines() != null) {
                     for (Line line : ecriture.getLines()) {
                         Account account = line.getAccount();
-
+                        if (line.getManuallyUpdated() == null) {
+                            line.setManuallyUpdated(false);
+                        }
                         if (account != null) {
                             Account existingAccount = accountMap.get(account.getAccount());
                             if (existingAccount == null) {

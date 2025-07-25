@@ -82,6 +82,12 @@ public class Line {
     @Column(name = "exchange_rate_date")
     private LocalDate exchangeRateDate;
 
+    @Column(name = "manually_updated", nullable = false)
+    private Boolean manuallyUpdated = false; // Default to false
+
+    @Column(name = "manual_update_date")
+    private LocalDate manualUpdateDate;
+
     @JsonSetter("credit")
     public void setCredit(Object value) {
         this.credit = convertToDouble(value);
@@ -92,7 +98,6 @@ public class Line {
     @ToString.Exclude  // Prevent circular reference in toString
     private Ecriture ecriture;        // Associated Ecriture
 
-    //@JsonDeserialize(using = AccountDeserializer.class)
 
     @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.PERSIST)
     @JoinColumn(name = "account_id", nullable = true)
@@ -108,6 +113,18 @@ public class Line {
         return creditExact != null ? new BigDecimal(creditExact) : BigDecimal.ZERO;
     }
 
+    public Line() {
+        this.manuallyUpdated = false;
+    }
+
+    // Getter/Setter with null safety
+    public Boolean getManuallyUpdated() {
+        return manuallyUpdated != null ? manuallyUpdated : false;
+    }
+
+    public void setManuallyUpdated(Boolean manuallyUpdated) {
+        this.manuallyUpdated = manuallyUpdated != null ? manuallyUpdated : false;
+    }
     // In Line class
     @Override
     public boolean equals(Object o) {

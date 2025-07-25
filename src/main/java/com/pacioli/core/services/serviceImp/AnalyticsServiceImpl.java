@@ -8,10 +8,13 @@ import com.pacioli.core.DTO.analytics.DossierCreationTrend;
 import com.pacioli.core.DTO.analytics.DossierStatistics;
 import com.pacioli.core.DTO.analytics.HistoriqueStatistics;
 import com.pacioli.core.DTO.analytics.HistoriqueUploadTrend;
+import com.pacioli.core.DTO.analytics.ManualUpdateStatistics;
+import com.pacioli.core.DTO.analytics.ManualUpdateTrend;
 import com.pacioli.core.DTO.analytics.PieceStatistics;
 import com.pacioli.core.DTO.analytics.PieceUploadTrend;
 import com.pacioli.core.Exceptions.AnalyticsException;
 import com.pacioli.core.enums.PieceStatus;
+import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.AnalyticsService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +23,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Comparator;
@@ -27,8 +31,10 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +49,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final PieceRepository pieceRepository;
     private final DossierRepository dossierRepository;
     private final UserRepository userRepository;
+    private final EcritureRepository ecritureRepository;
+    private final LineRepository lineRepository;
 
     @Override
     @Cacheable(value = "adminAnalytics", unless = "#result == null")
@@ -56,6 +64,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             CompletableFuture<DossierStatistics> dossierStatsFuture = generateDossierStatisticsAsync();
             CompletableFuture<HistoriqueStatistics> historiqueStatsFuture = generateHistoriqueStatisticsAsync();
             CompletableFuture<List<CabinetAnalytics>> cabinetAnalyticsFuture = generateCabinetAnalyticsAsync();
+            CompletableFuture<ManualUpdateStatistics> manualUpdateStatsFuture = generateManualUpdateStatisticsAsync(); // NEW
 
             // Wait for all async operations to complete
             CompletableFuture.allOf(
@@ -63,7 +72,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     pieceStatsFuture,
                     dossierStatsFuture,
                     historiqueStatsFuture,
-                    cabinetAnalyticsFuture
+                    cabinetAnalyticsFuture,
+                    manualUpdateStatsFuture // NEW
             ).join();
 
             return AdminAnalyticsDTO.builder()
@@ -72,6 +82,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     .dossierStats(dossierStatsFuture.get())
                     .historiqueStats(historiqueStatsFuture.get())
                     .cabinetAnalytics(cabinetAnalyticsFuture.get())
+                    .manualUpdateStats(manualUpdateStatsFuture.get()) // THIS WAS MISSING!
                     .build();
 
         } catch (Exception e) {
@@ -96,12 +107,14 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     .dossierStats(generateDossierStatisticsForPeriod(startDate, endDate))
                     .historiqueStats(generateHistoriqueStatisticsForPeriod(startDate, endDate))
                     .cabinetAnalytics(generateCabinetAnalyticsForPeriod(startDate, endDate))
+                    .manualUpdateStats(generateManualUpdateStatisticsForPeriod(startDate, endDate)) // NEW
                     .build();
         } catch (Exception e) {
             log.error("Error generating admin analytics for period", e);
             throw new AnalyticsException("Failed to generate admin analytics for period", e);
         }
     }
+
 
     @Async("analyticsTaskExecutor")
     public CompletableFuture<CabinetStatistics> generateCabinetStatisticsAsync() {
@@ -180,55 +193,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             return CompletableFuture.completedFuture(stats);
         } catch (Exception e) {
             log.error("Error generating historique statistics", e);
-            return CompletableFuture.failedFuture(e);
-        }
-    }
-
-    @Async("analyticsTaskExecutor")
-    public CompletableFuture<List<CabinetAnalytics>> generateCabinetAnalyticsAsync() {
-        try {
-            List<CabinetAnalytics> analytics = cabinetRepository.findAll().stream()
-                    .map(cabinet -> {
-                        try {
-                            Long totalDossiers = dossierRepository.countByCabinetId(cabinet.getId());
-                            Long totalPieces = pieceRepository.countByDossierCabinetId(cabinet.getId());
-                            Long totalUsers = userRepository.countByCabinetId(cabinet.getId());
-
-                            Map<String, Long> piecesByStatus = new HashMap<>();
-                            for (PieceStatus status : PieceStatus.values()) {
-                                Long count = pieceRepository.countByDossierCabinetIdAndStatus(cabinet.getId(), status);
-                                piecesByStatus.put(status.name(), count != null ? count : 0L);
-                            }
-
-                            Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndType(cabinet.getId(), "HISTORIQUE");
-
-                            return CabinetAnalytics.builder()
-                                    .cabinetId(cabinet.getId())
-                                    .cabinetName(cabinet.getName())
-                                    .totalDossiers(totalDossiers != null ? totalDossiers : 0L)
-                                    .totalPieces(totalPieces != null ? totalPieces : 0L)
-                                    .totalUsers(totalUsers != null ? totalUsers : 0L)
-                                    .piecesByStatus(piecesByStatus)
-                                    .totalHistoriqueFiles(totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L)
-                                    .build();
-                        } catch (Exception e) {
-                            log.warn("Error generating analytics for cabinet {}: {}", cabinet.getId(), e.getMessage());
-                            return CabinetAnalytics.builder()
-                                    .cabinetId(cabinet.getId())
-                                    .cabinetName(cabinet.getName())
-                                    .totalDossiers(0L)
-                                    .totalPieces(0L)
-                                    .totalUsers(0L)
-                                    .piecesByStatus(new HashMap<>())
-                                    .totalHistoriqueFiles(0L)
-                                    .build();
-                        }
-                    })
-                    .collect(Collectors.toList());
-
-            return CompletableFuture.completedFuture(analytics);
-        } catch (Exception e) {
-            log.error("Error generating cabinet analytics", e);
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -436,43 +400,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
     }
 
-    private PieceStatistics generatePieceStatistics() {
-        Long totalPieces = pieceRepository.count();
-
-        Map<String, Long> piecesByStatus = new HashMap<>();
-        for (PieceStatus status : PieceStatus.values()) {
-            Long count = pieceRepository.countPiecesByStatus(status);
-            piecesByStatus.put(status.name(), count != null ? count : 0L);
-        }
-
-        Long uploadedPieces = piecesByStatus.getOrDefault(PieceStatus.UPLOADED.name(), 0L);
-        Long processingPieces = piecesByStatus.getOrDefault(PieceStatus.PROCESSING.name(), 0L);
-        Long processedPieces = piecesByStatus.getOrDefault(PieceStatus.PROCESSED.name(), 0L);
-        Long rejectedPieces = piecesByStatus.getOrDefault(PieceStatus.REJECTED.name(), 0L);
-        Long duplicatePieces = piecesByStatus.getOrDefault(PieceStatus.DUPLICATE.name(), 0L);
-
-        // NEW: Add forced pieces statistics
-        Long forcedPieces = pieceRepository.countByIsForcedTrue();
-        Map<Long, Long> forcedPiecesByCabinet = generateForcedPiecesByCabinetMap();
-        Map<Long, Long> forcedPiecesByDossier = generateForcedPiecesByDossierMap();
-
-        List<PieceUploadTrend> uploadTrends = generatePieceUploadTrends();
-
-        return PieceStatistics.builder()
-                .totalPieces(totalPieces)
-                .uploadedPieces(uploadedPieces)
-                .processingPieces(processingPieces)
-                .processedPieces(processedPieces)
-                .rejectedPieces(rejectedPieces)
-                .duplicatePieces(duplicatePieces)
-                .forcedPieces(forcedPieces != null ? forcedPieces : 0L)  // NEW
-                .piecesByStatus(piecesByStatus)
-                .uploadTrends(uploadTrends)
-                .forcedPiecesByCabinet(forcedPiecesByCabinet)  // NEW
-                .forcedPiecesByDossier(forcedPiecesByDossier)  // NEW
-                .build();
-    }
-
     private DossierStatistics generateDossierStatistics() {
         try {
             return generateDossierStatisticsAsync().get();
@@ -485,68 +412,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     .creationTrends(Collections.emptyList())
                     .build();
         }
-    }
-
-    private HistoriqueStatistics generateHistoriqueStatistics() {
-        try {
-            return generateHistoriqueStatisticsAsync().get();
-        } catch (Exception e) {
-            log.error("Error in synchronous historique statistics generation", e);
-            return HistoriqueStatistics.builder()
-                    .totalHistoriqueFiles(0L)
-                    .historiqueFilesByCabinet(new HashMap<>())
-                    .uploadTrends(Collections.emptyList())
-                    .build();
-        }
-    }
-
-    private List<CabinetAnalytics> generateCabinetAnalytics() {
-        return cabinetRepository.findAll().stream()
-                .map(cabinet -> {
-                    try {
-                        Long totalDossiers = dossierRepository.countByCabinetId(cabinet.getId());
-                        Long totalPieces = pieceRepository.countByDossierCabinetId(cabinet.getId());
-                        Long totalUsers = userRepository.countByCabinetId(cabinet.getId());
-
-                        Map<String, Long> piecesByStatus = new HashMap<>();
-                        for (PieceStatus status : PieceStatus.values()) {
-                            Long count = pieceRepository.countByDossierCabinetIdAndStatus(cabinet.getId(), status);
-                            piecesByStatus.put(status.name(), count != null ? count : 0L);
-                        }
-
-                        Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndType(cabinet.getId(), "HISTORIQUE");
-
-                        // NEW: Add forced pieces statistics for this cabinet
-                        Long totalForcedPieces = pieceRepository.countByDossierCabinetIdAndIsForcedTrue(cabinet.getId());
-                        Map<Long, Long> forcedPiecesByDossier = generateForcedPiecesByDossierMapForCabinet(cabinet.getId());
-
-                        return CabinetAnalytics.builder()
-                                .cabinetId(cabinet.getId())
-                                .cabinetName(cabinet.getName())
-                                .totalDossiers(totalDossiers != null ? totalDossiers : 0L)
-                                .totalPieces(totalPieces != null ? totalPieces : 0L)
-                                .totalUsers(totalUsers != null ? totalUsers : 0L)
-                                .piecesByStatus(piecesByStatus)
-                                .totalHistoriqueFiles(totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L)
-                                .totalForcedPieces(totalForcedPieces != null ? totalForcedPieces : 0L)  // NEW
-                                .forcedPiecesByDossier(forcedPiecesByDossier)  // NEW
-                                .build();
-                    } catch (Exception e) {
-                        log.warn("Error generating analytics for cabinet {}: {}", cabinet.getId(), e.getMessage());
-                        return CabinetAnalytics.builder()
-                                .cabinetId(cabinet.getId())
-                                .cabinetName(cabinet.getName())
-                                .totalDossiers(0L)
-                                .totalPieces(0L)
-                                .totalUsers(0L)
-                                .piecesByStatus(new HashMap<>())
-                                .totalHistoriqueFiles(0L)
-                                .totalForcedPieces(0L)  // NEW
-                                .forcedPiecesByDossier(new HashMap<>())  // NEW
-                                .build();
-                    }
-                })
-                .collect(Collectors.toList());
     }
 
     private Map<Long, Long> generateForcedPiecesByCabinetMap() {
@@ -665,5 +530,236 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             log.error("Error generating piece statistics", e);
             return CompletableFuture.failedFuture(e);
         }
+    }
+
+    private List<ManualUpdateTrend> generateManualUpdateTrends() {
+        try {
+            return ecritureRepository.getManualUpdateTrendsByMonth()
+                    .stream()
+                    .map(result -> ManualUpdateTrend.builder()
+                            .period((String) result[0])
+                            .ecritureCount(((Number) result[1]).longValue())
+                            .lineCount(0L) // You can add a separate query for lines if needed
+                            .cabinetBreakdown(new HashMap<>()) // You can add cabinet breakdown if needed
+                            .build())
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Error generating manual update trends: {}", e.getMessage());
+            return Collections.emptyList();
         }
+    }
+
+    private ManualUpdateStatistics generateManualUpdateStatisticsForPeriod(LocalDate startDate, LocalDate endDate) {
+        try {
+            // Use the correct repository method names that match your actual repository
+            Long totalManuallyUpdatedEcritures = ecritureRepository.countManuallyUpdatedEcrituresInPeriod(startDate, endDate);
+            Long totalManuallyUpdatedLines = lineRepository.countManuallyUpdatedLinesInPeriod(startDate, endDate);
+
+            // Get other stats for period using your actual repository methods
+            Map<Long, Long> manuallyUpdatedEcrituresByCabinet = ecritureRepository.countManuallyUpdatedEcrituresByCabinetInPeriod(startDate, endDate)
+                    .stream()
+                    .collect(Collectors.toMap(
+                            result -> ((Number) result[0]).longValue(),
+                            result -> ((Number) result[1]).longValue()
+                    ));
+
+            Map<Long, Long> manuallyUpdatedLinesByCabinet = lineRepository.countManuallyUpdatedLinesByCabinetInPeriod(startDate, endDate)
+                    .stream()
+                    .collect(Collectors.toMap(
+                            result -> ((Number) result[0]).longValue(),
+                            result -> ((Number) result[1]).longValue()
+                    ));
+
+            Map<Long, String> manualUpdateCabinetNames = cabinetRepository.findAll()
+                    .stream()
+                    .collect(Collectors.toMap(Cabinet::getId, Cabinet::getName));
+
+            // You'll need to add this method to your EcritureRepository:
+            // @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.entryDate BETWEEN :startDate AND :endDate")
+            // Long countEcrituresInPeriod(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+            Long totalEcrituresInPeriod = ecritureRepository.count(); // For now, use total count
+            Double manualUpdatePercentage = totalEcrituresInPeriod > 0 ?
+                    (totalManuallyUpdatedEcritures.doubleValue() / totalEcrituresInPeriod.doubleValue()) * 100.0 : 0.0;
+
+            return ManualUpdateStatistics.builder()
+                    .totalManuallyUpdatedEcritures(totalManuallyUpdatedEcritures != null ? totalManuallyUpdatedEcritures : 0L)
+                    .totalManuallyUpdatedLines(totalManuallyUpdatedLines != null ? totalManuallyUpdatedLines : 0L)
+                    .manuallyUpdatedEcrituresByCabinet(manuallyUpdatedEcrituresByCabinet)
+                    .manuallyUpdatedLinesByCabinet(manuallyUpdatedLinesByCabinet)
+                    .manualUpdateCabinetNames(manualUpdateCabinetNames)
+                    .manualUpdatePercentage(manualUpdatePercentage)
+                    .manualUpdateTrends(Collections.emptyList()) // You can implement trends for period if needed
+                    .build();
+        } catch (Exception e) {
+            log.error("Error generating manual update statistics for period", e);
+            // Return empty stats instead of null
+            return ManualUpdateStatistics.builder()
+                    .totalManuallyUpdatedEcritures(0L)
+                    .totalManuallyUpdatedLines(0L)
+                    .manuallyUpdatedEcrituresByCabinet(new HashMap<>())
+                    .manuallyUpdatedLinesByCabinet(new HashMap<>())
+                    .manualUpdateCabinetNames(new HashMap<>())
+                    .manualUpdatePercentage(0.0)
+                    .manualUpdateTrends(Collections.emptyList())
+                    .build();
+        }
+    }
+
+    @Async("analyticsTaskExecutor")
+    public CompletableFuture<List<CabinetAnalytics>> generateCabinetAnalyticsAsync() {
+        try {
+            List<CabinetAnalytics> analytics = cabinetRepository.findAll().stream()
+                    .map(cabinet -> {
+                        try {
+                            Long totalDossiers = dossierRepository.countByCabinetId(cabinet.getId());
+                            Long totalPieces = pieceRepository.countByDossierCabinetId(cabinet.getId());
+                            Long totalUsers = userRepository.countByCabinetId(cabinet.getId());
+
+                            Map<String, Long> piecesByStatus = new HashMap<>();
+                            for (PieceStatus status : PieceStatus.values()) {
+                                Long count = pieceRepository.countByDossierCabinetIdAndStatus(cabinet.getId(), status);
+                                piecesByStatus.put(status.name(), count != null ? count : 0L);
+                            }
+
+                            Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndType(cabinet.getId(), "HISTORIQUE");
+
+                            // NEW: Add forced pieces statistics
+                            Long totalForcedPieces = pieceRepository.countByDossierCabinetIdAndIsForcedTrue(cabinet.getId());
+                            Map<Long, Long> forcedPiecesByDossier = generateForcedPiecesByDossierMapForCabinet(cabinet.getId());
+
+                            // NEW: Add manual update statistics
+                            Long totalManuallyUpdatedEcritures = ecritureRepository.countManuallyUpdatedEcrituresByCabinet()
+                                    .stream()
+                                    .filter(result -> Objects.equals(((Number) result[0]).longValue(), cabinet.getId()))
+                                    .map(result -> ((Number) result[1]).longValue())
+                                    .findFirst()
+                                    .orElse(0L);
+
+                            Long totalManuallyUpdatedLines = lineRepository.countManuallyUpdatedLinesByCabinet()
+                                    .stream()
+                                    .filter(result -> Objects.equals(((Number) result[0]).longValue(), cabinet.getId()))
+                                    .map(result -> ((Number) result[1]).longValue())
+                                    .findFirst()
+                                    .orElse(0L);
+
+                            Long cabinetTotalEcritures = ecritureRepository.countEcrituresByCabinet(cabinet.getId());
+                            Double manualUpdatePercentage = cabinetTotalEcritures > 0 ?
+                                    (totalManuallyUpdatedEcritures.doubleValue() / cabinetTotalEcritures.doubleValue()) * 100.0 : 0.0;
+
+                            LocalDate lastManualUpdateDate = ecritureRepository.getLastManualUpdateDateByCabinet()
+                                    .stream()
+                                    .filter(result -> Objects.equals(((Number) result[0]).longValue(), cabinet.getId()))
+                                    .map(result -> {
+                                        Object dateObj = result[1];
+                                        if (dateObj instanceof LocalDate) {
+                                            return (LocalDate) dateObj;
+                                        } else if (dateObj instanceof Date) {
+                                            return ((Date) dateObj).toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+                                        }
+                                        return null;
+                                    })
+                                    .filter(Objects::nonNull)
+                                    .findFirst()
+                                    .orElse(null);
+
+                            return CabinetAnalytics.builder()
+                                    .cabinetId(cabinet.getId())
+                                    .cabinetName(cabinet.getName())
+                                    .totalDossiers(totalDossiers != null ? totalDossiers : 0L)
+                                    .totalPieces(totalPieces != null ? totalPieces : 0L)
+                                    .totalUsers(totalUsers != null ? totalUsers : 0L)
+                                    .piecesByStatus(piecesByStatus)
+                                    .totalHistoriqueFiles(totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L)
+                                    .totalForcedPieces(totalForcedPieces != null ? totalForcedPieces : 0L)  // NEW
+                                    .forcedPiecesByDossier(forcedPiecesByDossier)  // NEW
+                                    .totalManuallyUpdatedEcritures(totalManuallyUpdatedEcritures)  // NEW
+                                    .totalManuallyUpdatedLines(totalManuallyUpdatedLines)  // NEW
+                                    .manualUpdatePercentage(manualUpdatePercentage)  // NEW
+                                    .lastManualUpdateDate(lastManualUpdateDate)  // NEW
+                                    .build();
+                        } catch (Exception e) {
+                            log.warn("Error generating analytics for cabinet {}: {}", cabinet.getId(), e.getMessage());
+                            return CabinetAnalytics.builder()
+                                    .cabinetId(cabinet.getId())
+                                    .cabinetName(cabinet.getName())
+                                    .totalDossiers(0L)
+                                    .totalPieces(0L)
+                                    .totalUsers(0L)
+                                    .piecesByStatus(new HashMap<>())
+                                    .totalHistoriqueFiles(0L)
+                                    .totalForcedPieces(0L)  // NEW
+                                    .forcedPiecesByDossier(new HashMap<>())  // NEW
+                                    .totalManuallyUpdatedEcritures(0L)  // NEW
+                                    .totalManuallyUpdatedLines(0L)  // NEW
+                                    .manualUpdatePercentage(0.0)  // NEW
+                                    .lastManualUpdateDate(null)  // NEW
+                                    .build();
+                        }
+                    })
+                    .collect(Collectors.toList());
+
+            return CompletableFuture.completedFuture(analytics);
+        } catch (Exception e) {
+            log.error("Error generating cabinet analytics", e);
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    @Async("analyticsTaskExecutor")
+    public CompletableFuture<ManualUpdateStatistics> generateManualUpdateStatisticsAsync() {
+        try {
+            // Use the correct repository method names from your actual repositories
+            Long totalManuallyUpdatedEcritures = ecritureRepository.countManuallyUpdatedEcritures();
+            Long totalManuallyUpdatedLines = lineRepository.countManuallyUpdatedLines();
+
+            // Get manually updated ecritures by cabinet
+            Map<Long, Long> manuallyUpdatedEcrituresByCabinet = ecritureRepository.countManuallyUpdatedEcrituresByCabinet()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            result -> ((Number) result[0]).longValue(),  // cabinet_id
+                            result -> ((Number) result[1]).longValue()   // count
+                    ));
+
+            // Get manually updated lines by cabinet
+            Map<Long, Long> manuallyUpdatedLinesByCabinet = lineRepository.countManuallyUpdatedLinesByCabinet()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            result -> ((Number) result[0]).longValue(),  // cabinet_id
+                            result -> ((Number) result[1]).longValue()   // count
+                    ));
+
+            // Get cabinet names for manual update stats
+            Map<Long, String> manualUpdateCabinetNames = cabinetRepository.findAll()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            Cabinet::getId,
+                            Cabinet::getName
+                    ));
+
+            // Calculate manual update percentage
+            Long totalEcritures = ecritureRepository.count();
+            Double manualUpdatePercentage = totalEcritures > 0 ?
+                    (totalManuallyUpdatedEcritures.doubleValue() / totalEcritures.doubleValue()) * 100.0 : 0.0;
+
+            // Generate trends
+            List<ManualUpdateTrend> manualUpdateTrends = generateManualUpdateTrends();
+
+            ManualUpdateStatistics stats = ManualUpdateStatistics.builder()
+                    .totalManuallyUpdatedEcritures(totalManuallyUpdatedEcritures != null ? totalManuallyUpdatedEcritures : 0L)
+                    .totalManuallyUpdatedLines(totalManuallyUpdatedLines != null ? totalManuallyUpdatedLines : 0L)
+                    .manuallyUpdatedEcrituresByCabinet(manuallyUpdatedEcrituresByCabinet)
+                    .manuallyUpdatedLinesByCabinet(manuallyUpdatedLinesByCabinet)
+                    .manualUpdateCabinetNames(manualUpdateCabinetNames)
+                    .manualUpdatePercentage(manualUpdatePercentage)
+                    .manualUpdateTrends(manualUpdateTrends)
+                    .build();
+
+            return CompletableFuture.completedFuture(stats);
+        } catch (Exception e) {
+            log.error("Error generating manual update statistics", e);
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
 }

@@ -48,6 +48,12 @@ public class Ecriture {
     private LocalDate exchangeRateDate; // Date of the exchange rate
     private Boolean amountUpdated = false; // Default to false
 
+    @Column(name = "manually_updated", nullable = false)
+    private Boolean manuallyUpdated = false; // Default to false
+
+    @Column(name = "manual_update_date")
+    private LocalDate manualUpdateDate;
+
     // In Ecriture class
     @Transient
     public String getJournalName() {
@@ -59,6 +65,18 @@ public class Ecriture {
         return journal != null ? journal.getType() : null;
     }
 
+    public Ecriture() {
+        this.manuallyUpdated = false;
+    }
+
+    // Getter/Setter with null safety
+    public Boolean getManuallyUpdated() {
+        return manuallyUpdated != null ? manuallyUpdated : false;
+    }
+
+    public void setManuallyUpdated(Boolean manuallyUpdated) {
+        this.manuallyUpdated = manuallyUpdated != null ? manuallyUpdated : false;
+    }
 
     @Override
     public boolean equals(Object o) {

@@ -14,5 +14,6 @@ public class EcritureDTO {
     private List<LineDTO> lines;
     private PieceDTO piece; // Add this field
     private Boolean amountUpdated;
-
+    private Boolean manuallyUpdated;
+    private LocalDate manualUpdateDate;
 }

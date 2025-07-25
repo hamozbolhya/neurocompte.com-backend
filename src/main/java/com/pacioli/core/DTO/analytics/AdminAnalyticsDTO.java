@@ -16,5 +16,6 @@ public class AdminAnalyticsDTO {
     private PieceStatistics pieceStats;
     private DossierStatistics dossierStats;
     private HistoriqueStatistics historiqueStats;
+    private ManualUpdateStatistics manualUpdateStats;
     private List<CabinetAnalytics> cabinetAnalytics;
 }

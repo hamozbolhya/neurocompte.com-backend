@@ -126,8 +126,6 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
 
-
-
     @Override
     @Transactional
     public Ecriture updateEcriture(Ecriture ecriture) {
@@ -190,7 +188,8 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Set the amountUpdated field
         dto.setAmountUpdated(ecriture.getAmountUpdated());
-
+        dto.setManuallyUpdated(ecriture.getManuallyUpdated());
+        dto.setManualUpdateDate(ecriture.getManualUpdateDate());
         // Map Journal only if it's not null
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
@@ -230,7 +229,8 @@ public class EcritureServiceImpl implements EcritureService {
             lineDTO.setUsdCredit(line.getUsdCredit());
             lineDTO.setConvertedDebit(line.getConvertedDebit());
             lineDTO.setConvertedCredit(line.getConvertedCredit());
-
+            lineDTO.setManuallyUpdated(line.getManuallyUpdated());
+            lineDTO.setManualUpdateDate(line.getManualUpdateDate());
             return lineDTO;
         }).collect(Collectors.toList());
         dto.setLines(lineDTOs);
@@ -309,6 +309,12 @@ public class EcritureServiceImpl implements EcritureService {
         existingEcriture.setJournal(newJournal);
         existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
 
+        if (ecritureRequest.getManuallyUpdated() != null && ecritureRequest.getManuallyUpdated()) {
+            existingEcriture.setManuallyUpdated(true);
+            existingEcriture.setManualUpdateDate(LocalDate.now());
+            log.info("Ecriture {} marked as manually updated", ecritureId);
+        }
+
         // Update the amountUpdated field if it's provided in the request
         if (ecritureRequest.getAmountUpdated() != null) {
             existingEcriture.setAmountUpdated(ecritureRequest.getAmountUpdated());
@@ -346,8 +352,8 @@ public class EcritureServiceImpl implements EcritureService {
         }
 
         // This line was missing - actually update the lines
-        updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate);
-
+        updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
+                ecritureRequest.getManuallyUpdated());
         // Now validate the totals after the lines have been updated
         double totalDebit = 0;
         double totalCredit = 0;
@@ -395,9 +401,9 @@ public class EcritureServiceImpl implements EcritureService {
         return ecritureRepository.save(existingEcriture);
     }
 
-    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines, boolean hasExchangeRate, double exchangeRate) {
+    private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines,
+                                     boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated) {
         List<Line> existingLines = existingEcriture.getLines();
-
         // Step 1: Remove lines that no longer exist
         List<Long> updatedLineIds = updatedLines.stream()
                 .filter(line -> line.getId() != null)
@@ -554,6 +560,11 @@ public class EcritureServiceImpl implements EcritureService {
                         }
                     }
                 }
+                if (manuallyUpdated != null && manuallyUpdated) {
+                    existingLine.setManuallyUpdated(true);
+                    existingLine.setManualUpdateDate(LocalDate.now());
+                    log.debug("Line {} marked as manually updated", existingLine.getId());
+                }
             } else {
                 // Add a new line
                 Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
@@ -591,7 +602,11 @@ public class EcritureServiceImpl implements EcritureService {
                         newLine.setConvertedCredit(0.0);
                     }
                 }
-
+                if (manuallyUpdated != null && manuallyUpdated) {
+                    newLine.setManuallyUpdated(true);
+                    newLine.setManualUpdateDate(LocalDate.now());
+                    log.debug("New line marked as manually updated");
+                }
                 existingLines.add(newLine);
             }
         }

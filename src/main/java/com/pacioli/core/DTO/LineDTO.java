@@ -13,6 +13,9 @@ public class LineDTO {
 
     private AccountDTO account; // Full account object instead of just the name
 
+    private Boolean manuallyUpdated;
+    private LocalDate manualUpdateDate;
+
     // Already existing fields for original values
     private Double originalDebit;
     private Double originalCredit;

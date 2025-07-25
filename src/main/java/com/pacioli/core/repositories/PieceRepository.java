@@ -9,10 +9,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
-import java.util.Collection;
 import java.util.Date;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
@@ -124,9 +122,7 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
                                      @Param("baseFileName") String baseFileName);
 
 
-    Long countPiecesByStatus(PieceStatus status);
-
-    Long countByIsDuplicateTrue();
+//    Long countPiecesByStatus(PieceStatus status);
 
     Long countByType(String type);
 
@@ -136,8 +132,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     Long countPiecesByUploadDateBetween(Date startDate, Date endDate);
 
     Long countPiecesByStatusAndUploadDateBetween(PieceStatus status, Date startDate, Date endDate);
-
-    Long countByIsDuplicateTrueAndUploadDateBetween(Date startDate, Date endDate);
 
     Long countByTypeAndUploadDateBetween(String type, Date startDate, Date endDate);
 
@@ -163,13 +157,8 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     Long countByIsForcedTrueAndUploadDateBetween(Date startDate, Date endDate);
 
-    Long countByDossierCabinetIdAndIsForcedTrue(Long cabinetId);
-
-    Long countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
-
-    Long countByDossierIdAndIsForcedTrue(Long dossierId);
-
-    Long countByDossierIdAndIsForcedTrueAndUploadDateBetween(Long dossierId, Date startDate, Date endDate);
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.isForced = true")
+    Long countByDossierCabinetIdAndIsForcedTrue(@Param("cabinetId") Long cabinetId);
 
     // Get forced pieces grouped by cabinet
     @Query("SELECT p.dossier.cabinet.id, COUNT(p) FROM Piece p WHERE p.isForced = true GROUP BY p.dossier.cabinet.id")
@@ -186,10 +175,26 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Object[]> countForcedPiecesByDossierAndPeriod(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
 
     // Get forced pieces by dossier within a specific cabinet
-    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.dossier.cabinet.id = :cabinetId GROUP BY p.dossier.id")
+    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.isForced = true GROUP BY p.dossier.id")
     List<Object[]> countForcedPiecesByDossierInCabinet(@Param("cabinetId") Long cabinetId);
 
-    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.dossier.cabinet.id = :cabinetId AND p.uploadDate BETWEEN :startDate AND :endDate GROUP BY p.dossier.id")
-    List<Object[]> countForcedPiecesByDossierInCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
 
+    @Query("SELECT d.cabinet.id, COUNT(p), d.cabinet.name FROM Piece p JOIN p.dossier d GROUP BY d.cabinet.id, d.cabinet.name")
+    List<Object[]> countPiecesByAllCabinets();
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier IS NULL")
+    Long countPiecesWithoutDossier();
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.status != 'DELETED'") // Adjust based on your deletion strategy
+    Long countActivePieces();
+
+    @Query("SELECT p.id, p.filename, p.status, p.isForced, d.cabinet.id, d.cabinet.name FROM Piece p JOIN p.dossier d WHERE d.cabinet.id = :cabinetId")
+    List<Object[]> findRawPieceDataByCabinet(@Param("cabinetId") Long cabinetId);
+
+    // Make sure you have this method for status counting:
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.status = :status")
+    Long countPiecesByStatus(@Param("status") PieceStatus status);
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.isDuplicate = true")
+    Long countByIsDuplicateTrue();
 }

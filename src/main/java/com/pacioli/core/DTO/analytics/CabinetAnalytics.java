@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 @Data
@@ -21,4 +22,8 @@ public class CabinetAnalytics {
     private Long totalHistoriqueFiles;
     private Long totalForcedPieces;
     private Map<Long, Long> forcedPiecesByDossier;
+    private Long totalManuallyUpdatedEcritures;
+    private Long totalManuallyUpdatedLines;
+    private Double manualUpdatePercentage;
+    private LocalDate lastManualUpdateDate;
 }

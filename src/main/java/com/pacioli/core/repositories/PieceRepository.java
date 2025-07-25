@@ -70,8 +70,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
             "GROUP BY d.id, d.name")
     List<PieceStatsDTO> getPieceStatsByCabinetId(@Param("cabinetId") Long cabinetId);
 
-    @Query("SELECT p FROM Piece p WHERE p.dossier.id = :dossierId AND p.originalFileName = :originalFileName AND p.isDuplicate = false AND p.status != 'DUPLICATE'")
-    Optional<Piece> findByDossierIdAndOriginalFileName(@Param("dossierId") Long dossierId, @Param("originalFileName") String originalFileName);
 
     @Query("SELECT p FROM Piece p " +
             "JOIN p.factureData fd " +
@@ -114,9 +112,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
                                                 @Param("maxAmount") Double maxAmount);
 
 
-    @Query("SELECT p FROM Piece p WHERE p.originalPiece.id = :originalPieceId")
-    List<Piece> findDuplicatesByOriginalPieceId(@Param("originalPieceId") Long originalPieceId);
-
     @Query("SELECT p FROM Piece p " +
             "WHERE p.dossier.id = :dossierId " +
             "AND p.isDuplicate = false " +
@@ -129,5 +124,72 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
                                      @Param("baseFileName") String baseFileName);
 
 
+    Long countPiecesByStatus(PieceStatus status);
+
+    Long countByIsDuplicateTrue();
+
+    Long countByType(String type);
+
+    List<Piece> findByType(String type);
+
+    // Period-based queries
+    Long countPiecesByUploadDateBetween(Date startDate, Date endDate);
+
+    Long countPiecesByStatusAndUploadDateBetween(PieceStatus status, Date startDate, Date endDate);
+
+    Long countByIsDuplicateTrueAndUploadDateBetween(Date startDate, Date endDate);
+
+    Long countByTypeAndUploadDateBetween(String type, Date startDate, Date endDate);
+
+    List<Piece> findByTypeAndUploadDateBetween(String type, Date startDate, Date endDate);
+
+    List<Piece> findByUploadDateBetween(Date startDate, Date endDate);
+
+    // Cabinet-based queries
+    Long countByDossierCabinetId(Long cabinetId);
+
+    Long countByDossierCabinetIdAndStatus(Long cabinetId, PieceStatus status);
+
+    Long countByDossierCabinetIdAndType(Long cabinetId, String type);
+
+    // Cabinet and period-based queries
+    Long countByDossierCabinetIdAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
+
+    Long countByDossierCabinetIdAndStatusAndUploadDateBetween(Long cabinetId, PieceStatus status, Date startDate, Date endDate);
+
+    Long countByDossierCabinetIdAndTypeAndUploadDateBetween(Long cabinetId, String type, Date startDate, Date endDate);
+
+    Long countByIsForcedTrue();
+
+    Long countByIsForcedTrueAndUploadDateBetween(Date startDate, Date endDate);
+
+    Long countByDossierCabinetIdAndIsForcedTrue(Long cabinetId);
+
+    Long countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
+
+    Long countByDossierIdAndIsForcedTrue(Long dossierId);
+
+    Long countByDossierIdAndIsForcedTrueAndUploadDateBetween(Long dossierId, Date startDate, Date endDate);
+
+    // Get forced pieces grouped by cabinet
+    @Query("SELECT p.dossier.cabinet.id, COUNT(p) FROM Piece p WHERE p.isForced = true GROUP BY p.dossier.cabinet.id")
+    List<Object[]> countForcedPiecesByCabinet();
+
+    @Query("SELECT p.dossier.cabinet.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.uploadDate BETWEEN :startDate AND :endDate GROUP BY p.dossier.cabinet.id")
+    List<Object[]> countForcedPiecesByCabinetAndPeriod(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    // Get forced pieces grouped by dossier
+    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true GROUP BY p.dossier.id")
+    List<Object[]> countForcedPiecesByDossier();
+
+    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.uploadDate BETWEEN :startDate AND :endDate GROUP BY p.dossier.id")
+    List<Object[]> countForcedPiecesByDossierAndPeriod(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    // Get forced pieces by dossier within a specific cabinet
+    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.dossier.cabinet.id = :cabinetId GROUP BY p.dossier.id")
+    List<Object[]> countForcedPiecesByDossierInCabinet(@Param("cabinetId") Long cabinetId);
+
+    @Query("SELECT p.dossier.id, COUNT(p) FROM Piece p WHERE p.isForced = true AND p.dossier.cabinet.id = :cabinetId AND p.uploadDate BETWEEN :startDate AND :endDate GROUP BY p.dossier.id")
+    List<Object[]> countForcedPiecesByDossierInCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
 
 }

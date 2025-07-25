@@ -21,4 +21,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     List<User> findAll(Sort sort);
 
     List<User> findByCabinetId(Long cabinetId);
+
+    Long countByCabinetId(Long cabinetId);
+
+    @Query("SELECT COUNT(u) FROM User u WHERE u.cabinet.id = :cabinetId AND u.isDeleted = false")
+    Long countActiveByCabinetId(@Param("cabinetId") Long cabinetId);
 }

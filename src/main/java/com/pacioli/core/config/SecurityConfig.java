@@ -45,6 +45,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authz -> authz
                         .requestMatchers("/error").authenticated()
                         .requestMatchers("/auth/login", "/auth/register", "/auth/change-password").permitAll()
+                        .requestMatchers("/api/analytics/**").hasAuthority("PACIOLI")
                         .requestMatchers("/ws").permitAll() // Allow initial handshake
                         .requestMatchers("/topic/**").authenticated()
                         .anyRequest().authenticated()

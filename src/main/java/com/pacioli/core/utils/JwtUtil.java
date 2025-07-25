@@ -53,8 +53,24 @@ public class JwtUtil {
         return extractClaims(token).getExpiration().before(new Date());
     }
 
-    public boolean validateToken(String token, String username) {
-        String extractedUsername = extractUsername(token);
-        return (extractedUsername.equals(username) && !isTokenExpired(token));
+    @SuppressWarnings("unchecked")
+    public List<String> extractRoles(String token) {
+        return (List<String>) extractClaims(token).get("roles");
+    }
+
+    public Long extractCabinetId(String token) {
+        Object cabinetId = extractClaims(token).get("cabinetId");
+        if (cabinetId instanceof Number) {
+            return ((Number) cabinetId).longValue();
+        }
+        return null;
+    }
+
+    public String extractCabinetName(String token) {
+        return (String) extractClaims(token).get("cabinetName");
+    }
+
+    public Boolean extractActive(String token) {
+        return (Boolean) extractClaims(token).get("active");
     }
 }

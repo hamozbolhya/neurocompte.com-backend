@@ -51,4 +51,6 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
 
     @Query("SELECT COUNT(d) FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Long countByCreatorAndCabinetId(@Param("cabinetId") Long cabinetId);
+    Long countByCabinetId(Long cabinetId);
+
 }

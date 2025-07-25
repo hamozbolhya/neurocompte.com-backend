@@ -29,5 +29,6 @@ public interface LineRepository extends JpaRepository<Line, Long> {
     @Query("SELECT l.ecriture.piece.dossier.cabinet.id, COUNT(l) FROM Line l WHERE l.manuallyUpdated = true AND l.manualUpdateDate BETWEEN :startDate AND :endDate GROUP BY l.ecriture.piece.dossier.cabinet.id")
     List<Object[]> countManuallyUpdatedLinesByCabinetInPeriod(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 
-
+    @Query("SELECT COUNT(l) FROM Line l WHERE l.ecriture.piece.dossier.cabinet.id = :cabinetId AND l.manuallyUpdated = true AND l.manualUpdateDate BETWEEN :startDate AND :endDate")
+    Long countManuallyUpdatedLinesByCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }

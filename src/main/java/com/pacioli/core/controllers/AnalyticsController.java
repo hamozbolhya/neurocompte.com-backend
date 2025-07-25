@@ -3,13 +3,14 @@ package com.pacioli.core.controllers;
 
 import com.pacioli.core.DTO.analytics.AdminAnalyticsDTO;
 import com.pacioli.core.DTO.analytics.CabinetAnalytics;
-import com.pacioli.core.DTO.analytics.PieceStatistics;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.repositories.CabinetRepository;
+import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.EcritureRepository;
 import com.pacioli.core.repositories.LineRepository;
 import com.pacioli.core.repositories.PieceRepository;
+import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.AnalyticsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/analytics")
@@ -41,9 +43,103 @@ public class AnalyticsController {
     private final LineRepository lineRepository;
     private final PieceRepository pieceRepository;
     private final CabinetRepository cabinetRepository;
+    private final UserRepository userRepository;
+    private final DossierRepository dossierRepository;
 
     @Autowired
     private CacheManager cacheManager;
+
+    @GetMapping("/cabinet")
+    @PreAuthorize("hasAuthority('PACIOLI')")
+    public ResponseEntity<Map<String, Object>> getCabinetAnalytics(
+            @RequestParam("cabinetId") Long cabinetId,
+            @RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
+
+        log.info("Cabinet analytics requested for cabinet: {} (refresh: {})", cabinetId, refresh);
+
+        try {
+            // Clear cache if refresh is requested
+            if (refresh) {
+                Cache adminCache = cacheManager.getCache("adminAnalytics");
+                if (adminCache != null) {
+                    adminCache.clear();
+                    log.info("Cache cleared due to refresh parameter");
+                }
+            }
+
+            // Get the cabinet
+            Cabinet cabinet = cabinetRepository.findById(cabinetId)
+                    .orElseThrow(() -> new IllegalArgumentException("Cabinet not found with ID: " + cabinetId));
+
+            // Generate cabinet-specific analytics using the service
+            Map<String, Object> cabinetAnalytics = analyticsService.getCabinetAnalytics(cabinetId);
+
+            // Add cabinet info (if not already included by the service)
+            cabinetAnalytics.put("cabinetInfo", Map.of(
+                    "id", cabinet.getId(),
+                    "name", cabinet.getName()
+            ));
+
+            log.info("Cabinet analytics generated successfully for cabinet: {}", cabinetId);
+            return ResponseEntity.ok(cabinetAnalytics);
+
+        } catch (Exception e) {
+            log.error("Error generating cabinet analytics for cabinet {}: {}", cabinetId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/cabinet/period")
+    @PreAuthorize("hasAuthority('PACIOLI')")
+    public ResponseEntity<Map<String, Object>> getCabinetAnalyticsForPeriod(
+            @RequestParam("cabinetId") Long cabinetId,
+            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam("endDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
+
+        log.info("Cabinet analytics requested for cabinet: {} and period: {} to {} (refresh: {})",
+                cabinetId, startDate, endDate, refresh);
+
+        if (startDate.isAfter(endDate)) {
+            log.warn("Invalid date range: start date {} is after end date {}", startDate, endDate);
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            // Clear cache if refresh is requested
+            if (refresh) {
+                Cache periodCache = cacheManager.getCache("adminAnalyticsPeriod");
+                if (periodCache != null) {
+                    periodCache.clear();
+                    log.info("Cache cleared due to refresh parameter");
+                }
+            }
+
+            // Get the cabinet
+            Cabinet cabinet = cabinetRepository.findById(cabinetId)
+                    .orElseThrow(() -> new IllegalArgumentException("Cabinet not found with ID: " + cabinetId));
+
+            // Generate cabinet-specific analytics for period using the service
+            Map<String, Object> cabinetAnalytics = analyticsService.getCabinetAnalyticsForPeriod(cabinetId, startDate, endDate);
+
+            // Add cabinet and period info (if not already included by the service)
+            cabinetAnalytics.put("cabinetInfo", Map.of(
+                    "id", cabinet.getId(),
+                    "name", cabinet.getName()
+            ));
+            cabinetAnalytics.put("period", Map.of(
+                    "startDate", startDate,
+                    "endDate", endDate
+            ));
+
+            log.info("Cabinet analytics for period generated successfully for cabinet: {}", cabinetId);
+            return ResponseEntity.ok(cabinetAnalytics);
+
+        } catch (Exception e) {
+            log.error("Error generating cabinet analytics for period for cabinet {}: {}", cabinetId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
 
     @GetMapping("/admin")
     @PreAuthorize("hasAuthority('PACIOLI')")
@@ -711,6 +807,33 @@ public class AnalyticsController {
         return ResponseEntity.ok(status);
     }
 
+    @GetMapping("/debug/cabinet-check/{cabinetId}")
+    @PreAuthorize("hasAuthority('PACIOLI')")
+    public ResponseEntity<Map<String, Object>> debugCabinetCheck(@PathVariable Long cabinetId) {
+        Map<String, Object> debug = new HashMap<>();
 
+        try {
+            // Check if cabinet exists
+            Cabinet cabinet = cabinetRepository.findById(cabinetId).orElse(null);
+            debug.put("cabinetExists", cabinet != null);
+            if (cabinet != null) {
+                debug.put("cabinetName", cabinet.getName());
+            }
 
+            // Check counts
+            debug.put("totalDossiers", dossierRepository.countByCabinetId(cabinetId));
+            debug.put("totalPieces", pieceRepository.countByDossierCabinetId(cabinetId));
+            debug.put("totalUsers", userRepository.countByCabinetId(cabinetId));
+
+            // Check if analytics service works
+            Map<String, Object> analytics = analyticsService.getCabinetAnalytics(cabinetId);
+            debug.put("analyticsKeys", analytics.keySet());
+            debug.put("analyticsEmpty", analytics.isEmpty());
+
+            return ResponseEntity.ok(debug);
+        } catch (Exception e) {
+            debug.put("error", e.getMessage());
+            return ResponseEntity.ok(debug);
+        }
+    }
 }

@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -158,5 +159,10 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId")
     Long countEcrituresByCabinet(@Param("cabinetId") Long cabinetId);
 
+    @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId AND e.manuallyUpdated = true AND e.manualUpdateDate BETWEEN :startDate AND :endDate")
+    Long countManuallyUpdatedEcrituresByCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId AND e.entryDate BETWEEN :startDate AND :endDate")
+    Long countEcrituresByCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
 }
 

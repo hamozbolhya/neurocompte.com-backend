@@ -762,4 +762,320 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
     }
 
+    public Map<String, Object> getCabinetAnalytics(Long cabinetId) {
+        log.info("Generating analytics for cabinet: {}", cabinetId);
+
+        try {
+            Map<String, Object> analytics = new HashMap<>();
+
+            // Get cabinet info
+            Cabinet cabinet = cabinetRepository.findById(cabinetId)
+                    .orElseThrow(() -> new IllegalArgumentException("Cabinet not found with ID: " + cabinetId));
+
+            log.info("Found cabinet: {}", cabinet.getName());
+
+            // Generate cabinet-specific statistics
+            analytics.put("cabinetInfo", Map.of(
+                    "id", cabinet.getId(),
+                    "name", cabinet.getName()
+            ));
+
+            // Cabinet Stats
+            Map<String, Object> cabinetStats = Map.of(
+                    "totalCabinets", 1L,
+                    "activeCabinets", 1L,
+                    "inactiveCabinets", 0L
+            );
+            analytics.put("cabinetStats", cabinetStats);
+            log.info("Cabinet stats: {}", cabinetStats);
+
+            // Generate other stats
+            Map<String, Object> pieceStats = generatePieceStatsForCabinet(cabinetId);
+            Map<String, Object> dossierStats = generateDossierStatsForCabinet(cabinetId);
+            Map<String, Object> historiqueStats = generateHistoriqueStatsForCabinet(cabinetId);
+            Map<String, Object> manualUpdateStats = generateManualUpdateStatsForCabinet(cabinetId);
+            Map<String, Object> singleCabinetAnalytics = generateSingleCabinetAnalytics(cabinet);
+
+            analytics.put("pieceStats", pieceStats);
+            analytics.put("dossierStats", dossierStats);
+            analytics.put("historiqueStats", historiqueStats);
+            analytics.put("manualUpdateStats", manualUpdateStats);
+            analytics.put("cabinetAnalytics", List.of(singleCabinetAnalytics));
+
+            log.info("Final analytics keys: {}", analytics.keySet());
+            log.info("Piece stats null? {}", pieceStats == null);
+            log.info("Cabinet analytics size: {}", analytics.get("cabinetAnalytics") != null ?
+                    ((List<?>) analytics.get("cabinetAnalytics")).size() : "null");
+
+            return analytics;
+
+        } catch (Exception e) {
+            log.error("Error generating cabinet analytics for cabinet {}: {}", cabinetId, e.getMessage(), e);
+            throw new RuntimeException("Failed to generate cabinet analytics", e);
+        }
+    }
+
+    public Map<String, Object> getCabinetAnalyticsForPeriod(Long cabinetId, LocalDate startDate, LocalDate endDate) {
+        log.info("Generating analytics for cabinet: {} for period: {} to {}", cabinetId, startDate, endDate);
+
+        if (startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("Start date cannot be after end date");
+        }
+
+        try {
+            Date start = java.sql.Date.valueOf(startDate);
+            Date end = java.sql.Date.valueOf(endDate.plusDays(1));
+
+            Map<String, Object> analytics = new HashMap<>();
+
+            // Get cabinet info
+            Cabinet cabinet = cabinetRepository.findById(cabinetId)
+                    .orElseThrow(() -> new IllegalArgumentException("Cabinet not found with ID: " + cabinetId));
+
+            analytics.put("cabinetInfo", Map.of(
+                    "id", cabinet.getId(),
+                    "name", cabinet.getName()
+            ));
+
+            analytics.put("period", Map.of(
+                    "startDate", startDate,
+                    "endDate", endDate
+            ));
+
+            analytics.put("cabinetStats", Map.of(
+                    "totalCabinets", 1L,
+                    "activeCabinets", 1L,
+                    "inactiveCabinets", 0L
+            ));
+
+            analytics.put("pieceStats", generatePieceStatsForCabinetAndPeriod(cabinetId, start, end));
+            analytics.put("dossierStats", generateDossierStatsForCabinet(cabinetId));
+            analytics.put("historiqueStats", generateHistoriqueStatsForCabinetAndPeriod(cabinetId, start, end));
+            analytics.put("manualUpdateStats", generateManualUpdateStatsForCabinetAndPeriod(cabinetId, startDate, endDate));
+
+            // FIX: Return only the selected cabinet for period analytics
+            analytics.put("cabinetAnalytics", List.of(generateSingleCabinetAnalyticsForPeriod(cabinet, start, end)));
+
+            return analytics;
+
+        } catch (Exception e) {
+            log.error("Error generating cabinet analytics for period for cabinet {}: {}", cabinetId, e.getMessage(), e);
+            throw new RuntimeException("Failed to generate cabinet analytics for period", e);
+        }
+    }
+
+    private Map<String, Object> generateSingleCabinetAnalyticsForPeriod(Cabinet cabinet, Date startDate, Date endDate) {
+        Map<String, Object> cabinetAnalytics = new HashMap<>();
+
+        cabinetAnalytics.put("cabinetId", cabinet.getId());
+        cabinetAnalytics.put("cabinetName", cabinet.getName());
+
+        Long totalDossiers = dossierRepository.countByCabinetId(cabinet.getId()); // Dossiers typically don't have date filtering
+        Long totalPieces = pieceRepository.countByDossierCabinetIdAndUploadDateBetween(cabinet.getId(), startDate, endDate);
+        Long totalUsers = userRepository.countByCabinetId(cabinet.getId());
+
+        cabinetAnalytics.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
+        cabinetAnalytics.put("totalPieces", totalPieces != null ? totalPieces : 0L);
+        cabinetAnalytics.put("totalUsers", totalUsers != null ? totalUsers : 0L);
+
+        // Get pieces by status for period
+        Map<String, Long> piecesByStatus = new HashMap<>();
+        for (PieceStatus status : PieceStatus.values()) {
+            Long count = pieceRepository.countByDossierCabinetIdAndStatusAndUploadDateBetween(cabinet.getId(), status, startDate, endDate);
+            piecesByStatus.put(status.name(), count != null ? count : 0L);
+        }
+        cabinetAnalytics.put("piecesByStatus", piecesByStatus);
+
+        // Additional stats for period
+        Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndTypeAndUploadDateBetween(cabinet.getId(), "HISTORIQUE", startDate, endDate);
+        cabinetAnalytics.put("totalHistoriqueFiles", totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L);
+
+        Long totalForcedPieces = pieceRepository.countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(cabinet.getId(), startDate, endDate);
+        cabinetAnalytics.put("totalForcedPieces", totalForcedPieces != null ? totalForcedPieces : 0L);
+
+        return cabinetAnalytics;
+    }
+
+    private Map<String, Object> generateSingleCabinetAnalytics(Cabinet cabinet) {
+        Map<String, Object> cabinetAnalytics = new HashMap<>();
+
+        cabinetAnalytics.put("cabinetId", cabinet.getId());
+        cabinetAnalytics.put("cabinetName", cabinet.getName());
+
+        // Make sure these queries are working
+        Long totalDossiers = dossierRepository.countByCabinetId(cabinet.getId());
+        Long totalPieces = pieceRepository.countByDossierCabinetId(cabinet.getId());
+        Long totalUsers = userRepository.countByCabinetId(cabinet.getId());
+
+        // Add debug logging
+        log.info("Cabinet {} stats: dossiers={}, pieces={}, users={}",
+                cabinet.getId(), totalDossiers, totalPieces, totalUsers);
+
+        cabinetAnalytics.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
+        cabinetAnalytics.put("totalPieces", totalPieces != null ? totalPieces : 0L);
+        cabinetAnalytics.put("totalUsers", totalUsers != null ? totalUsers : 0L);
+
+        // Get pieces by status - this might be the issue
+        Map<String, Long> piecesByStatus = new HashMap<>();
+        for (PieceStatus status : PieceStatus.values()) {
+            Long count = pieceRepository.countByDossierCabinetIdAndStatus(cabinet.getId(), status);
+            piecesByStatus.put(status.name(), count != null ? count : 0L);
+            log.debug("Cabinet {} - Status {}: {}", cabinet.getId(), status, count);
+        }
+        cabinetAnalytics.put("piecesByStatus", piecesByStatus);
+
+        return cabinetAnalytics;
+    }
+
+    private Map<String, Object> generateManualUpdateStatsForCabinetAndPeriod(Long cabinetId, LocalDate startDate, LocalDate endDate) {
+        Map<String, Object> manualUpdateStats = new HashMap<>();
+
+        Long manualEcritures = ecritureRepository.countManuallyUpdatedEcrituresByCabinetAndPeriod(cabinetId, startDate, endDate);
+        Long manualLines = lineRepository.countManuallyUpdatedLinesByCabinetAndPeriod(cabinetId, startDate, endDate);
+
+        Date start = java.sql.Date.valueOf(startDate);
+        Date end = java.sql.Date.valueOf(endDate.plusDays(1));
+        Long totalEcritures = ecritureRepository.countEcrituresByCabinetAndPeriod(cabinetId, start, end);
+
+        Double manualUpdatePercentage = totalEcritures > 0 ?
+                (manualEcritures.doubleValue() / totalEcritures.doubleValue()) * 100.0 : 0.0;
+
+        manualUpdateStats.put("totalManuallyUpdatedEcritures", manualEcritures != null ? manualEcritures : 0L);
+        manualUpdateStats.put("totalManuallyUpdatedLines", manualLines != null ? manualLines : 0L);
+        manualUpdateStats.put("manualUpdatePercentage", manualUpdatePercentage);
+        manualUpdateStats.put("manuallyUpdatedEcrituresByCabinet", Map.of(cabinetId, manualEcritures != null ? manualEcritures : 0L));
+        manualUpdateStats.put("manuallyUpdatedLinesByCabinet", Map.of(cabinetId, manualLines != null ? manualLines : 0L));
+
+        // Get cabinet names
+        Cabinet cabinet = cabinetRepository.findById(cabinetId).orElse(null);
+        if (cabinet != null) {
+            manualUpdateStats.put("manualUpdateCabinetNames", Map.of(cabinetId, cabinet.getName()));
+        }
+
+        return manualUpdateStats;
+    }
+
+    private Map<String, Object> generateManualUpdateStatsForCabinet(Long cabinetId) {
+        Map<String, Object> manualUpdateStats = new HashMap<>();
+
+        Long manualEcritures = ecritureRepository.countManuallyUpdatedEcrituresByCabinet()
+                .stream()
+                .filter(result -> Objects.equals(((Number) result[0]).longValue(), cabinetId))
+                .map(result -> ((Number) result[1]).longValue())
+                .findFirst()
+                .orElse(0L);
+
+        Long manualLines = lineRepository.countManuallyUpdatedLinesByCabinet()
+                .stream()
+                .filter(result -> Objects.equals(((Number) result[0]).longValue(), cabinetId))
+                .map(result -> ((Number) result[1]).longValue())
+                .findFirst()
+                .orElse(0L);
+
+        Long totalEcritures = ecritureRepository.countEcrituresByCabinet(cabinetId);
+        Double manualUpdatePercentage = totalEcritures > 0 ?
+                (manualEcritures.doubleValue() / totalEcritures.doubleValue()) * 100.0 : 0.0;
+
+        manualUpdateStats.put("totalManuallyUpdatedEcritures", manualEcritures);
+        manualUpdateStats.put("totalManuallyUpdatedLines", manualLines);
+        manualUpdateStats.put("manualUpdatePercentage", manualUpdatePercentage);
+        manualUpdateStats.put("manuallyUpdatedEcrituresByCabinet", Map.of(cabinetId, manualEcritures));
+        manualUpdateStats.put("manuallyUpdatedLinesByCabinet", Map.of(cabinetId, manualLines));
+
+        // Get cabinet names
+        Cabinet cabinet = cabinetRepository.findById(cabinetId).orElse(null);
+        if (cabinet != null) {
+            manualUpdateStats.put("manualUpdateCabinetNames", Map.of(cabinetId, cabinet.getName()));
+        }
+
+        return manualUpdateStats;
+    }
+
+    private Map<String, Object> generateHistoriqueStatsForCabinetAndPeriod(Long cabinetId, Date startDate, Date endDate) {
+        Map<String, Object> historiqueStats = new HashMap<>();
+
+        Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndTypeAndUploadDateBetween(cabinetId, "HISTORIQUE", startDate, endDate);
+        historiqueStats.put("totalHistoriqueFiles", totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L);
+        historiqueStats.put("historiqueFilesByCabinet", Map.of(cabinetId, totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L));
+
+        return historiqueStats;
+    }
+
+    private Map<String, Object> generatePieceStatsForCabinet(Long cabinetId) {
+        log.info("Generating piece stats for cabinet: {}", cabinetId);
+
+        Map<String, Object> pieceStats = new HashMap<>();
+
+        Long totalPieces = pieceRepository.countByDossierCabinetId(cabinetId);
+        log.info("Total pieces for cabinet {}: {}", cabinetId, totalPieces);
+
+        pieceStats.put("totalPieces", totalPieces != null ? totalPieces : 0L);
+
+        Map<String, Long> piecesByStatus = new HashMap<>();
+        for (PieceStatus status : PieceStatus.values()) {
+            Long count = pieceRepository.countByDossierCabinetIdAndStatus(cabinetId, status);
+            piecesByStatus.put(status.name(), count != null ? count : 0L);
+            log.debug("Cabinet {} - Status {}: {}", cabinetId, status, count);
+        }
+
+        pieceStats.put("uploadedPieces", piecesByStatus.getOrDefault("UPLOADED", 0L));
+        pieceStats.put("processingPieces", piecesByStatus.getOrDefault("PROCESSING", 0L));
+        pieceStats.put("processedPieces", piecesByStatus.getOrDefault("PROCESSED", 0L));
+        pieceStats.put("rejectedPieces", piecesByStatus.getOrDefault("REJECTED", 0L));
+        pieceStats.put("duplicatePieces", piecesByStatus.getOrDefault("DUPLICATE", 0L));
+        pieceStats.put("piecesByStatus", piecesByStatus);
+
+        Long forcedPieces = pieceRepository.countByDossierCabinetIdAndIsForcedTrue(cabinetId);
+        pieceStats.put("forcedPieces", forcedPieces != null ? forcedPieces : 0L);
+
+        log.info("Generated piece stats for cabinet {}: {}", cabinetId, pieceStats);
+        return pieceStats;
+    }
+
+
+    private Map<String, Object> generatePieceStatsForCabinetAndPeriod(Long cabinetId, Date startDate, Date endDate) {
+        Map<String, Object> pieceStats = new HashMap<>();
+
+        Long totalPieces = pieceRepository.countByDossierCabinetIdAndUploadDateBetween(cabinetId, startDate, endDate);
+        pieceStats.put("totalPieces", totalPieces != null ? totalPieces : 0L);
+
+        Map<String, Long> piecesByStatus = new HashMap<>();
+        for (PieceStatus status : PieceStatus.values()) {
+            Long count = pieceRepository.countByDossierCabinetIdAndStatusAndUploadDateBetween(cabinetId, status, startDate, endDate);
+            piecesByStatus.put(status.name(), count != null ? count : 0L);
+        }
+
+        pieceStats.put("uploadedPieces", piecesByStatus.getOrDefault("UPLOADED", 0L));
+        pieceStats.put("processingPieces", piecesByStatus.getOrDefault("PROCESSING", 0L));
+        pieceStats.put("processedPieces", piecesByStatus.getOrDefault("PROCESSED", 0L));
+        pieceStats.put("rejectedPieces", piecesByStatus.getOrDefault("REJECTED", 0L));
+        pieceStats.put("duplicatePieces", piecesByStatus.getOrDefault("DUPLICATE", 0L));
+        pieceStats.put("piecesByStatus", piecesByStatus);
+
+        Long forcedPieces = pieceRepository.countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(cabinetId, startDate, endDate);
+        pieceStats.put("forcedPieces", forcedPieces != null ? forcedPieces : 0L);
+
+        return pieceStats;
+    }
+
+    private Map<String, Object> generateDossierStatsForCabinet(Long cabinetId) {
+        Map<String, Object> dossierStats = new HashMap<>();
+
+        Long totalDossiers = dossierRepository.countByCabinetId(cabinetId);
+        dossierStats.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
+        dossierStats.put("activeDossiers", totalDossiers != null ? totalDossiers : 0L);
+        dossierStats.put("dossiersByCabinet", Map.of(cabinetId, totalDossiers != null ? totalDossiers : 0L));
+
+        return dossierStats;
+    }
+
+    private Map<String, Object> generateHistoriqueStatsForCabinet(Long cabinetId) {
+        Map<String, Object> historiqueStats = new HashMap<>();
+
+        Long totalHistoriqueFiles = pieceRepository.countByDossierCabinetIdAndType(cabinetId, "HISTORIQUE");
+        historiqueStats.put("totalHistoriqueFiles", totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L);
+        historiqueStats.put("historiqueFilesByCabinet", Map.of(cabinetId, totalHistoriqueFiles != null ? totalHistoriqueFiles : 0L));
+
+        return historiqueStats;
+    }
 }

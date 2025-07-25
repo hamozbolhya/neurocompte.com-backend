@@ -147,11 +147,11 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     Long countByDossierCabinetIdAndType(Long cabinetId, String type);
 
     // Cabinet and period-based queries
-    Long countByDossierCabinetIdAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
-
-    Long countByDossierCabinetIdAndStatusAndUploadDateBetween(Long cabinetId, PieceStatus status, Date startDate, Date endDate);
-
-    Long countByDossierCabinetIdAndTypeAndUploadDateBetween(Long cabinetId, String type, Date startDate, Date endDate);
+//    Long countByDossierCabinetIdAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
+//
+//    Long countByDossierCabinetIdAndStatusAndUploadDateBetween(Long cabinetId, PieceStatus status, Date startDate, Date endDate);
+//
+//    Long countByDossierCabinetIdAndTypeAndUploadDateBetween(Long cabinetId, String type, Date startDate, Date endDate);
 
     Long countByIsForcedTrue();
 
@@ -197,4 +197,16 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     @Query("SELECT COUNT(p) FROM Piece p WHERE p.isDuplicate = true")
     Long countByIsDuplicateTrue();
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.uploadDate BETWEEN :startDate AND :endDate")
+    Long countByDossierCabinetIdAndUploadDateBetween(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.status = :status AND p.uploadDate BETWEEN :startDate AND :endDate")
+    Long countByDossierCabinetIdAndStatusAndUploadDateBetween(@Param("cabinetId") Long cabinetId, @Param("status") PieceStatus status, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.type = :type AND p.uploadDate BETWEEN :startDate AND :endDate")
+    Long countByDossierCabinetIdAndTypeAndUploadDateBetween(@Param("cabinetId") Long cabinetId, @Param("type") String type, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.isForced = true AND p.uploadDate BETWEEN :startDate AND :endDate")
+    Long countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
 }

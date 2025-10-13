@@ -5,6 +5,7 @@ import com.pacioli.core.models.Account;
 import java.util.List;
 
 public interface AccountService {
+    Account findById(Long id);
     List<Account> getAllAccounts();
     Account createAccount(Account account);
     Account updateAccount(Long id, Account updatedAccount);

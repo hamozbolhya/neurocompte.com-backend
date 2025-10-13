@@ -22,6 +22,12 @@ public class AccountServiceImpl implements AccountService {
     }
 
     @Override
+    public Account findById(Long id) {
+        return accountRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found with ID: " + id));
+    }
+
+    @Override
     public List<Account> getAccountsByDossierId(Long dossierId) {
         return accountRepository.findByDossierId(dossierId);
     }

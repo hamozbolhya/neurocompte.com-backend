@@ -404,6 +404,7 @@ public class EcritureServiceImpl implements EcritureService {
     private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines,
                                      boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated) {
         List<Line> existingLines = existingEcriture.getLines();
+
         // Step 1: Remove lines that no longer exist
         List<Long> updatedLineIds = updatedLines.stream()
                 .filter(line -> line.getId() != null)
@@ -415,38 +416,6 @@ public class EcritureServiceImpl implements EcritureService {
                 .toList();
 
         existingLines.removeAll(linesToRemove);
-
-        // Get exchange rate information from the first line if available
-        String originalCurrency = null;
-        String convertedCurrency = null;
-        String exchangeRateDate = null;  // Changed to String to match the field type
-
-        // Extract currency information from updated lines if available
-        for (Line line : updatedLines) {
-            if (line.getOriginalCurrency() != null) {
-                originalCurrency = line.getOriginalCurrency();
-            }
-            if (line.getConvertedCurrency() != null) {
-                convertedCurrency = line.getConvertedCurrency();
-            }
-            if (line.getExchangeRateDate() != null) {
-                // Convert LocalDate to String if needed
-                if (line.getExchangeRateDate() instanceof LocalDate) {
-                    LocalDate date = (LocalDate) line.getExchangeRateDate();
-                    exchangeRateDate = date.toString();  // ISO format (yyyy-MM-dd)
-                } else {
-                    exchangeRateDate = line.getExchangeRateDate().toString();
-                }
-            }
-            if (originalCurrency != null && convertedCurrency != null && exchangeRateDate != null) {
-                break;
-            }
-        }
-
-        // Default values if not provided
-        if (originalCurrency == null) originalCurrency = "NAN&";
-        if (convertedCurrency == null) convertedCurrency = "NAN&";
-        if (exchangeRateDate == null) exchangeRateDate = LocalDate.now().toString();  // Current date as String
 
         // Step 2: Add new or update existing lines
         for (Line updatedLine : updatedLines) {
@@ -463,108 +432,37 @@ public class EcritureServiceImpl implements EcritureService {
 
                 existingLine.setAccount(managedAccount);
                 existingLine.setLabel(updatedLine.getLabel());
+                existingLine.setDebit(updatedLine.getDebit());
+                existingLine.setCredit(updatedLine.getCredit());
 
-                // If amountUpdated flag is true, we should prioritize converted values
-                if (existingEcriture.getAmountUpdated() != null && existingEcriture.getAmountUpdated()) {
-                    // Use convertedDebit/Credit as the source of truth if they exist
-                    if (updatedLine.getConvertedDebit() != null) {
-                        existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
-                        // Recalculate the original debit based on the converted value
-                        if (exchangeRate > 0) {
-                            existingLine.setDebit(updatedLine.getConvertedDebit() / exchangeRate);
-                            existingLine.setOriginalDebit(updatedLine.getConvertedDebit() / exchangeRate);
-                        } else {
-                            existingLine.setDebit(updatedLine.getDebit());
-                            existingLine.setOriginalDebit(updatedLine.getDebit());
-                        }
-                    } else {
-                        existingLine.setDebit(updatedLine.getDebit());
-                        existingLine.setOriginalDebit(updatedLine.getDebit());
-                        if (exchangeRate > 0) {
-                            existingLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
-                        }
-                    }
+                // CRITICAL FIX: Always set currency fields from request, use null if not provided/invalid
+                existingLine.setOriginalCurrency(
+                        isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null
+                );
 
-                    if (updatedLine.getConvertedCredit() != null) {
-                        existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
-                        // Recalculate the original credit based on the converted value
-                        if (exchangeRate > 0) {
-                            existingLine.setCredit(updatedLine.getConvertedCredit() / exchangeRate);
-                            existingLine.setOriginalCredit(updatedLine.getConvertedCredit() / exchangeRate);
-                        } else {
-                            existingLine.setCredit(updatedLine.getCredit());
-                            existingLine.setOriginalCredit(updatedLine.getCredit());
-                        }
-                    } else {
-                        existingLine.setCredit(updatedLine.getCredit());
-                        existingLine.setOriginalCredit(updatedLine.getCredit());
-                        if (exchangeRate > 0) {
-                            existingLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
-                        }
-                    }
+                existingLine.setConvertedCurrency(
+                        isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null
+                );
 
-                    // Set exchange rate info
-                    existingLine.setOriginalCurrency(originalCurrency);
-                    existingLine.setExchangeRate(exchangeRate);
-                    existingLine.setConvertedCurrency(convertedCurrency);
-                    existingLine.setExchangeRateDate(exchangeRateDate);
-                } else {
-                    // Regular flow - use original values and calculate converted values
-                    existingLine.setDebit(updatedLine.getDebit());
-                    existingLine.setCredit(updatedLine.getCredit());
+                existingLine.setExchangeRate(
+                        updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0
+                                ? updatedLine.getExchangeRate()
+                                : null
+                );
 
-                    // Handle exchange rate information if available
-                    // Handle exchange rate information if available
-                    if (hasExchangeRate) {
-                        // Set original amounts
-                        existingLine.setOriginalDebit(updatedLine.getDebit());
-                        existingLine.setOriginalCredit(updatedLine.getCredit());
-                        existingLine.setOriginalCurrency(originalCurrency);
+                existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
+                existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
+                existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
+                existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                existingLine.setExchangeRateDate(String.valueOf(updatedLine.getExchangeRateDate()));
 
-                        // Set exchange rate info
-                        existingLine.setExchangeRate(exchangeRate);
-                        existingLine.setConvertedCurrency(convertedCurrency);
-                        existingLine.setExchangeRateDate(exchangeRateDate);
-
-                        // Check if we should use provided converted values or calculate them
-                        if (existingEcriture.getAmountUpdated() != null && existingEcriture.getAmountUpdated()) {
-                            // Use the provided converted values if they exist
-                            if (updatedLine.getConvertedDebit() != null) {
-                                existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
-                            } else if (updatedLine.getDebit() != null && updatedLine.getDebit() > 0) {
-                                existingLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
-                            } else {
-                                existingLine.setConvertedDebit(0.0);
-                            }
-
-                            if (updatedLine.getConvertedCredit() != null) {
-                                existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
-                            } else if (updatedLine.getCredit() != null && updatedLine.getCredit() > 0) {
-                                existingLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
-                            } else {
-                                existingLine.setConvertedCredit(0.0);
-                            }
-                        } else {
-                            // Calculate converted amounts based on debit/credit values
-                            if (updatedLine.getDebit() != null && updatedLine.getDebit() > 0) {
-                                existingLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
-                            } else {
-                                existingLine.setConvertedDebit(0.0);
-                            }
-
-                            if (updatedLine.getCredit() != null && updatedLine.getCredit() > 0) {
-                                existingLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
-                            } else {
-                                existingLine.setConvertedCredit(0.0);
-                            }
-                        }
-                    }
-                }
+                // Manual update tracking
                 if (manuallyUpdated != null && manuallyUpdated) {
                     existingLine.setManuallyUpdated(true);
                     existingLine.setManualUpdateDate(LocalDate.now());
                     log.debug("Line {} marked as manually updated", existingLine.getId());
                 }
+
             } else {
                 // Add a new line
                 Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
@@ -577,42 +475,48 @@ public class EcritureServiceImpl implements EcritureService {
                 newLine.setCredit(updatedLine.getCredit());
                 newLine.setEcriture(existingEcriture);
 
-                // Handle exchange rate information for new lines
-                if (hasExchangeRate) {
-                    // Set original amounts (same as regular amounts for now)
-                    newLine.setOriginalDebit(updatedLine.getDebit());
-                    newLine.setOriginalCredit(updatedLine.getCredit());
-                    newLine.setOriginalCurrency(originalCurrency);
+                // CRITICAL FIX: Set currency fields from request, use null if not provided/invalid
+                newLine.setOriginalCurrency(
+                        isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null
+                );
 
-                    // Set exchange rate info
-                    newLine.setExchangeRate(exchangeRate);
-                    newLine.setConvertedCurrency(convertedCurrency);
-                    newLine.setExchangeRateDate(exchangeRateDate);  // Now passing a String
+                newLine.setConvertedCurrency(
+                        isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null
+                );
 
-                    // Calculate and set converted amounts
-                    if (updatedLine.getDebit() != null && updatedLine.getDebit() > 0) {
-                        newLine.setConvertedDebit(updatedLine.getDebit() * exchangeRate);
-                    } else {
-                        newLine.setConvertedDebit(0.0);
-                    }
+                newLine.setExchangeRate(
+                        updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0
+                                ? updatedLine.getExchangeRate()
+                                : null
+                );
 
-                    if (updatedLine.getCredit() != null && updatedLine.getCredit() > 0) {
-                        newLine.setConvertedCredit(updatedLine.getCredit() * exchangeRate);
-                    } else {
-                        newLine.setConvertedCredit(0.0);
-                    }
-                }
+                newLine.setOriginalDebit(updatedLine.getOriginalDebit());
+                newLine.setOriginalCredit(updatedLine.getOriginalCredit());
+                newLine.setConvertedDebit(updatedLine.getConvertedDebit());
+                newLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                newLine.setExchangeRateDate(String.valueOf(updatedLine.getExchangeRateDate()));
+
                 if (manuallyUpdated != null && manuallyUpdated) {
                     newLine.setManuallyUpdated(true);
                     newLine.setManualUpdateDate(LocalDate.now());
                     log.debug("New line marked as manually updated");
                 }
+
                 existingLines.add(newLine);
             }
         }
 
         // Update the Ecriture with the new list of lines
         existingEcriture.setLines(existingLines);
+    }
+
+    private boolean isValidCurrency(String currency) {
+        return currency != null &&
+                !currency.isEmpty() &&
+                !currency.equals("NAN&") &&
+                !currency.equals("null") &&
+                !currency.equals("undefined") &&
+                currency.matches("[A-Z]{3}");
     }
 
     @Override

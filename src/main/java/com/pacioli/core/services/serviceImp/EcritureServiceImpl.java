@@ -4,6 +4,7 @@ import com.pacioli.core.DTO.*;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.EcritureService;
+import com.pacioli.core.utils.EcritureValidationUtil;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -306,6 +307,37 @@ public class EcritureServiceImpl implements EcritureService {
             throw new IllegalArgumentException("Le nouveau journal doit appartenir au même dossier.");
         }
 
+        // ✅ GET DECIMAL PRECISION FROM DOSSIER/COUNTRY
+        int decimalPrecision = 2; // Default
+        if (existingEcriture.getPiece() != null &&
+                existingEcriture.getPiece().getDossier() != null &&
+                existingEcriture.getPiece().getDossier().getCountry() != null &&
+                existingEcriture.getPiece().getDossier().getDecimalPrecision() != null) {
+            decimalPrecision = existingEcriture.getPiece().getDossier().getDecimalPrecision();
+        }
+
+        // ✅ VALIDATE BEFORE PROCESSING
+        Map<String, String> balanceErrors = EcritureValidationUtil.validateEcritureBalance(
+                ecritureRequest, decimalPrecision);
+
+        if (!balanceErrors.isEmpty()) {
+            String errorMessage = balanceErrors.values().stream()
+                    .findFirst()
+                    .orElse("Erreur de validation");
+            log.error("❌ Validation errors: {}", balanceErrors);
+            throw new IllegalArgumentException(errorMessage);
+        }
+
+        Map<String, String> exchangeRateErrors = EcritureValidationUtil.validateExchangeRate(ecritureRequest);
+        if (!exchangeRateErrors.isEmpty()) {
+            String errorMessage = exchangeRateErrors.values().stream()
+                    .findFirst()
+                    .orElse("Erreur de validation du taux de change");
+            log.error("❌ Exchange rate validation errors: {}", exchangeRateErrors);
+            throw new IllegalArgumentException(errorMessage);
+        }
+
+        // ✅ VALIDATION PASSED - Continue with update
         existingEcriture.setJournal(newJournal);
         existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
 
@@ -320,20 +352,12 @@ public class EcritureServiceImpl implements EcritureService {
             existingEcriture.setAmountUpdated(ecritureRequest.getAmountUpdated());
         }
 
-        // ADD THIS CODE HERE - Check if the exchange rate has been updated
-        boolean exchangeRateUpdated = false;
+        // Check if the exchange rate has been updated
         Piece associatedPiece = existingEcriture.getPiece();
-
         if (associatedPiece != null && ecritureRequest.getExchangeRate() != null) {
-            // Compare with the piece's exchange rate
             if (associatedPiece.getExchangeRate() == null ||
                     !associatedPiece.getExchangeRate().equals(ecritureRequest.getExchangeRate())) {
-
-                // Exchange rate has been updated
-                exchangeRateUpdated = true;
-                associatedPiece.setExchangeRateUpdated(exchangeRateUpdated);
-
-                // Save the updated piece
+                associatedPiece.setExchangeRateUpdated(true);
                 pieceRepository.save(associatedPiece);
             }
         }
@@ -342,7 +366,6 @@ public class EcritureServiceImpl implements EcritureService {
         double exchangeRate = 0;
         boolean hasExchangeRate = false;
 
-        // Check if any of the lines have exchange rate information
         for (Line line : ecritureRequest.getLines()) {
             if (line.getExchangeRate() != null && line.getExchangeRate() > 0) {
                 exchangeRate = line.getExchangeRate();
@@ -351,53 +374,11 @@ public class EcritureServiceImpl implements EcritureService {
             }
         }
 
-        // This line was missing - actually update the lines
+        // Update the lines
         updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
                 ecritureRequest.getManuallyUpdated());
-        // Now validate the totals after the lines have been updated
-        double totalDebit = 0;
-        double totalCredit = 0;
 
-        // Calculate totals from the appropriate fields
-        for (Line line : existingEcriture.getLines()) {
-            // For debit: prefer convertedDebit if exists and amountUpdated is true
-            if (existingEcriture.getAmountUpdated() != null && existingEcriture.getAmountUpdated()
-                    && line.getConvertedDebit() != null) {
-                totalDebit += line.getConvertedDebit();
-            } else {
-                totalDebit += (line.getDebit() != null ? line.getDebit() : 0);
-            }
-
-            // For credit: prefer convertedCredit if exists and amountUpdated is true
-            if (existingEcriture.getAmountUpdated() != null && existingEcriture.getAmountUpdated()
-                    && line.getConvertedCredit() != null) {
-                totalCredit += line.getConvertedCredit();
-            } else {
-                totalCredit += (line.getCredit() != null ? line.getCredit() : 0);
-            }
-        }
-
-        // Check if totals are balanced
-        if (Math.abs(totalDebit - totalCredit) > 0.01) {
-            throw new IllegalArgumentException(
-                    String.format("La somme du débit (%.2f) doit être égale à la somme du crédit (%.2f).",
-                            totalDebit, totalCredit));
-        }
-
-        // If we have exchange rate information, also validate converted amounts
-        if (hasExchangeRate) {
-            double totalConvertedDebit = existingEcriture.getLines().stream()
-                    .mapToDouble(line -> line.getConvertedDebit() != null ? line.getConvertedDebit() : 0)
-                    .sum();
-            double totalConvertedCredit = existingEcriture.getLines().stream()
-                    .mapToDouble(line -> line.getConvertedCredit() != null ? line.getConvertedCredit() : 0)
-                    .sum();
-
-            if (Math.abs(totalConvertedDebit - totalConvertedCredit) > 0.01) {
-                throw new IllegalArgumentException("La somme du débit converti doit être égale à la somme du crédit converti.");
-            }
-        }
-
+        log.info("✅ Ecriture {} validation passed and updated successfully", ecritureId);
         return ecritureRepository.save(existingEcriture);
     }
 
@@ -426,6 +407,12 @@ public class EcritureServiceImpl implements EcritureService {
                         .findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("Ligne non trouvée avec l'identifiant : " + updatedLine.getId()));
 
+                // ✅ SAVE EXISTING VALUES BEFORE UPDATING
+                String existingExchangeRateDate = String.valueOf(existingLine.getExchangeRateDate());
+                String existingOriginalCurrency = existingLine.getOriginalCurrency();
+                String existingConvertedCurrency = existingLine.getConvertedCurrency();
+                Double existingExchangeRate = existingLine.getExchangeRate();
+
                 // Fetch the Account to ensure it is managed
                 Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
                         .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
@@ -435,26 +422,70 @@ public class EcritureServiceImpl implements EcritureService {
                 existingLine.setDebit(updatedLine.getDebit());
                 existingLine.setCredit(updatedLine.getCredit());
 
-                // CRITICAL FIX: Always set currency fields from request, use null if not provided/invalid
-                existingLine.setOriginalCurrency(
-                        isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null
-                );
+                // ✅ PRESERVE CURRENCY FIELDS IF NOT PROVIDED IN UPDATE
+                if (isValidCurrency(updatedLine.getOriginalCurrency())) {
+                    existingLine.setOriginalCurrency(updatedLine.getOriginalCurrency());
+                } else if (existingOriginalCurrency != null) {
+                    // Keep existing if new one is invalid
+                    existingLine.setOriginalCurrency(existingOriginalCurrency);
+                } else {
+                    existingLine.setOriginalCurrency(null);
+                }
 
-                existingLine.setConvertedCurrency(
-                        isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null
-                );
+                if (isValidCurrency(updatedLine.getConvertedCurrency())) {
+                    existingLine.setConvertedCurrency(updatedLine.getConvertedCurrency());
+                } else if (existingConvertedCurrency != null) {
+                    // Keep existing if new one is invalid
+                    existingLine.setConvertedCurrency(existingConvertedCurrency);
+                } else {
+                    existingLine.setConvertedCurrency(null);
+                }
 
-                existingLine.setExchangeRate(
-                        updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0
-                                ? updatedLine.getExchangeRate()
-                                : null
-                );
+                // ✅ PRESERVE EXCHANGE RATE IF NOT PROVIDED
+                if (updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0) {
+                    existingLine.setExchangeRate(updatedLine.getExchangeRate());
+                } else if (existingExchangeRate != null) {
+                    // Keep existing if new one is not provided
+                    existingLine.setExchangeRate(existingExchangeRate);
+                } else {
+                    existingLine.setExchangeRate(null);
+                }
 
                 existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
                 existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
                 existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
                 existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
-                existingLine.setExchangeRateDate(String.valueOf(updatedLine.getExchangeRateDate()));
+
+                // ✅ PRESERVE EXCHANGE RATE DATE - PRIORITY ORDER:
+                // 1. Use new value if provided and valid
+                // 2. Keep existing value if present
+                // 3. Try to get from piece
+                // 4. Set to null as last resort
+
+                boolean hasNewExchangeRateDate = updatedLine.getExchangeRateDate() != null &&
+                        !updatedLine.getExchangeRateDate().toString().isEmpty() &&
+                        !updatedLine.getExchangeRateDate().toString().equals("null");
+
+                if (hasNewExchangeRateDate) {
+                    // New valid value provided - use it
+                    existingLine.setExchangeRateDate(updatedLine.getExchangeRateDate().toString());
+                    log.debug("📅 Updated exchange rate date from request: {}", updatedLine.getExchangeRateDate());
+                } else if (existingExchangeRateDate != null &&
+                        !existingExchangeRateDate.equals("null") &&
+                        !existingExchangeRateDate.isEmpty()) {
+                    // Keep existing value - DON'T OVERWRITE WITH NULL
+                    log.debug("📅 Preserving existing exchange rate date: {}", existingExchangeRateDate);
+                    // existingLine already has this value, no need to set
+                } else if (existingEcriture.getPiece() != null &&
+                        existingEcriture.getPiece().getExchangeRateDate() != null) {
+                    // Get from piece if available
+                    existingLine.setExchangeRateDate(existingEcriture.getPiece().getExchangeRateDate().toString());
+                    log.info("📅 Set exchange rate date from piece: {}", existingEcriture.getPiece().getExchangeRateDate());
+                } else {
+                    // Last resort - set to null
+                    existingLine.setExchangeRateDate(null);
+                    log.debug("📅 No exchange rate date available, setting to null");
+                }
 
                 // Manual update tracking
                 if (manuallyUpdated != null && manuallyUpdated) {
@@ -475,7 +506,7 @@ public class EcritureServiceImpl implements EcritureService {
                 newLine.setCredit(updatedLine.getCredit());
                 newLine.setEcriture(existingEcriture);
 
-                // CRITICAL FIX: Set currency fields from request, use null if not provided/invalid
+                // Set currency fields from request, use null if not provided/invalid
                 newLine.setOriginalCurrency(
                         isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null
                 );
@@ -494,7 +525,20 @@ public class EcritureServiceImpl implements EcritureService {
                 newLine.setOriginalCredit(updatedLine.getOriginalCredit());
                 newLine.setConvertedDebit(updatedLine.getConvertedDebit());
                 newLine.setConvertedCredit(updatedLine.getConvertedCredit());
-                newLine.setExchangeRateDate(String.valueOf(updatedLine.getExchangeRateDate()));
+
+                // ✅ For new lines, try to get exchangeRateDate from piece or request
+                if (updatedLine.getExchangeRateDate() != null &&
+                        !updatedLine.getExchangeRateDate().toString().isEmpty() &&
+                        !updatedLine.getExchangeRateDate().toString().equals("null")) {
+                    newLine.setExchangeRateDate(updatedLine.getExchangeRateDate().toString());
+                } else if (existingEcriture.getPiece() != null &&
+                        existingEcriture.getPiece().getExchangeRateDate() != null) {
+                    // Get from piece if not provided in request
+                    newLine.setExchangeRateDate(existingEcriture.getPiece().getExchangeRateDate().toString());
+                    log.info("📅 Set exchange rate date for new line from piece: {}", existingEcriture.getPiece().getExchangeRateDate());
+                } else {
+                    newLine.setExchangeRateDate(null);
+                }
 
                 if (manuallyUpdated != null && manuallyUpdated) {
                     newLine.setManuallyUpdated(true);

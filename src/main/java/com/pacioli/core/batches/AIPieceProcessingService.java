@@ -88,16 +88,10 @@ public class AIPieceProcessingService {
     public void processPieceBatch() {
         // Only get UPLOADED pieces for new processing (excluding duplicates)
         List<Piece> pendingPieces;
-        pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED)
-                .stream()
-                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                .collect(Collectors.toList());
+        pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED).stream().filter(piece -> !duplicateDetectionService.isDuplicate(piece)).collect(Collectors.toList());
 
         if (pendingPieces.size() == 0) {
-            pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING)
-                    .stream()
-                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                    .collect(Collectors.toList());
+            pendingPieces = pieceRepository.findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING).stream().filter(piece -> !duplicateDetectionService.isDuplicate(piece)).collect(Collectors.toList());
         }
 
         log.info("⭐️ Starting batch processing");
@@ -135,11 +129,8 @@ public class AIPieceProcessingService {
 
         try {
             // Skip if already processed or is a duplicate
-            if (currentPiece.getStatus() == PieceStatus.PROCESSED ||
-                    currentPiece.getStatus() == PieceStatus.DUPLICATE ||
-                    duplicateDetectionService.isDuplicate(currentPiece)) {
-                log.info("⏭️ Skipping piece {} - status: {}, isDuplicate: {}",
-                        currentPiece.getId(), currentPiece.getStatus(), currentPiece.getIsDuplicate());
+            if (currentPiece.getStatus() == PieceStatus.PROCESSED || currentPiece.getStatus() == PieceStatus.DUPLICATE || duplicateDetectionService.isDuplicate(currentPiece)) {
+                log.info("⏭️ Skipping piece {} - status: {}, isDuplicate: {}", currentPiece.getId(), currentPiece.getStatus(), currentPiece.getIsDuplicate());
                 return;
             }
 
@@ -176,15 +167,15 @@ public class AIPieceProcessingService {
                 return;
             }
 
+            // BUILD THE PIECE DTO (this does the conversion)
             PieceDTO pieceDTO = buildPieceDTO(currentPiece, root.get("outputText"));
 
-            // The saveEcrituresAndFacture method will now handle comprehensive duplicate detection
+             // ✅ CREATE A NEW JSON NODE WITH THE CONVERTED DATA
+            JsonNode convertedResponse = createConvertedResponseNode(pieceDTO, root.get("outputText"));
+
+           // The saveEcrituresAndFacture method will now handle comprehensive duplicate detection
             // and WebSocket notification
-            pieceService.saveEcrituresAndFacture(
-                    currentPiece.getId(),
-                    currentPiece.getDossier().getId(),
-                    objectMapper.writeValueAsString(pieceDTO),
-                    root.get("outputText") // ADD THIS PARAMETER - the original AI response
+            pieceService.saveEcrituresAndFacture(currentPiece.getId(), currentPiece.getDossier().getId(), objectMapper.writeValueAsString(pieceDTO), convertedResponse  // ✅ PASS THE CONVERTED DATA INSTEAD
             );
 
         } catch (Exception e) {
@@ -197,6 +188,90 @@ public class AIPieceProcessingService {
         }
     }
 
+    /**
+     * Creates a JSON node that mimics the AI response structure but with converted currency data
+     */
+    private JsonNode createConvertedResponseNode(PieceDTO pieceDTO, JsonNode originalResponse) {
+        try {
+            // Parse the original response
+            String responseText = originalResponse.asText();
+            JsonNode parsedOriginal = objectMapper.readTree(responseText);
+
+            // Create a new object node to hold the converted data
+            ObjectNode convertedRoot = objectMapper.createObjectNode();
+
+            // Build the ecritures array from the PieceDTO which has the converted data
+            ArrayNode ecrituresArray = objectMapper.createArrayNode();
+
+            if (pieceDTO.getEcritures() != null && !pieceDTO.getEcritures().isEmpty()) {
+                EcrituresDTO2 ecriture = pieceDTO.getEcritures().get(0);
+
+                for (LineDTO line : ecriture.getLines()) {
+                    ObjectNode entryNode = objectMapper.createObjectNode();
+
+                    // Set basic fields
+                    entryNode.put("Date", ecriture.getEntryDate());
+                    entryNode.put("JournalCode", ecriture.getJournal().getName());
+                    entryNode.put("JournalLib", ecriture.getJournal().getType());
+                    entryNode.put("FactureNum", pieceDTO.getFactureData() != null ? pieceDTO.getFactureData().getInvoiceNumber() : "");
+                    entryNode.put("CompteNum", line.getAccount().getAccount());
+                    entryNode.put("CompteLib", line.getAccount().getLabel());
+                    entryNode.put("EcritLib", line.getLabel());
+
+                    // Set amount fields - check if conversion happened
+                    if (line.getOriginalDebit() != null && line.getConvertedDebit() != null && !line.getOriginalDebit().equals(line.getConvertedDebit())) {
+                        // Conversion happened
+                        entryNode.put("OriginalDebitAmt", line.getOriginalDebit());
+                        entryNode.put("DebitAmt", line.getConvertedDebit());
+                        entryNode.put("OriginalCreditAmt", line.getOriginalCredit());
+                        entryNode.put("CreditAmt", line.getConvertedCredit());
+                        entryNode.put("OriginalDevise", line.getOriginalCurrency());
+                        entryNode.put("Devise", line.getConvertedCurrency());
+                    } else {
+                        // No conversion
+                        entryNode.put("DebitAmt", line.getDebit());
+                        entryNode.put("CreditAmt", line.getCredit());
+                        entryNode.put("Devise", line.getOriginalCurrency() != null ? line.getOriginalCurrency() : (line.getConvertedCurrency() != null ? line.getConvertedCurrency() : "USD"));
+                    }
+
+                    // Set exchange rate info if available
+                    if (line.getExchangeRate() != null) {
+                        entryNode.put("ExchangeRate", line.getExchangeRate());
+                    }
+                    if (line.getExchangeRateDate() != null) {
+                        entryNode.put("ExchangeRateDate", line.getExchangeRateDate().toString());
+                    }
+
+                    // Set USD amounts if available
+                    if (line.getUsdDebit() != null) {
+                        entryNode.put("UsdDebitAmt", line.getUsdDebit());
+                    }
+                    if (line.getUsdCredit() != null) {
+                        entryNode.put("UsdCreditAmt", line.getUsdCredit());
+                    }
+
+                    // Set TVA rate
+                    if (pieceDTO.getFactureData() != null && pieceDTO.getFactureData().getTaxRate() != null) {
+                        entryNode.put("TVARate", pieceDTO.getFactureData().getTaxRate().toString());
+                    } else {
+                        entryNode.put("TVARate", "");
+                    }
+
+                    ecrituresArray.add(entryNode);
+                }
+            }
+
+            convertedRoot.set("ecritures", ecrituresArray);
+
+            // Wrap it as a text node to match the original structure
+            return objectMapper.valueToTree(objectMapper.writeValueAsString(convertedRoot));
+
+        } catch (Exception e) {
+            log.error("💥 Error creating converted response node: {}", e.getMessage(), e);
+            // Fall back to original response if conversion fails
+            return originalResponse;
+        }
+    }
 
     private void rejectPiece(Piece piece, String reason) {
         log.error("Rejecting piece {}: {}", piece.getId(), reason);
@@ -235,11 +310,7 @@ public class AIPieceProcessingService {
             }
 
             PieceDTO pieceDTO = buildPieceDTO(piece, root.get("outputText"));
-            pieceService.saveEcrituresAndFacture(
-                    piece.getId(),
-                    piece.getDossier().getId(),
-                    objectMapper.writeValueAsString(pieceDTO),
-                    root.get("outputText")
+            pieceService.saveEcrituresAndFacture(piece.getId(), piece.getDossier().getId(), objectMapper.writeValueAsString(pieceDTO), root.get("outputText")
 
             );
             log.info("DOSSIER ID 4 {}", piece.getDossier().getId());
@@ -274,12 +345,7 @@ public class AIPieceProcessingService {
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-api-key", apiKey);
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                aiServiceUrl + jsonFilename,
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                String.class
-        );
+        ResponseEntity<String> response = restTemplate.exchange(aiServiceUrl + jsonFilename, HttpMethod.GET, new HttpEntity<>(headers), String.class);
 
         log.info("📡 AI service response status: {}", response.getStatusCode());
 
@@ -365,8 +431,7 @@ public class AIPieceProcessingService {
             // Log a portion of the input to help diagnose the issue
             if (node != null) {
                 String text = node.asText();
-                log.error("Input excerpt (first 100 chars): {}",
-                        text.length() > 100 ? text.substring(0, 100) + "..." : text);
+                log.error("Input excerpt (first 100 chars): {}", text.length() > 100 ? text.substring(0, 100) + "..." : text);
             }
             return false;
         }
@@ -383,10 +448,7 @@ public class AIPieceProcessingService {
         log.debug("Validating ecriture: {}", entry);
 
         // Validate required fields exist and aren't empty
-        String[] requiredStringFields = {
-                "Date", "JournalCode", "JournalLib", "FactureNum",
-                "CompteNum", "CompteLib", "EcritLib", "Devise"
-        };
+        String[] requiredStringFields = {"Date", "JournalCode", "JournalLib", "FactureNum", "CompteNum", "CompteLib", "EcritLib", "Devise"};
 
         for (String field : requiredStringFields) {
             if (!entry.has(field)) {
@@ -483,8 +545,7 @@ public class AIPieceProcessingService {
 
                 invoiceCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
                 piece.setAiCurrency(invoiceCurrencyCode);
-                log.info("💱 Set AI currency for piece {}: {} (normalized from '{}')",
-                        piece.getId(), invoiceCurrencyCode, rawCurrency);
+                log.info("💱 Set AI currency for piece {}: {} (normalized from '{}')", piece.getId(), invoiceCurrencyCode, rawCurrency);
             } else {
                 log.info("⚠️ No currency information found in AI response, using default USD");
                 invoiceCurrencyCode = "USD";
@@ -496,11 +557,9 @@ public class AIPieceProcessingService {
 
             // Get the dossier currency
             Long dossierId = piece.getDossier().getId();
-            Dossier dossier = dossierRepository.findById(dossierId)
-                    .orElseThrow(() -> new RuntimeException("Dossier not found: " + dossierId));
+            Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new RuntimeException("Dossier not found: " + dossierId));
 
-            String dossierCurrencyCode = dossier.getCurrency() != null ?
-                    normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode()) : "MAD";
+            String dossierCurrencyCode = dossier.getCurrency() != null ? normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode()) : "MAD";
 
             log.info("💱 Dossier {} has currency {}", dossierId, dossierCurrencyCode);
 
@@ -525,12 +584,7 @@ public class AIPieceProcessingService {
                 pieceRepository.save(piece);
 
                 // Convert the currency values in ecritures
-                convertedEcrituresNode = convertCurrencyIfNeeded(
-                        ecrituresNode,
-                        invoiceDate,
-                        invoiceCurrencyCode,
-                        dossierCurrencyCode
-                );
+                convertedEcrituresNode = convertCurrencyIfNeeded(ecrituresNode, invoiceDate, invoiceCurrencyCode, dossierCurrencyCode);
             } else {
                 log.info("💱 No currency conversion needed");
                 convertedEcrituresNode = ecrituresNode;
@@ -578,12 +632,7 @@ public class AIPieceProcessingService {
         }
     }
 
-    private JsonNode convertCurrencyIfNeeded(
-            JsonNode ecrituresNode,
-            LocalDate invoiceDate,
-            String invoiceCurrencyCode,
-            String dossierCurrencyCode
-    ) {
+    private JsonNode convertCurrencyIfNeeded(JsonNode ecrituresNode, LocalDate invoiceDate, String invoiceCurrencyCode, String dossierCurrencyCode) {
         // Normalize currency codes to ensure consistent comparisons
         invoiceCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(invoiceCurrencyCode);
         dossierCurrencyCode = normalizeCurrencyCode.normalizeCurrencyCode(dossierCurrencyCode);
@@ -640,12 +689,10 @@ public class AIPieceProcessingService {
             }
 
             if (debitAmt > 0) {
-                log.info("💱 Converting debit: {} {} → {} {}",
-                        debitAmt, invoiceCurrencyCode, convertedDebitAmt, dossierCurrencyCode);
+                log.info("💱 Converting debit: {} {} → {} {}", debitAmt, invoiceCurrencyCode, convertedDebitAmt, dossierCurrencyCode);
             }
             if (creditAmt > 0) {
-                log.info("💱 Converting credit: {} {} → {} {}",
-                        creditAmt, invoiceCurrencyCode, convertedCreditAmt, dossierCurrencyCode);
+                log.info("💱 Converting credit: {} {} → {} {}", creditAmt, invoiceCurrencyCode, convertedCreditAmt, dossierCurrencyCode);
             }
 
             // Store original values
@@ -702,8 +749,7 @@ public class AIPieceProcessingService {
 
             // Apply date rules to get the effective date for exchange rate lookup
             LocalDate effectiveDate = determineEffectiveDate(invoiceDate);
-            log.info("📅 Using effective date for exchange rate: {} (original invoice date: {})",
-                    effectiveDate, invoiceDate);
+            log.info("📅 Using effective date for exchange rate: {} (original invoice date: {})", effectiveDate, invoiceDate);
 
             // Get exchange rates for effective date
             ExchangeRate invoiceCurrencyRate = null;
@@ -713,8 +759,7 @@ public class AIPieceProcessingService {
                 invoiceCurrencyRate = exchangeRateService.getExchangeRate(invoiceCurrencyCode, effectiveDate);
                 log.info("💱 Got exchange rate for {}: {}", invoiceCurrencyCode, invoiceCurrencyRate);
             } catch (Exception e) {
-                log.error("Failed to get exchange rate for {} on date {}: {}",
-                        invoiceCurrencyCode, effectiveDate, e.getMessage());
+                log.error("Failed to get exchange rate for {} on date {}: {}", invoiceCurrencyCode, effectiveDate, e.getMessage());
                 // Use a default fallback rate
                 invoiceCurrencyRate = createFallbackExchangeRate(invoiceCurrencyCode, effectiveDate);
                 log.info("💱 Using fallback exchange rate for {}: {}", invoiceCurrencyCode, invoiceCurrencyRate.getRate());
@@ -724,8 +769,7 @@ public class AIPieceProcessingService {
                 dossierCurrencyRate = exchangeRateService.getExchangeRate(dossierCurrencyCode, effectiveDate);
                 log.info("💱 Got exchange rate for {}: {}", dossierCurrencyCode, dossierCurrencyRate);
             } catch (Exception e) {
-                log.error("Failed to get exchange rate for {} on date {}: {}",
-                        dossierCurrencyCode, effectiveDate, e.getMessage());
+                log.error("Failed to get exchange rate for {} on date {}: {}", dossierCurrencyCode, effectiveDate, e.getMessage());
                 // Use a default fallback rate
                 dossierCurrencyRate = createFallbackExchangeRate(dossierCurrencyCode, effectiveDate);
                 log.info("💱 Using fallback exchange rate for {}: {}", dossierCurrencyCode, dossierCurrencyRate.getRate());
@@ -743,8 +787,7 @@ public class AIPieceProcessingService {
             }
 
             // Apply currency conversion rules
-            double rate = calculateConversionRate(invoiceCurrencyCode, dossierCurrencyCode,
-                    invoiceCurrencyRate, dossierCurrencyRate);
+            double rate = calculateConversionRate(invoiceCurrencyCode, dossierCurrencyCode, invoiceCurrencyRate, dossierCurrencyRate);
             log.info("💱 Final exchange rate: 1 {} = {} {}", invoiceCurrencyCode, rate, dossierCurrencyCode);
             return rate;
         } catch (Exception e) {
@@ -806,8 +849,7 @@ public class AIPieceProcessingService {
 
         // Rule 2: If invoice date is after or equal to today, use yesterday
         if (invoiceDate.isEqual(today) || invoiceDate.isAfter(today)) {
-            log.info("📅 Invoice date {} is today or in the future, using yesterday's date ({}) for exchange rate",
-                    invoiceDate, today.minusDays(1));
+            log.info("📅 Invoice date {} is today or in the future, using yesterday's date ({}) for exchange rate", invoiceDate, today.minusDays(1));
             return today.minusDays(1);
         }
 
@@ -818,12 +860,7 @@ public class AIPieceProcessingService {
 
 
     // Fixed calculateConversionRate method with null safety
-    private double calculateConversionRate(
-            String invoiceCurrencyCode,
-            String dossierCurrencyCode,
-            ExchangeRate invoiceCurrencyRate,
-            ExchangeRate dossierCurrencyRate
-    ) {
+    private double calculateConversionRate(String invoiceCurrencyCode, String dossierCurrencyCode, ExchangeRate invoiceCurrencyRate, ExchangeRate dossierCurrencyRate) {
         // Safety check - shouldn't happen due to fallbacks in calling method
         if (invoiceCurrencyRate == null || dossierCurrencyRate == null) {
             log.error("💥 Null exchange rates in calculateConversionRate despite fallbacks");
@@ -855,19 +892,14 @@ public class AIPieceProcessingService {
         // Case 3: Neither currency is USD
         log.info("💱 Case 3: Neither currency is USD, calculating cross rate");
         double rate = dossierCurrencyRate.getRate() / invoiceCurrencyRate.getRate();
-        log.info("💱 Cross rate calculation: {} / {} = {}",
-                dossierCurrencyRate.getRate(), invoiceCurrencyRate.getRate(), rate);
+        log.info("💱 Cross rate calculation: {} / {} = {}", dossierCurrencyRate.getRate(), invoiceCurrencyRate.getRate(), rate);
         return rate;
     }
 
     private String formatDateToStandard(String dateStr) {
         try {
             // Try parsing different date formats
-            List<DateTimeFormatter> formatters = Arrays.asList(
-                    DateTimeFormatter.ofPattern("dd/MM/yyyy"),
-                    DateTimeFormatter.ofPattern("yyyy-MM-dd"),
-                    DateTimeFormatter.ofPattern("dd-MM-yyyy")
-            );
+            List<DateTimeFormatter> formatters = Arrays.asList(DateTimeFormatter.ofPattern("dd/MM/yyyy"), DateTimeFormatter.ofPattern("yyyy-MM-dd"), DateTimeFormatter.ofPattern("dd-MM-yyyy"));
 
             LocalDate date = null;
             for (DateTimeFormatter formatter : formatters) {
@@ -1007,8 +1039,7 @@ public class AIPieceProcessingService {
             factureData.setDevise(normalizedCurrency);
             factureData.setOriginalCurrency(normalizedCurrency);
 
-            log.info("Set normalized currency in FactureData: {} (from '{}')",
-                    normalizedCurrency, rawCurrency);
+            log.info("Set normalized currency in FactureData: {} (from '{}')", normalizedCurrency, rawCurrency);
         }
 
         // Add currency conversion information if available
@@ -1018,9 +1049,7 @@ public class AIPieceProcessingService {
         }
 
         if (entry.has("ConvertedDevise") || entry.has("Devise")) {
-            String rawCurrency = entry.has("ConvertedDevise") ?
-                    entry.get("ConvertedDevise").asText() :
-                    entry.get("Devise").asText();
+            String rawCurrency = entry.has("ConvertedDevise") ? entry.get("ConvertedDevise").asText() : entry.get("Devise").asText();
 
             factureData.setConvertedCurrency(normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency));
         }
@@ -1065,8 +1094,7 @@ public class AIPieceProcessingService {
             factureData.setUsdTotalTVA(parseDouble(entry.get("UsdTotalTVA").asText()));
         }
 
-        log.info("Built FactureData DTO: invoiceNumber={}, invoiceDate={}, currency={}",
-                factureData.getInvoiceNumber(), factureData.getInvoiceDate(), factureData.getDevise());
+        log.info("Built FactureData DTO: invoiceNumber={}, invoiceDate={}, currency={}", factureData.getInvoiceNumber(), factureData.getInvoiceDate(), factureData.getDevise());
 
         return factureData;
     }
@@ -1167,8 +1195,7 @@ public class AIPieceProcessingService {
             dateStr = dateStr.trim();
 
             // List of potential formatters to try
-            List<DateTimeFormatter> formatters = Arrays.asList(
-                    DateTimeFormatter.ofPattern("yyyy-MM-d"),   // Handle single-digit day
+            List<DateTimeFormatter> formatters = Arrays.asList(DateTimeFormatter.ofPattern("yyyy-MM-d"),   // Handle single-digit day
                     DateTimeFormatter.ofPattern("yyyy-M-dd"),   // Handle single-digit month
                     DateTimeFormatter.ofPattern("yyyy-M-d"),    // Handle single-digit month and day
                     DateTimeFormatter.ofPattern("yyyy-MM-dd"),  // Standard format

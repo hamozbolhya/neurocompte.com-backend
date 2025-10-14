@@ -623,7 +623,8 @@ public class PieceServiceImpl implements PieceService {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         // Fetch the Dossier explicitly
-        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         log.info("Fetched Dossier ID: {}", dossier.getId());
 
         // Parse original AI response to get exact string values
@@ -640,7 +641,8 @@ public class PieceServiceImpl implements PieceService {
         }
 
         // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream().collect(Collectors.toMap(Account::getAccount, Function.identity()));
+        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
+                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
         List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -653,90 +655,180 @@ public class PieceServiceImpl implements PieceService {
                 ecriture.setManuallyUpdated(false);
             }
 
-            if (ecriture.getManuallyUpdated() == null) {
-                ecriture.setManuallyUpdated(false);
-            }
-
-            // Find or create Journal (existing logic)
-            Journal journal = journals.stream().filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName())).findFirst().orElseGet(() -> {
-                log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                Journal newJournal = new Journal(ecriture.getJournal().getName(), ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
-                Journal savedJournal = journalRepository.save(newJournal);
-                journals.add(savedJournal);
-                return savedJournal;
-            });
+            // Find or create Journal
+            Journal journal = journals.stream()
+                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
+                        Journal newJournal = new Journal(
+                                ecriture.getJournal().getName(),
+                                ecriture.getJournal().getType(),
+                                dossier.getCabinet(),
+                                dossier
+                        );
+                        Journal savedJournal = journalRepository.save(newJournal);
+                        journals.add(savedJournal);
+                        return savedJournal;
+                    });
             ecriture.setJournal(journal);
 
             try {
                 Ecriture savedEcriture = ecritureRepository.save(ecriture);
 
-                // Process lines with exact precision from original AI response
+                // Process lines
                 for (int j = 0; j < ecriture.getLines().size(); j++) {
                     Line line = ecriture.getLines().get(j);
                     line.setEcriture(savedEcriture);
+
                     if (line.getManuallyUpdated() == null) {
                         line.setManuallyUpdated(false);
                     }
-                    if (line.getManuallyUpdated() == null) {
-                        line.setManuallyUpdated(false);
-                    }
-                    // Use exact precision from original AI response if available
-                    if (originalEcritures != null && j < originalEcritures.size()) {
-                        JsonNode originalEntry = originalEcritures.get(j);
 
-                        // Set amounts using exact string values
-                        if (originalEntry.has("OriginalDebitAmt")) {
-                            // Currency conversion case
-                            line.setOriginalDebitExact(originalEntry.get("OriginalDebitAmt").asText());
-                            line.setDebitExact(originalEntry.get("OriginalDebitAmt").asText());
-                            line.setConvertedDebitExact(originalEntry.get("DebitAmt").asText());
+                    // ✅ THE KEY FIX: Check if the line already has currency info from the DTO
+                    boolean hasConversionInfo = (line.getOriginalCurrency() != null &&
+                            line.getConvertedCurrency() != null &&
+                            !line.getOriginalCurrency().equals(line.getConvertedCurrency()));
 
-                            line.setOriginalCreditExact(originalEntry.get("OriginalCreditAmt").asText());
-                            line.setCreditExact(originalEntry.get("OriginalCreditAmt").asText());
-                            line.setConvertedCreditExact(originalEntry.get("CreditAmt").asText());
-                        } else {
-                            // No conversion case
-                            line.setDebitExact(originalEntry.get("DebitAmt").asText());
-                            line.setCreditExact(originalEntry.get("CreditAmt").asText());
-                        }
+                    if (hasConversionInfo) {
+                        // ✅ Line already has proper conversion info from the DTO, use it!
+                        log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}",
+                                line.getOriginalCurrency(), line.getConvertedCurrency());
 
-                        // Set USD amounts if available
-                        if (originalEntry.has("UsdDebitAmt")) {
-                            line.setUsdDebitExact(originalEntry.get("UsdDebitAmt").asText());
-                        }
-                        if (originalEntry.has("UsdCreditAmt")) {
-                            line.setUsdCreditExact(originalEntry.get("UsdCreditAmt").asText());
-                        }
+                        // Set exact precision from original AI response if available
+                        if (originalEcritures != null && j < originalEcritures.size()) {
+                            JsonNode originalEntry = originalEcritures.get(j);
 
-                        // Set exchange rate
-                        if (originalEntry.has("ExchangeRate")) {
-                            line.setExchangeRateExact(originalEntry.get("ExchangeRate").asText());
-                        }
+                            // Only set the exact string values, DON'T overwrite currencies
+                            if (line.getOriginalDebit() != null) {
+                                line.setOriginalDebitExact(String.valueOf(line.getOriginalDebit()));
+                            }
+                            if (line.getConvertedDebit() != null) {
+                                line.setConvertedDebitExact(String.valueOf(line.getConvertedDebit()));
+                            }
+                            if (line.getDebit() != null) {
+                                line.setDebitExact(String.valueOf(line.getDebit()));
+                            }
 
-                        // Set currencies
-                        if (originalEntry.has("OriginalDevise")) {
-                            line.setOriginalCurrency(originalEntry.get("OriginalDevise").asText());
-                        }
-                        if (originalEntry.has("Devise")) {
-                            line.setConvertedCurrency(originalEntry.get("Devise").asText());
-                        }
-                        // Set exchange rate date
-                        if (originalEntry.has("ExchangeRateDate")) {
-                            try {
-                                line.setExchangeRateDate(originalEntry.get("ExchangeRateDate").asText());
-                            } catch (Exception e) {
-                                log.trace("Error parsing exchange rate date: {}", e.getMessage());
+                            if (line.getOriginalCredit() != null) {
+                                line.setOriginalCreditExact(String.valueOf(line.getOriginalCredit()));
+                            }
+                            if (line.getConvertedCredit() != null) {
+                                line.setConvertedCreditExact(String.valueOf(line.getConvertedCredit()));
+                            }
+                            if (line.getCredit() != null) {
+                                line.setCreditExact(String.valueOf(line.getCredit()));
+                            }
+
+                            // Set exchange rate exact if available
+                            if (line.getExchangeRate() != null) {
+                                line.setExchangeRateExact(String.valueOf(line.getExchangeRate()));
                             }
                         }
+                    } else {
+                        // ✅ No conversion info in DTO, use original AI response
+                        log.info("💱 No conversion info in DTO, using original AI response");
+
+                        if (originalEcritures != null && j < originalEcritures.size()) {
+                            JsonNode originalEntry = originalEcritures.get(j);
+
+                            // Set amounts using exact string values
+                            if (originalEntry.has("OriginalDebitAmt")) {
+                                // Currency conversion case
+                                line.setOriginalDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                                line.setDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                                line.setConvertedDebitExact(originalEntry.get("DebitAmt").asText());
+
+                                line.setOriginalCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                                line.setCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                                line.setConvertedCreditExact(originalEntry.get("CreditAmt").asText());
+                            } else {
+                                // No conversion case
+                                line.setDebitExact(originalEntry.get("DebitAmt").asText());
+                                line.setCreditExact(originalEntry.get("CreditAmt").asText());
+                            }
+
+                            // Set USD amounts if available
+                            if (originalEntry.has("UsdDebitAmt")) {
+                                line.setUsdDebitExact(originalEntry.get("UsdDebitAmt").asText());
+                            }
+                            if (originalEntry.has("UsdCreditAmt")) {
+                                line.setUsdCreditExact(originalEntry.get("UsdCreditAmt").asText());
+                            }
+
+                            // Set exchange rate
+                            if (originalEntry.has("ExchangeRate")) {
+                                line.setExchangeRateExact(originalEntry.get("ExchangeRate").asText());
+                            }
+
+                            // Set currencies ONLY if not already set from DTO
+                            if (line.getOriginalCurrency() == null) {
+                                if (originalEntry.has("OriginalDevise")) {
+                                    line.setOriginalCurrency(originalEntry.get("OriginalDevise").asText());
+                                }
+                            }
+
+                            if (line.getConvertedCurrency() == null) {
+                                if (originalEntry.has("Devise")) {
+                                    line.setConvertedCurrency(originalEntry.get("Devise").asText());
+                                }
+                            }
+
+                            // Set exchange rate date
+                            // Set exchange rate date
+                            if (originalEntry.has("ExchangeRateDate") && !originalEntry.get("ExchangeRateDate").isNull()) {
+                                try {
+                                    String dateStr = originalEntry.get("ExchangeRateDate").asText();
+                                    if (dateStr != null && !dateStr.isEmpty() && !dateStr.equals("null")) {
+                                        line.setExchangeRateDate(dateStr);
+                                    } else {
+                                        line.setExchangeRateDate(null);
+                                    }
+                                } catch (Exception e) {
+                                    log.trace("Error parsing exchange rate date: {}", e.getMessage());
+                                    line.setExchangeRateDate(null);
+                                }
+                            } else {
+                                // If not provided or is null in JSON, try to get from piece
+                                if (piece.getExchangeRateDate() != null) {
+                                    line.setExchangeRateDate(piece.getExchangeRateDate().toString());
+                                    log.info("📅 Set exchange rate date from piece: {}", piece.getExchangeRateDate());
+                                } else {
+                                    line.setExchangeRateDate(null);
+                                }
+                            }
+                           // ✅ ADD THIS: If still null, get from piece
+                            if (line.getExchangeRateDate() == null && piece.getExchangeRateDate() != null) {
+                                line.setExchangeRateDate(piece.getExchangeRateDate().toString());
+                                log.info("📅 Set exchange rate date from piece: {}", piece.getExchangeRateDate());
+                            }
+                        }
+
+                        // If still no currency info, set from piece or default
+                        if (line.getOriginalCurrency() == null && line.getConvertedCurrency() == null) {
+                            String currency = piece.getAiCurrency() != null ? piece.getAiCurrency() : "USD";
+                            line.setOriginalCurrency(currency);
+                            line.setConvertedCurrency(currency);
+                            log.info("💱 Set default currency: {}", currency);
+                        }
                     }
 
-                    // FIXED: Handle account creation with proper duplicate prevention
+                    log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}",
+                            line.getLabel(),
+                            line.getOriginalCurrency(),
+                            line.getConvertedCurrency(),
+                            line.getExchangeRate(),
+                            line.getOriginalDebit(),
+                            line.getConvertedDebit());
+
+                    // Handle account creation
                     String accountNumber = line.getAccount().getAccount();
-                    Account account = findOrCreateAccount(accountNumber, dossier, journal, line.getAccount().getLabel(), accountMap);
+                    Account account = findOrCreateAccount(accountNumber, dossier, journal,
+                            line.getAccount().getLabel(), accountMap);
                     line.setAccount(account);
                 }
 
-                // Save Lines associated with the Ecriture
+                // Save Lines
                 lineRepository.saveAll(ecriture.getLines());
 
             } catch (Exception e) {

@@ -34,11 +34,6 @@ public class Journal {
     private List<Account> accounts;
 
     @OneToMany(mappedBy = "journal", cascade = CascadeType.ALL)
-    @JsonManagedReference("journal-entries") // Unique reference for Journal-Entries
-    @ToString.Exclude  // Prevent circular reference in toString
-    private List<Entry> entries;
-
-    @OneToMany(mappedBy = "journal", cascade = CascadeType.ALL)
     @JsonManagedReference("journal-ecritures") // Unique reference for Ecritures
     @ToString.Exclude  // Prevent circular reference in toString
     private List<Ecriture> ecritures;

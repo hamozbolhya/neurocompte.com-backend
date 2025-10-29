@@ -12,5 +12,6 @@ public class EcrituresDTO2 {
         private String entryDate;
         private JournalDTO journal;
         private List<LineDTO> lines; // ← ADD THIS FIELD
-        private Piece piece;
+        private Long pieceId;
+        private String pieceFilename;
 }

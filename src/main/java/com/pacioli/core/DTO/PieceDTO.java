@@ -3,11 +3,13 @@ package com.pacioli.core.DTO;
 import com.pacioli.core.enums.PieceStatus;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
 
+@Slf4j
 @Data
 public class PieceDTO {
     private Long id;
@@ -45,4 +47,18 @@ public class PieceDTO {
 
     private Long originalPieceId;
     private String originalPieceName;
+
+
+    public void setEcritures(List<EcrituresDTO2> ecritures) {
+        this.ecritures = ecritures;
+        // Debug log
+        if (ecritures != null) {
+            log.info("📊 Set {} ecritures in PieceDTO", ecritures.size());
+            for (int i = 0; i < ecritures.size(); i++) {
+                EcrituresDTO2 ecriture = ecritures.get(i);
+                log.info("  Ecriture {}: {} lines", i,
+                        ecriture.getLines() != null ? ecriture.getLines().size() : 0);
+            }
+        }
+    }
 }

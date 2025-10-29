@@ -1045,6 +1045,18 @@ public class PieceServiceImpl implements PieceService {
                 try {
                     if (piece.getEcritures() != null) {
                         Hibernate.initialize(piece.getEcritures());
+                        // ✅ CRITICAL: Also initialize lines within each ecriture
+                        piece.getEcritures().forEach(ecriture -> {
+                            if (ecriture.getLines() != null) {
+                                Hibernate.initialize(ecriture.getLines());
+                                // ✅ Also initialize account for each line
+                                ecriture.getLines().forEach(line -> {
+                                    if (line.getAccount() != null) {
+                                        Hibernate.initialize(line.getAccount());
+                                    }
+                                });
+                            }
+                        });
                     }
                     if (piece.getFactureData() != null) {
                         Hibernate.initialize(piece.getFactureData());
@@ -1098,28 +1110,70 @@ public class PieceServiceImpl implements PieceService {
                         dto.setFactureData(factureDataDTO);
                     }
 
+                    // ✅ FIXED: Include lines in ecritures (same as REST controller)
                     if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
-                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream().map(ecriture -> {
-                            EcrituresDTO2 dto2 = new EcrituresDTO2();
-                            dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
-                            dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
+                                .map(ecriture -> {
+                                    EcrituresDTO2 dto2 = new EcrituresDTO2();
+                                    dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
+                                    dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
 
-                            // Add journal information
-                            if (ecriture.getJournal() != null) {
-                                JournalDTO journalDTO = new JournalDTO();
-                                journalDTO.setName(ecriture.getJournal().getName());
-                                journalDTO.setType(ecriture.getJournal().getType());
-                                dto2.setJournal(journalDTO);
-                            }
+                                    // Add journal information
+                                    if (ecriture.getJournal() != null) {
+                                        JournalDTO journalDTO = new JournalDTO();
+                                        journalDTO.setName(ecriture.getJournal().getName());
+                                        journalDTO.setType(ecriture.getJournal().getType());
+                                        dto2.setJournal(journalDTO);
+                                    }
 
-                            return dto2;
-                        }).collect(Collectors.toList());
+                                    // ✅ ADD THIS: Map lines with account information
+                                    if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
+                                        List<LineDTO> linesDTOs = ecriture.getLines().stream()
+                                                .map(line -> {
+                                                    LineDTO lineDTO = new LineDTO();
+                                                    lineDTO.setId(line.getId());
+                                                    lineDTO.setLabel(line.getLabel());
+                                                    lineDTO.setDebit(line.getDebit());
+                                                    lineDTO.setCredit(line.getCredit());
+
+                                                    // Add account information
+                                                    if (line.getAccount() != null) {
+                                                        AccountDTO accountDTO = new AccountDTO();
+                                                        accountDTO.setId(line.getAccount().getId());
+                                                        accountDTO.setAccount(line.getAccount().getAccount());
+                                                        accountDTO.setLabel(line.getAccount().getLabel());
+                                                        lineDTO.setAccount(accountDTO);
+                                                    }
+
+                                                    // Add currency information if available
+                                                    lineDTO.setOriginalDebit(line.getOriginalDebit());
+                                                    lineDTO.setOriginalCredit(line.getOriginalCredit());
+                                                    lineDTO.setOriginalCurrency(line.getOriginalCurrency());
+                                                    lineDTO.setConvertedDebit(line.getConvertedDebit());
+                                                    lineDTO.setConvertedCredit(line.getConvertedCredit());
+                                                    lineDTO.setConvertedCurrency(line.getConvertedCurrency());
+                                                    lineDTO.setExchangeRate(line.getExchangeRate());
+                                                    lineDTO.setExchangeRateDate(line.getExchangeRateDate());
+                                                    lineDTO.setUsdDebit(line.getUsdDebit());
+                                                    lineDTO.setUsdCredit(line.getUsdCredit());
+
+                                                    return lineDTO;
+                                                })
+                                                .collect(Collectors.toList());
+                                        dto2.setLines(linesDTOs);
+                                        log.debug("✅ Mapped {} lines for ecriture {}", linesDTOs.size(), ecriture.getId());
+                                    }
+
+                                    return dto2;
+                                })
+                                .collect(Collectors.toList());
                         dto.setEcritures(ecrituresDTOs);
+                        log.info("✅ Mapped {} ecritures for piece {}", ecrituresDTOs.size(), piece.getId());
                     }
 
                     return dto;
                 } catch (Exception e) {
-                    log.error("Error mapping piece {} to DTO: {}", piece.getId(), e.getMessage());
+                    log.error("Error mapping piece {} to DTO: {}", piece.getId(), e.getMessage(), e);
                     // Return minimal DTO with error info
                     PieceDTO errorDto = new PieceDTO();
                     errorDto.setId(piece.getId());

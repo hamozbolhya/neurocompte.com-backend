@@ -12,6 +12,10 @@ import java.util.Objects;
 
 @Entity
 @Data
+@Table(name = "dossier",
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"name", "cabinet_id"})
+        })
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Dossier {
     @Id
@@ -44,7 +48,6 @@ public class Dossier {
     @ToString.Exclude  // Prevent circular reference in toString
     private List<Account> accounts;
 
-    @Column(unique = true)
     private String name;
     private String ICE;
     private String address;

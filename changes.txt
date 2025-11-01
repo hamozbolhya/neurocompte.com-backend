@@ -1,0 +1,12 @@
+-- Drop the old constraint
+ALTER TABLE dossier DROP CONSTRAINT ukhgme5v0la8ta43foxla441rs2;
+
+-- If the above doesn't work, find the exact constraint name:
+SELECT conname, contype, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'dossier'::regclass AND contype = 'u';
+
+-- Then drop it with the correct name
+ALTER TABLE dossier DROP CONSTRAINT your_constraint_name_here;
+
+-- Hibernate will create the new composite constraint automatically when you restart

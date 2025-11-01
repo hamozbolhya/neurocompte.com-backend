@@ -463,7 +463,7 @@ public class AIPieceProcessingService {
             }
         }
 
-        // Validate numeric fields (DebitAmt and CreditAmt)
+        // Validate numeric fields (DebitAmt and CreditAmt) with comma support
         String[] numericFields = {"DebitAmt", "CreditAmt"};
         for (String field : numericFields) {
             if (!entry.has(field)) {
@@ -476,8 +476,16 @@ public class AIPieceProcessingService {
             String rawValue = fieldNode.asText().trim();
 
             try {
+                // ✅ FIX: Replace comma with dot for European decimal format
+                String normalizedValue = rawValue.replace(',', '.');
+
+                // Handle empty values
+                if (normalizedValue.isEmpty()) {
+                    normalizedValue = "0";
+                }
+
                 // Attempt to parse as double
-                double value = Double.parseDouble(rawValue);
+                double value = Double.parseDouble(normalizedValue);
 
                 // Check for invalid values
                 if (Double.isInfinite(value) || Double.isNaN(value)) {
@@ -486,7 +494,7 @@ public class AIPieceProcessingService {
                 }
 
                 // All good with this field
-                log.debug("Successfully validated numeric field {}: {}", field, value);
+                log.debug("Successfully validated numeric field {}: {} (normalized from '{}')", field, value, rawValue);
             } catch (NumberFormatException e) {
                 log.error("❌ Field {} contains non-numeric value: '{}'", field, rawValue);
                 return false;
@@ -660,8 +668,8 @@ public class AIPieceProcessingService {
             });
 
             // Get original amounts
-            double debitAmt = entry.get("DebitAmt").asDouble();
-            double creditAmt = entry.get("CreditAmt").asDouble();
+            double debitAmt = parseDouble(entry.get("DebitAmt").asText());
+            double creditAmt = parseDouble(entry.get("CreditAmt").asText());
 
             // Apply conversion
             double convertedDebitAmt = debitAmt * exchangeRate;
@@ -927,8 +935,9 @@ public class AIPieceProcessingService {
     private Double calculateLargestAmount(JsonNode ecritures) {
         double maxAmount = 0.0;
         for (JsonNode entry : ecritures) {
-            double debit = entry.get("DebitAmt").asDouble();
-            double credit = entry.get("CreditAmt").asDouble();
+            // ✅ FIX: Use parseDouble method which handles comma separators
+            double debit = parseDouble(entry.get("DebitAmt").asText());
+            double credit = parseDouble(entry.get("CreditAmt").asText());
             maxAmount = Math.max(maxAmount, Math.max(debit, credit));
         }
         return maxAmount;
@@ -1100,13 +1109,16 @@ public class AIPieceProcessingService {
     }
 
     // Helper method to safely parse double values
+    // Helper method to safely parse double values with comma support
     private Double parseDouble(String value) {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
 
         try {
-            return Double.parseDouble(value);
+            // ✅ FIX: Replace comma with dot for European decimal format
+            String normalizedValue = value.replace(',', '.');
+            return Double.parseDouble(normalizedValue);
         } catch (NumberFormatException e) {
             log.trace("Error parsing double value: {}", value);
             return null;
@@ -1128,27 +1140,27 @@ public class AIPieceProcessingService {
 
             // Check if we have original amounts - if so, this means conversion happened
             if (entry.has("OriginalDebitAmt")) {
-                // Set original values
-                line.setOriginalDebit(entry.get("OriginalDebitAmt").asDouble());
+                // ✅ FIX: Use parseDouble for all numeric values
+                line.setOriginalDebit(parseDouble(entry.get("OriginalDebitAmt").asText()));
                 // Set regular debit to original (unconverted) amount
-                line.setDebit(entry.get("OriginalDebitAmt").asDouble());
+                line.setDebit(parseDouble(entry.get("OriginalDebitAmt").asText()));
                 // Set converted value
-                line.setConvertedDebit(entry.get("DebitAmt").asDouble());
+                line.setConvertedDebit(parseDouble(entry.get("DebitAmt").asText()));
             } else {
                 // No conversion happened, just set the regular debit
-                line.setDebit(entry.get("DebitAmt").asDouble());
+                line.setDebit(parseDouble(entry.get("DebitAmt").asText()));
             }
 
             if (entry.has("OriginalCreditAmt")) {
-                // Set original values
-                line.setOriginalCredit(entry.get("OriginalCreditAmt").asDouble());
+                // ✅ FIX: Use parseDouble for all numeric values
+                line.setOriginalCredit(parseDouble(entry.get("OriginalCreditAmt").asText()));
                 // Set regular credit to original (unconverted) amount
-                line.setCredit(entry.get("OriginalCreditAmt").asDouble());
+                line.setCredit(parseDouble(entry.get("OriginalCreditAmt").asText()));
                 // Set converted value
-                line.setConvertedCredit(entry.get("CreditAmt").asDouble());
+                line.setConvertedCredit(parseDouble(entry.get("CreditAmt").asText()));
             } else {
                 // No conversion happened, just set the regular credit
-                line.setCredit(entry.get("CreditAmt").asDouble());
+                line.setCredit(parseDouble(entry.get("CreditAmt").asText()));
             }
 
             // Set currency information

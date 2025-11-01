@@ -49,54 +49,41 @@ public class DossierServiceImpl implements DossierService {
     @Transactional
     public Dossier createDossier(Dossier dossier, List<Exercise> exercicesData) {
         String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Creating dossier: {}", requestId, dossier.getName());
+        log.info("[{}] Creating dossier: {} for cabinet: {}", requestId, dossier.getName(), dossier.getCabinet().getId());
 
-        // Check if a dossier with the same name already exists
-        Dossier existingDossier = dossierRepository.findByName(dossier.getName()).orElse(null);
+        // ✅ FIX: Check if a dossier with the same name exists IN THE SAME CABINET
+        Dossier existingDossier = dossierRepository.findByNameAndCabinetId(
+                dossier.getName(),
+                dossier.getCabinet().getId()
+        ).orElse(null);
 
         // Store whether this is a new dossier or an update
         boolean isNewDossier = existingDossier == null;
 
         if (existingDossier != null) {
-            // If a Dossier with the same name exists, update its details (except the name)
-            existingDossier.setICE(dossier.getICE());
-            existingDossier.setAddress(dossier.getAddress());
-            existingDossier.setCity(dossier.getCity());
-            existingDossier.setPhone(dossier.getPhone());
-            existingDossier.setEmail(dossier.getEmail());
-
-            // Update country relationship
-            existingDossier.setCountry(dossier.getCountry());
-
-            // Update decimal precision
-            if (dossier.getDecimalPrecision() != null) {
-                existingDossier.setDecimalPrecision(dossier.getDecimalPrecision());
-                log.info("[{}] Updated decimal precision to: {}", requestId, dossier.getDecimalPrecision());
-            }
-
-            dossier = existingDossier;
-        } else {
-            // If no Dossier with the same name exists, check the Cabinet
-            Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
-                    .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
-            dossier.setCabinet(cabinet);
-
-            // Set default decimal precision if not provided for new dossiers
-            if (dossier.getDecimalPrecision() == null) {
-                dossier.setDecimalPrecision(2);
-                log.info("[{}] Set default decimal precision to: 2", requestId);
-            }
+            log.error("[{}] Dossier with name '{}' already exists in cabinet {} with ID: {}",
+                    requestId, dossier.getName(), dossier.getCabinet().getId(), existingDossier.getId());
+            throw new IllegalArgumentException("Un dossier avec le nom '" + dossier.getName() + "' existe déjà dans ce cabinet.");
         }
 
-        // Save or update the Dossier
+        // If no Dossier with the same name exists in this cabinet, check the Cabinet exists
+        Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
+                .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
+        dossier.setCabinet(cabinet);
+
+        // Set default decimal precision if not provided for new dossiers
+        if (dossier.getDecimalPrecision() == null) {
+            dossier.setDecimalPrecision(2);
+            log.info("[{}] Set default decimal precision to: 2", requestId);
+        }
+
+        // Save the new Dossier
         Dossier savedDossier = dossierRepository.save(dossier);
-        log.info("[{}] Dossier saved with ID: {} and decimal precision: {}",
+        log.info("[{}] New dossier created with ID: {} and decimal precision: {}",
                 requestId, savedDossier.getId(), savedDossier.getDecimalPrecision());
 
-        // Create the list of default journals (only for new dossiers)
-        if (isNewDossier) {
-            createDefaultJournals(savedDossier);
-        }
+        // Create the list of default journals for new dossiers
+        createDefaultJournals(savedDossier);
 
         // Handle Exercise data if provided
         if (exercicesData != null && !exercicesData.isEmpty()) {
@@ -116,7 +103,7 @@ public class DossierServiceImpl implements DossierService {
             }
         }
 
-        // Call the AI Company API - use POST for new, PUT for existing
+        // Call the AI Company API - use POST for new companies
         String countryCode = savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : "NOT_FOUND";
 
         Company company = new Company();
@@ -126,25 +113,18 @@ public class DossierServiceImpl implements DossierService {
         company.setActivity(savedDossier.getActivity());
 
         try {
-            if (isNewDossier) {
-                // For new dossiers, use POST
-                log.info("[{}] Calling Company AI API to create company for dossier ID: {}", requestId, savedDossier.getId());
-                Company createdCompany = companyAiService.createCompany(company);
-                log.info("[{}] Company created successfully in AI service with ID: {}", requestId, createdCompany.getId());
-            } else {
-                // For existing dossiers, use PUT
-                log.info("[{}] Calling Company AI API to update company for dossier ID: {}", requestId, savedDossier.getId());
-                Company updatedCompany = companyAiService.updateCompany(savedDossier.getId(), company);
-                log.info("[{}] Company updated successfully in AI service with ID: {}", requestId, updatedCompany.getId());
-            }
+            // For new dossiers, use POST
+            log.info("[{}] Calling Company AI API to create company for dossier ID: {}", requestId, savedDossier.getId());
+            Company createdCompany = companyAiService.createCompany(company);
+            log.info("[{}] Company created successfully in AI service with ID: {}", requestId, createdCompany.getId());
+
         } catch (Exception e) {
             // Log the error and trigger a transaction rollback
-            log.error("[{}] Error creating/updating company in AI service for dossier ID {}: {}",
+            log.error("[{}] Error creating company in AI service for dossier ID {}: {}",
                     requestId, savedDossier.getId(), e.getMessage(), e);
 
             // The @Transactional annotation will ensure rollback on RuntimeException
-            throw new CompanyAiException("Erreur lors de la " + (isNewDossier ? "création" : "mise à jour") +
-                    " de la société dans le service AI: " + e.getMessage(), e);
+            throw new CompanyAiException("Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
         }
 
         return savedDossier;

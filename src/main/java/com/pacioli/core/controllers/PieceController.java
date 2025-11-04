@@ -35,12 +35,8 @@ public class PieceController {
     @Value("${file.upload.dir:Files/}")
     private String uploadDir;
     private final PieceService pieceService;
-
-    private final DossierService dossierService;
-
-    public PieceController(PieceService pieceService, DossierService dossierService) {
+    public PieceController(PieceService pieceService) {
         this.pieceService = pieceService;
-        this.dossierService = dossierService;
     }
 
     @GetMapping("/{Id}")

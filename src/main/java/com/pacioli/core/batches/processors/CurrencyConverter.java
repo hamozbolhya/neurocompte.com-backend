@@ -75,8 +75,9 @@ public class CurrencyConverter {
             ObjectNode convertedEntry = objectMapper.createObjectNode();
             entry.fields().forEachRemaining(field -> convertedEntry.set(field.getKey(), field.getValue()));
 
-            double debitAmt = entry.get("DebitAmt").asDouble();
-            double creditAmt = entry.get("CreditAmt").asDouble();
+            // ✅ ADDED: Use parseDouble for comma support
+            double debitAmt = parseDouble(entry.get("DebitAmt").asText());
+            double creditAmt = parseDouble(entry.get("CreditAmt").asText());
 
             double convertedDebitAmt = debitAmt * exchangeRate;
             double convertedCreditAmt = creditAmt * exchangeRate;
@@ -204,5 +205,21 @@ public class CurrencyConverter {
         }
         log.warn("❌ Could not parse date: {}. Using current date.", dateStr);
         return LocalDate.now();
+    }
+
+    // ✅ ADDED: parseDouble method with comma support
+    private double parseDouble(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return 0.0;
+        }
+
+        try {
+            // ✅ ADDED: Replace comma with dot for European decimal format
+            String normalizedValue = value.replace(',', '.');
+            return Double.parseDouble(normalizedValue);
+        } catch (NumberFormatException e) {
+            log.trace("Error parsing double value: {}", value);
+            return 0.0;
+        }
     }
 }

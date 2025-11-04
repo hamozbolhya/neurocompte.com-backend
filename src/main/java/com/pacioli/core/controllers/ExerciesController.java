@@ -1,5 +1,6 @@
 package com.pacioli.core.controllers;
 
+import com.pacioli.core.DTO.ExerciseRequest;
 import com.pacioli.core.models.Exercise;
 import com.pacioli.core.services.ExerciseService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,4 +32,12 @@ public class ExerciesController {
         return ResponseEntity.ok(exercises);
     }
 
+    @PostMapping("/dossier/{dossierId}")
+    public ResponseEntity<List<Exercise>> createExercisesForDossier(
+            @PathVariable Long dossierId,
+            @RequestBody List<ExerciseRequest> exerciseRequests) {
+
+        List<Exercise> createdExercises = exerciseService.createExercisesForDossier(dossierId, exerciseRequests);
+        return ResponseEntity.ok(createdExercises);
+    }
 }

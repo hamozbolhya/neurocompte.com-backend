@@ -13,8 +13,6 @@ import java.util.Optional;
 
 @Repository
 public interface DossierRepository extends JpaRepository<Dossier, Long> {
-    Optional<Dossier> findByName(String name);
-
     @Query("SELECT NEW com.pacioli.core.DTO.DossierDTO(" +
             "d.id, " +
             "d.name, " +
@@ -52,5 +50,6 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
     @Query("SELECT COUNT(d) FROM Dossier d WHERE d.cabinet.id = :cabinetId")
     Long countByCreatorAndCabinetId(@Param("cabinetId") Long cabinetId);
     Long countByCabinetId(Long cabinetId);
+    Optional<Dossier> findByNameAndCabinetId(String name, Long cabinetId);
 
 }

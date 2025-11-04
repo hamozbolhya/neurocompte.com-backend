@@ -38,11 +38,6 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     @Override
-    public List<Ecriture> getAllEcritures() {
-        return ecritureRepository.findAll();
-    }
-
-    @Override
     public List<Ecriture> getEcrituresByPieceId(Long pieceId) {
         return ecritureRepository.findByPieceId(pieceId);
     }

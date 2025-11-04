@@ -72,7 +72,22 @@ public class PieceValidator {
             return false;
         }
 
-        String[] requiredFields = {"Date", "JournalCode", "JournalLib", "FactureNum", "CompteNum", "CompteLib", "EcritLib", "Devise"};
+        // Different required fields for bank statements vs normal pieces
+        String[] requiredFields = {"Date", "JournalCode", "JournalLib", "CompteNum", "CompteLib", "EcritLib", "Devise"};
+        String[] numericFields = {"DebitAmt", "CreditAmt"};
+
+        return hasAllRequiredFields(entry, requiredFields) &&
+                hasValidNumericFields(entry, numericFields);
+    }
+
+    public boolean validateBankEcritureFields(JsonNode entry) {
+        if (entry == null) {
+            log.error("❌ Bank ecriture entry is null");
+            return false;
+        }
+
+        // Bank statements don't require FactureNum
+        String[] requiredFields = {"Date", "JournalCode", "JournalLib", "CompteNum", "CompteLib", "EcritLib", "Devise"};
         String[] numericFields = {"DebitAmt", "CreditAmt"};
 
         return hasAllRequiredFields(entry, requiredFields) &&
@@ -96,8 +111,12 @@ public class PieceValidator {
                 return false;
             }
 
-            if (!isValidNumericValue(entry.get(field).asText())) {
-                log.error("❌ Invalid numeric value for field {}: {}", field, entry.get(field).asText());
+            // ✅ ADDED: Comma support for European decimal format
+            String rawValue = entry.get(field).asText().trim();
+            String normalizedValue = rawValue.replace(',', '.');
+
+            if (!isValidNumericValue(normalizedValue)) {
+                log.error("❌ Invalid numeric value for field {}: {} (normalized from '{}')", field, normalizedValue, rawValue);
                 return false;
             }
         }
@@ -106,10 +125,74 @@ public class PieceValidator {
 
     private boolean isValidNumericValue(String value) {
         try {
-            double num = Double.parseDouble(value.trim());
+            // ✅ ADDED: Handle empty values
+            if (value.isEmpty()) {
+                value = "0";
+            }
+
+            double num = Double.parseDouble(value);
             return !Double.isInfinite(num) && !Double.isNaN(num);
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    public boolean isValidBankAIResponse(JsonNode root) {
+        return root.has("outputText") && validateBankEcritures(root.get("outputText"));
+    }
+
+    public boolean validateBankEcritures(JsonNode node) {
+        try {
+            String textValue = node.asText();
+
+            if (textValue == null || textValue.trim().isEmpty()) {
+                log.error("❌ Empty output text from bank AI service");
+                return false;
+            }
+
+            JsonNode parsedJson = parseJsonText(textValue);
+            JsonNode ecritures = findBankEcrituresNode(parsedJson);
+
+            return isValidBankEcrituresArray(ecritures);
+
+        } catch (Exception e) {
+            log.error("💥 Error validating bank ecritures: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    private JsonNode findBankEcrituresNode(JsonNode parsedJson) {
+        if (parsedJson.has("Ecritures")) {
+            JsonNode ecrituresNode = parsedJson.get("Ecritures");
+            if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                JsonNode firstItem = ecrituresNode.get(0);
+                if (firstItem.isArray() && firstItem.size() > 0) {
+                    JsonNode entriesNode = firstItem.get(0);
+                    if (entriesNode.has("entries")) {
+                        return entriesNode.get("entries");
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isValidBankEcrituresArray(JsonNode entries) {
+        if (entries == null || !entries.isArray() || entries.size() == 0) {
+            log.error("❌ Invalid bank entries array");
+            return false;
+        }
+
+        return validateAllBankEcritureEntries(entries);
+    }
+
+    private boolean validateAllBankEcritureEntries(JsonNode entries) {
+        for (int i = 0; i < entries.size(); i++) {
+            if (!validateBankEcritureFields(entries.get(i))) {
+                log.error("❌ Invalid bank ecriture at index {}: {}", i, entries.get(i));
+                return false;
+            }
+        }
+        return true;
     }
 }

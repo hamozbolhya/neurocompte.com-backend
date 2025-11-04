@@ -8,9 +8,6 @@ import java.time.LocalDate;
 import java.util.List;
 
 public interface EcritureService {
-    // Fetch all ecritures
-    List<Ecriture> getAllEcritures();
-
     // Fetch ecritures by Piece ID
     List<Ecriture> getEcrituresByPieceId(Long pieceId);
 

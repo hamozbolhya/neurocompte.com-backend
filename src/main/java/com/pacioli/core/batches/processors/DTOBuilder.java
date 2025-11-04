@@ -22,9 +22,12 @@ import java.util.*;
 @Slf4j
 public class DTOBuilder {
 
-    @Autowired private ObjectMapper objectMapper;
-    @Autowired private NormalizeCurrencyCode normalizeCurrencyCode;
-    @Autowired private CurrencyConverter currencyConverter;
+    @Autowired
+    private ObjectMapper objectMapper;
+    @Autowired
+    private NormalizeCurrencyCode normalizeCurrencyCode;
+    @Autowired
+    private CurrencyConverter currencyConverter;
 
     private static final List<DateTimeFormatter> DATE_FORMATTERS = Arrays.asList(
             DateTimeFormatter.ofPattern("dd/MM/yyyy"),
@@ -40,11 +43,18 @@ public class DTOBuilder {
         try {
             String responseText = aiResponse.asText();
             JsonNode parsedJson = objectMapper.readTree(responseText);
+
+            log.info("🔍 Parsed JSON structure - Root keys: {}", parsedJson.fieldNames());
+
             JsonNode ecrituresNode = findEcrituresNode(parsedJson);
 
             if (ecrituresNode == null || !ecrituresNode.isArray() || ecrituresNode.size() == 0) {
+                log.error("❌ No valid ecritures array found in AI response");
+                log.debug("❌ Available keys in parsed JSON: {}", parsedJson.fieldNames());
                 throw new IllegalArgumentException("No valid ecritures array found in AI response");
             }
+
+            log.info("✅ Found {} ecritures entries", ecrituresNode.size());
 
             JsonNode firstEntry = ecrituresNode.get(0);
             processPieceCurrencyAndAmount(piece, ecrituresNode, firstEntry);
@@ -71,17 +81,39 @@ public class DTOBuilder {
     }
 
     private String extractAndNormalizeCurrency(JsonNode entry) {
+        // ✅ FIX: Check if Devise field exists and is not null
         if (entry.has("Devise") && !entry.get("Devise").isNull() && !entry.get("Devise").asText().isEmpty()) {
             String rawCurrency = entry.get("Devise").asText();
-            return normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
+            String normalized = normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
+            log.info("💰 Extracted currency: {} -> {}", rawCurrency, normalized);
+            return normalized;
         }
         log.info("⚠️ No currency information found in AI response, using default USD");
         return "USD";
     }
 
     private JsonNode findEcrituresNode(JsonNode parsedJson) {
+        // First check for normal format
         if (parsedJson.has("ecritures")) return parsedJson.get("ecritures");
-        if (parsedJson.has("Ecritures")) return parsedJson.get("Ecritures");
+        if (parsedJson.has("Ecritures")) {
+            JsonNode ecrituresNode = parsedJson.get("Ecritures");
+
+            // Check if it's bank statement format (nested arrays with entries)
+            if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                JsonNode firstItem = ecrituresNode.get(0);
+                if (firstItem.isArray() && firstItem.size() > 0) {
+                    JsonNode entriesNode = firstItem.get(0);
+                    if (entriesNode.has("entries")) {
+                        log.info("🏦 Detected bank statement format with entries array");
+                        return entriesNode.get("entries");
+                    }
+                }
+            }
+
+            // If not bank format, return as-is (normal format)
+            log.info("📄 Detected normal Ecritures format");
+            return ecrituresNode;
+        }
         return null;
     }
 
@@ -124,6 +156,18 @@ public class DTOBuilder {
                 normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode()) : "MAD";
     }
 
+    // ✅ ADDED: Method to calculate largest amount with proper parsing
+    private Double calculateLargestAmount(JsonNode ecritures) {
+        double maxAmount = 0.0;
+        for (JsonNode entry : ecritures) {
+            // ✅ ADDED: Use parseDouble method which handles comma separators
+            double debit = parseDouble(entry.get("DebitAmt").asText());
+            double credit = parseDouble(entry.get("CreditAmt").asText());
+            maxAmount = Math.max(maxAmount, Math.max(debit, credit));
+        }
+        return maxAmount;
+    }
+
     public JsonNode createConvertedResponseNode(PieceDTO pieceDTO, JsonNode originalResponse) {
         try {
             String responseText = originalResponse.asText();
@@ -157,11 +201,17 @@ public class DTOBuilder {
         entryNode.put("Date", ecriture.getEntryDate());
         entryNode.put("JournalCode", ecriture.getJournal().getName());
         entryNode.put("JournalLib", ecriture.getJournal().getType());
-        entryNode.put("FactureNum", pieceDTO.getFactureData() != null ? pieceDTO.getFactureData().getInvoiceNumber() : "");
+
+        // Handle missing FactureNum for bank statements
+        String factureNum = pieceDTO.getFactureData() != null ?
+                pieceDTO.getFactureData().getInvoiceNumber() : "BANK-STMT";
+        entryNode.put("FactureNum", factureNum);
+
         entryNode.put("CompteNum", line.getAccount().getAccount());
         entryNode.put("CompteLib", line.getAccount().getLabel());
         entryNode.put("EcritLib", line.getLabel());
 
+        // Rest of the method remains the same...
         // Set amount fields - check if conversion happened
         if (line.getOriginalDebit() != null && line.getConvertedDebit() != null && !line.getOriginalDebit().equals(line.getConvertedDebit())) {
             // Conversion happened
@@ -208,8 +258,23 @@ public class DTOBuilder {
     private FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
 
-        // Set invoice number
-        factureData.setInvoiceNumber(entry.get("FactureNum").asText());
+        // Set invoice number - handle missing FactureNum for bank statements
+        if (entry.has("FactureNum") && !entry.get("FactureNum").isNull()) {
+            factureData.setInvoiceNumber(entry.get("FactureNum").asText());
+            log.info("📄 Normal invoice with FactureNum: {}", factureData.getInvoiceNumber());
+        } else {
+            // For bank statements, try to extract from EcritLib or generate default
+            String ecritLib = entry.has("EcritLib") ? entry.get("EcritLib").asText() : "";
+            if (ecritLib.contains("Facture")) {
+                // Try to extract invoice number from EcritLib
+                String invoiceNum = extractInvoiceNumberFromEcritLib(ecritLib);
+                factureData.setInvoiceNumber(invoiceNum);
+                log.info("🏦 Extracted invoice number from EcritLib: {}", invoiceNum);
+            } else {
+                factureData.setInvoiceNumber("BANK-" + System.currentTimeMillis());
+                log.info("🏦 Generated bank invoice number: {}", factureData.getInvoiceNumber());
+            }
+        }
 
         // Set invoice date
         try {
@@ -217,11 +282,13 @@ public class DTOBuilder {
                 String dateStr = entry.get("Date").asText();
                 LocalDate localDate = parseDate(dateStr);
                 factureData.setInvoiceDate(java.sql.Date.valueOf(localDate));
+                log.info("📅 Set invoice date: {}", factureData.getInvoiceDate());
             }
         } catch (Exception e) {
             log.error("Failed to set invoice date in buildFactureData: {}", e.getMessage());
         }
 
+        // Rest of the method remains the same...
         // Process TVA rate
         Double tvaRate = extractTVARate(entry);
         factureData.setTaxRate(tvaRate);
@@ -235,10 +302,28 @@ public class DTOBuilder {
         // Set conversion information
         setConversionInformation(factureData, entry);
 
-        log.info("Built FactureData DTO: invoiceNumber={}, invoiceDate={}, currency={}",
+        log.info("✅ Built FactureData DTO: invoiceNumber={}, invoiceDate={}, currency={}",
                 factureData.getInvoiceNumber(), factureData.getInvoiceDate(), factureData.getDevise());
 
         return factureData;
+    }
+
+    private String extractInvoiceNumberFromEcritLib(String ecritLib) {
+        try {
+            // Look for patterns like "Facture FT25034690" or "Facture 12345"
+            if (ecritLib.contains("Facture")) {
+                String[] parts = ecritLib.split("Facture");
+                if (parts.length > 1) {
+                    String invoicePart = parts[1].trim();
+                    // Extract alphanumeric invoice number
+                    String invoiceNum = invoicePart.replaceAll("[^a-zA-Z0-9]", " ").trim().split(" ")[0];
+                    return invoiceNum.isEmpty() ? "BANK-" + System.currentTimeMillis() : invoiceNum;
+                }
+            }
+        } catch (Exception e) {
+            log.trace("Error extracting invoice number from EcritLib: {}", e.getMessage());
+        }
+        return "BANK-" + System.currentTimeMillis();
     }
 
     private Double extractTVARate(JsonNode entry) {
@@ -270,16 +355,17 @@ public class DTOBuilder {
     private void setTotalAmounts(FactureDataDTO factureData, JsonNode entry, Double tvaRate) {
         // Set total TTC
         if (entry.has("TotalTTC")) {
-            factureData.setTotalTTC(parseDouble(entry.get("TotalTTC").asText()));
+            factureData.setTotalTTC(parseDoubleSafely(entry, "TotalTTC"));
         } else {
-            Double debit = entry.has("DebitAmt") ? entry.get("DebitAmt").asDouble() : 0.0;
-            Double credit = entry.has("CreditAmt") ? entry.get("CreditAmt").asDouble() : 0.0;
+            // ✅ FIX: Use safe parsing for debit/credit amounts
+            Double debit = entry.has("DebitAmt") ? parseDoubleSafely(entry, "DebitAmt") : 0.0;
+            Double credit = entry.has("CreditAmt") ? parseDoubleSafely(entry, "CreditAmt") : 0.0;
             factureData.setTotalTTC(Math.max(debit, credit));
         }
 
         // Set total HT
         if (entry.has("TotalHT")) {
-            factureData.setTotalHT(parseDouble(entry.get("TotalHT").asText()));
+            factureData.setTotalHT(parseDoubleSafely(entry, "TotalHT"));
         } else if (factureData.getTotalTTC() != null && tvaRate != null) {
             factureData.setTotalHT(factureData.getTotalTTC() / (1 + (tvaRate / 100)));
         }
@@ -311,7 +397,7 @@ public class DTOBuilder {
 
     private void setConversionInformation(FactureDataDTO factureData, JsonNode entry) {
         if (entry.has("ExchangeRate")) {
-            double rate = parseDouble(entry.get("ExchangeRate").asText());
+            double rate = parseDoubleSafely(entry, "ExchangeRate");
             factureData.setExchangeRate(rate);
 
             // Calculate converted amounts
@@ -336,13 +422,13 @@ public class DTOBuilder {
 
         // Set USD equivalents
         if (entry.has("UsdTotalTTC")) {
-            factureData.setUsdTotalTTC(parseDouble(entry.get("UsdTotalTTC").asText()));
+            factureData.setUsdTotalTTC(parseDoubleSafely(entry, "UsdTotalTTC"));
         }
         if (entry.has("UsdTotalHT")) {
-            factureData.setUsdTotalHT(parseDouble(entry.get("UsdTotalHT").asText()));
+            factureData.setUsdTotalHT(parseDoubleSafely(entry, "UsdTotalHT"));
         }
         if (entry.has("UsdTotalTVA")) {
-            factureData.setUsdTotalTVA(parseDouble(entry.get("UsdTotalTVA").asText()));
+            factureData.setUsdTotalTVA(parseDoubleSafely(entry, "UsdTotalTVA"));
         }
     }
 
@@ -383,22 +469,23 @@ public class DTOBuilder {
                 LineDTO line = new LineDTO();
                 line.setLabel(entry.get("EcritLib").asText());
 
+                // ✅ FIX: Use safe parsing for all numeric values
                 // Handle debit amounts
                 if (entry.has("OriginalDebitAmt")) {
-                    line.setOriginalDebit(entry.get("OriginalDebitAmt").asDouble());
-                    line.setDebit(entry.get("OriginalDebitAmt").asDouble());
-                    line.setConvertedDebit(entry.get("DebitAmt").asDouble());
+                    line.setOriginalDebit(parseDoubleSafely(entry, "OriginalDebitAmt"));
+                    line.setDebit(parseDoubleSafely(entry, "OriginalDebitAmt"));
+                    line.setConvertedDebit(parseDoubleSafely(entry, "DebitAmt"));
                 } else {
-                    line.setDebit(entry.get("DebitAmt").asDouble());
+                    line.setDebit(parseDoubleSafely(entry, "DebitAmt"));
                 }
 
                 // Handle credit amounts
                 if (entry.has("OriginalCreditAmt")) {
-                    line.setOriginalCredit(entry.get("OriginalCreditAmt").asDouble());
-                    line.setCredit(entry.get("OriginalCreditAmt").asDouble());
-                    line.setConvertedCredit(entry.get("CreditAmt").asDouble());
+                    line.setOriginalCredit(parseDoubleSafely(entry, "OriginalCreditAmt"));
+                    line.setCredit(parseDoubleSafely(entry, "OriginalCreditAmt"));
+                    line.setConvertedCredit(parseDoubleSafely(entry, "CreditAmt"));
                 } else {
-                    line.setCredit(entry.get("CreditAmt").asDouble());
+                    line.setCredit(parseDoubleSafely(entry, "CreditAmt"));
                 }
 
                 // Set currency information
@@ -437,16 +524,6 @@ public class DTOBuilder {
 
     // ==================== UTILITY METHODS ====================
 
-    private Double calculateLargestAmount(JsonNode ecritures) {
-        double maxAmount = 0.0;
-        for (JsonNode entry : ecritures) {
-            double debit = entry.get("DebitAmt").asDouble();
-            double credit = entry.get("CreditAmt").asDouble();
-            maxAmount = Math.max(maxAmount, Math.max(debit, credit));
-        }
-        return maxAmount;
-    }
-
     private LocalDate parseDate(String dateStr) {
         for (DateTimeFormatter formatter : DATE_FORMATTERS) {
             try {
@@ -469,16 +546,36 @@ public class DTOBuilder {
         }
     }
 
-    private Double parseDouble(String value) {
+    // parseDouble method with comma support and null safety
+    private double parseDouble(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return null;
+            return 0.0;
         }
 
         try {
-            return Double.parseDouble(value);
+            // ✅ ADDED: Replace comma with dot for European decimal format
+            String normalizedValue = value.replace(',', '.');
+            return Double.parseDouble(normalizedValue);
         } catch (NumberFormatException e) {
             log.trace("Error parsing double value: {}", value);
-            return null;
+            return 0.0;
         }
+    }
+
+    // Helper method for safe double parsing
+    private double parseDoubleSafely(JsonNode node, String fieldName) {
+        if (node.has(fieldName) && !node.get(fieldName).isNull()) {
+            try {
+                String value = node.get(fieldName).asText();
+                // Handle comma decimal separator
+                value = value.replace(',', '.');
+                return Double.parseDouble(value);
+            } catch (NumberFormatException e) {
+                log.trace("Error parsing {} value: {}", fieldName, node.get(fieldName).asText());
+                return 0.0;
+            }
+        }
+        log.trace("Field {} not found or is null", fieldName);
+        return 0.0;
     }
 }

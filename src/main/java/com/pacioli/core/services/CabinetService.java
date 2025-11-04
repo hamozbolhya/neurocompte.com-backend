@@ -16,11 +16,8 @@ public interface CabinetService {
     Cabinet updateCabinet(Long id, Cabinet cabinet);
     void deleteCabinet(Long id);
     CabinetDTO fetchCabinetById(Long id);
-    List<CabinetDTO> fetchAllCabinets();
     void assignCabinetToUser(Long cabinetId, UUID userId);
-
     void unassignCabinetFromUser(UUID userId);
     Optional<Cabinet> findByIce(String ice);
     CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail);
-
 }

@@ -3,6 +3,7 @@ package com.pacioli.core.services.serviceImp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pacioli.core.DTO.*;
+import com.pacioli.core.DTO.AI.BankStatementRequest;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
@@ -44,6 +45,9 @@ import java.util.stream.DoubleStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import com.pacioli.core.services.AI.services.BankApiService;
+import com.pacioli.core.DTO.AI.BankStatementResponse;
+
 @Slf4j
 @Service
 public class PieceServiceImpl implements PieceService {
@@ -55,6 +59,7 @@ public class PieceServiceImpl implements PieceService {
     private final JournalRepository journalRepository;
     private final AccountRepository accountRepository;
     private final DossierRepository dossierRepository;
+    private final BankApiService bankApiService;
 
     @Autowired
     private DuplicateDetectionService duplicateDetectionService;
@@ -73,7 +78,7 @@ public class PieceServiceImpl implements PieceService {
     @Value("${ai.service.api-key}")
     private String aiApiKey;
 
-    public PieceServiceImpl(PieceRepository pieceRepository, FactureDataRepository factureDataRepository, EcritureRepository ecritureRepository, LineRepository lineRepository, JournalRepository journalRepository, AccountRepository accountRepository, ObjectMapper objectMapper, DossierRepository dossierRepository) {
+    public PieceServiceImpl(PieceRepository pieceRepository, FactureDataRepository factureDataRepository, EcritureRepository ecritureRepository, LineRepository lineRepository, JournalRepository journalRepository, AccountRepository accountRepository, ObjectMapper objectMapper, DossierRepository dossierRepository, BankApiService bankApiService) {
         this.pieceRepository = pieceRepository;
         this.factureDataRepository = factureDataRepository;
         this.ecritureRepository = ecritureRepository;
@@ -82,12 +87,24 @@ public class PieceServiceImpl implements PieceService {
         this.accountRepository = accountRepository;
         this.objectMapper = objectMapper;
         this.dossierRepository = dossierRepository;
+        this.bankApiService = bankApiService;
     }
 
     @Override
     @Transactional
     public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException {
         try {
+            // Step 0: Validate file type - only accept PDF and JPEG
+            String originalFilename = file.getOriginalFilename();
+            String fileExtension = getFileExtension(originalFilename);
+
+            if (!isValidFileType(fileExtension)) {
+                log.error("Type de fichier non accepté: {}", fileExtension);
+                throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
+            }
+
+            log.info("File type validation passed: {}", fileExtension);
+
             // Step 1: Deserialize the Piece
             Piece piece = deserializePiece(pieceData, dossierId);
             log.info("Piece deserialized: {}", piece.getOriginalFileName());
@@ -103,7 +120,6 @@ public class PieceServiceImpl implements PieceService {
             piece.setIsDuplicate(false); // Initialize as not duplicate
 
             // Generate a single formatted filename with UUID for all pages
-            String originalFilename = piece.getFilename();
             String extension = originalFilename.substring(originalFilename.lastIndexOf('.') + 1);
             String uuid = UUID.randomUUID().toString();
             String formattedFilename = uuid + "." + extension;
@@ -112,42 +128,86 @@ public class PieceServiceImpl implements PieceService {
             boolean isPdf = isPdfFile(file);
             log.info("Is this a PDF file? {}", isPdf);
 
-            if (isPdf) {
-                log.info("PDF file detected, converting first page for storage");
-
-                try {
-                    // Convert PDF to images but only use first page for processing
-                    List<MultipartFile> convertedImages = convertPdfToImages(file);
-                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
-
-                    if (!convertedImages.isEmpty()) {
-                        // Format the filename (just using UUID, not page specific)
-                        formattedFilename = uuid + ".png";
-
-                        sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
-
-                        // Save first page as thumbnail/preview
-                        saveFileToDisk(convertedImages.get(0), formattedFilename);
-                        piece.setFilename(formattedFilename);
-                        piece.setStatus(PieceStatus.UPLOADED);
-
-                        Piece savedPiece = pieceRepository.save(piece);
-                        log.info("Piece saved with ID: {}", savedPiece.getId());
-                        return savedPiece;
-                    } else {
-                        log.warn("No images were converted from the PDF, falling back to save as-is");
-                    }
-                } catch (Exception e) {
-                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
-                    log.info("Falling back to saving the PDF as-is");
-                }
-            }
+//            if (isPdf) {
+//                log.info("PDF file detected, converting first page for storage");
+//
+//                try {
+//                    // Convert PDF to images but only use first page for processing
+//                    List<MultipartFile> convertedImages = convertPdfToImages(file);
+//                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
+//
+//                    if (!convertedImages.isEmpty()) {
+//                        // Format the filename (just using UUID, not page specific)
+//                        formattedFilename = uuid + ".png";
+//
+//                        // Check if this is a bank statement and call appropriate service
+//                        boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
+//                        log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
+//
+//                        if (isBankStatement) {
+//                            log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
+//                            // Call bank service AI - create BankStatementRequest object
+//                            BankStatementRequest bankRequest = new BankStatementRequest(dossierId, convertedImages.get(0), uuid);
+//                            BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
+//                            if (bankResponse.isSuccess()) {
+//                                log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
+//                            } else {
+//                                log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
+//                            }
+//                        } else {
+//                            log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
+//                            // Call normal AI service
+//                            sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
+//                        }
+//
+//// Save first page as thumbnail/preview
+//                        saveFileToDisk(convertedImages.get(0), formattedFilename);
+//                        piece.setFilename(formattedFilename);
+//                        piece.setStatus(PieceStatus.UPLOADED);
+//
+//                        Piece savedPiece = pieceRepository.save(piece);
+//                        log.info("Piece saved with ID: {}", savedPiece.getId());
+//                        return savedPiece;
+//                    } else {
+//                        log.warn("No images were converted from the PDF, falling back to save as-is");
+//                    }
+//                } catch (Exception e) {
+//                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
+//                    log.info("Falling back to saving the PDF as-is");
+//                }
+//            }
 
             // Not a PDF or conversion failed - save as-is and send to AI
             log.info("Processing as regular file");
 
+            if (!isValidFileType(fileExtension)) {
+                log.error("Type de fichier non accepté: {}", fileExtension);
+                throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
+            }
+            if (!isValidFileType(fileExtension)) {
+                log.error("Type de fichier non accepté: {}", fileExtension);
+                throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
+            }
             // Send the file to AI (just once)
-            sendFileToAI(file, formattedFilename, dossierId, country);
+            // Check if this is a bank statement and call appropriate service
+            boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
+            log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
+
+            if (isBankStatement) {
+                log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
+                // Call bank service AI - create BankStatementRequest object
+                BankStatementRequest bankRequest = new BankStatementRequest(dossierId, file, uuid);
+                BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
+                if (bankResponse.isSuccess()) {
+                    log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
+                } else {
+                    log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
+                }
+            } else {
+                log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
+                // Call normal AI service
+                sendFileToAI(file, formattedFilename, dossierId, country);
+            }
 
             saveFileToDisk(file, formattedFilename);
             piece.setFilename(formattedFilename);
@@ -623,8 +683,7 @@ public class PieceServiceImpl implements PieceService {
         log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         // Fetch the Dossier explicitly
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         log.info("Fetched Dossier ID: {}", dossier.getId());
 
         // Parse original AI response to get exact string values
@@ -641,8 +700,7 @@ public class PieceServiceImpl implements PieceService {
         }
 
         // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
-                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
+        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream().collect(Collectors.toMap(Account::getAccount, Function.identity()));
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
 
         List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -656,21 +714,13 @@ public class PieceServiceImpl implements PieceService {
             }
 
             // Find or create Journal
-            Journal journal = journals.stream()
-                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                        Journal newJournal = new Journal(
-                                ecriture.getJournal().getName(),
-                                ecriture.getJournal().getType(),
-                                dossier.getCabinet(),
-                                dossier
-                        );
-                        Journal savedJournal = journalRepository.save(newJournal);
-                        journals.add(savedJournal);
-                        return savedJournal;
-                    });
+            Journal journal = journals.stream().filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName())).findFirst().orElseGet(() -> {
+                log.info("Creating new Journal: {}", ecriture.getJournal().getName());
+                Journal newJournal = new Journal(ecriture.getJournal().getName(), ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
+                Journal savedJournal = journalRepository.save(newJournal);
+                journals.add(savedJournal);
+                return savedJournal;
+            });
             ecriture.setJournal(journal);
 
             try {
@@ -686,14 +736,11 @@ public class PieceServiceImpl implements PieceService {
                     }
 
                     // ✅ THE KEY FIX: Check if the line already has currency info from the DTO
-                    boolean hasConversionInfo = (line.getOriginalCurrency() != null &&
-                            line.getConvertedCurrency() != null &&
-                            !line.getOriginalCurrency().equals(line.getConvertedCurrency()));
+                    boolean hasConversionInfo = (line.getOriginalCurrency() != null && line.getConvertedCurrency() != null && !line.getOriginalCurrency().equals(line.getConvertedCurrency()));
 
                     if (hasConversionInfo) {
                         // ✅ Line already has proper conversion info from the DTO, use it!
-                        log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}",
-                                line.getOriginalCurrency(), line.getConvertedCurrency());
+                        log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}", line.getOriginalCurrency(), line.getConvertedCurrency());
 
                         // Set exact precision from original AI response if available
                         if (originalEcritures != null && j < originalEcritures.size()) {
@@ -797,7 +844,7 @@ public class PieceServiceImpl implements PieceService {
                                     line.setExchangeRateDate(null);
                                 }
                             }
-                           // ✅ ADD THIS: If still null, get from piece
+                            // ✅ ADD THIS: If still null, get from piece
                             if (line.getExchangeRateDate() == null && piece.getExchangeRateDate() != null) {
                                 line.setExchangeRateDate(piece.getExchangeRateDate().toString());
                                 log.info("📅 Set exchange rate date from piece: {}", piece.getExchangeRateDate());
@@ -813,18 +860,11 @@ public class PieceServiceImpl implements PieceService {
                         }
                     }
 
-                    log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}",
-                            line.getLabel(),
-                            line.getOriginalCurrency(),
-                            line.getConvertedCurrency(),
-                            line.getExchangeRate(),
-                            line.getOriginalDebit(),
-                            line.getConvertedDebit());
+                    log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}", line.getLabel(), line.getOriginalCurrency(), line.getConvertedCurrency(), line.getExchangeRate(), line.getOriginalDebit(), line.getConvertedDebit());
 
                     // Handle account creation
                     String accountNumber = line.getAccount().getAccount();
-                    Account account = findOrCreateAccount(accountNumber, dossier, journal,
-                            line.getAccount().getLabel(), accountMap);
+                    Account account = findOrCreateAccount(accountNumber, dossier, journal, line.getAccount().getLabel(), accountMap);
                     line.setAccount(account);
                 }
 
@@ -1112,61 +1152,57 @@ public class PieceServiceImpl implements PieceService {
 
                     // ✅ FIXED: Include lines in ecritures (same as REST controller)
                     if (piece.getEcritures() != null && !piece.getEcritures().isEmpty()) {
-                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream()
-                                .map(ecriture -> {
-                                    EcrituresDTO2 dto2 = new EcrituresDTO2();
-                                    dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
-                                    dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+                        List<EcrituresDTO2> ecrituresDTOs = piece.getEcritures().stream().map(ecriture -> {
+                            EcrituresDTO2 dto2 = new EcrituresDTO2();
+                            dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
+                            dto2.setEntryDate(ecriture.getEntryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
 
-                                    // Add journal information
-                                    if (ecriture.getJournal() != null) {
-                                        JournalDTO journalDTO = new JournalDTO();
-                                        journalDTO.setName(ecriture.getJournal().getName());
-                                        journalDTO.setType(ecriture.getJournal().getType());
-                                        dto2.setJournal(journalDTO);
+                            // Add journal information
+                            if (ecriture.getJournal() != null) {
+                                JournalDTO journalDTO = new JournalDTO();
+                                journalDTO.setName(ecriture.getJournal().getName());
+                                journalDTO.setType(ecriture.getJournal().getType());
+                                dto2.setJournal(journalDTO);
+                            }
+
+                            // ✅ ADD THIS: Map lines with account information
+                            if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
+                                List<LineDTO> linesDTOs = ecriture.getLines().stream().map(line -> {
+                                    LineDTO lineDTO = new LineDTO();
+                                    lineDTO.setId(line.getId());
+                                    lineDTO.setLabel(line.getLabel());
+                                    lineDTO.setDebit(line.getDebit());
+                                    lineDTO.setCredit(line.getCredit());
+
+                                    // Add account information
+                                    if (line.getAccount() != null) {
+                                        AccountDTO accountDTO = new AccountDTO();
+                                        accountDTO.setId(line.getAccount().getId());
+                                        accountDTO.setAccount(line.getAccount().getAccount());
+                                        accountDTO.setLabel(line.getAccount().getLabel());
+                                        lineDTO.setAccount(accountDTO);
                                     }
 
-                                    // ✅ ADD THIS: Map lines with account information
-                                    if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
-                                        List<LineDTO> linesDTOs = ecriture.getLines().stream()
-                                                .map(line -> {
-                                                    LineDTO lineDTO = new LineDTO();
-                                                    lineDTO.setId(line.getId());
-                                                    lineDTO.setLabel(line.getLabel());
-                                                    lineDTO.setDebit(line.getDebit());
-                                                    lineDTO.setCredit(line.getCredit());
+                                    // Add currency information if available
+                                    lineDTO.setOriginalDebit(line.getOriginalDebit());
+                                    lineDTO.setOriginalCredit(line.getOriginalCredit());
+                                    lineDTO.setOriginalCurrency(line.getOriginalCurrency());
+                                    lineDTO.setConvertedDebit(line.getConvertedDebit());
+                                    lineDTO.setConvertedCredit(line.getConvertedCredit());
+                                    lineDTO.setConvertedCurrency(line.getConvertedCurrency());
+                                    lineDTO.setExchangeRate(line.getExchangeRate());
+                                    lineDTO.setExchangeRateDate(line.getExchangeRateDate());
+                                    lineDTO.setUsdDebit(line.getUsdDebit());
+                                    lineDTO.setUsdCredit(line.getUsdCredit());
 
-                                                    // Add account information
-                                                    if (line.getAccount() != null) {
-                                                        AccountDTO accountDTO = new AccountDTO();
-                                                        accountDTO.setId(line.getAccount().getId());
-                                                        accountDTO.setAccount(line.getAccount().getAccount());
-                                                        accountDTO.setLabel(line.getAccount().getLabel());
-                                                        lineDTO.setAccount(accountDTO);
-                                                    }
+                                    return lineDTO;
+                                }).collect(Collectors.toList());
+                                dto2.setLines(linesDTOs);
+                                log.debug("✅ Mapped {} lines for ecriture {}", linesDTOs.size(), ecriture.getId());
+                            }
 
-                                                    // Add currency information if available
-                                                    lineDTO.setOriginalDebit(line.getOriginalDebit());
-                                                    lineDTO.setOriginalCredit(line.getOriginalCredit());
-                                                    lineDTO.setOriginalCurrency(line.getOriginalCurrency());
-                                                    lineDTO.setConvertedDebit(line.getConvertedDebit());
-                                                    lineDTO.setConvertedCredit(line.getConvertedCredit());
-                                                    lineDTO.setConvertedCurrency(line.getConvertedCurrency());
-                                                    lineDTO.setExchangeRate(line.getExchangeRate());
-                                                    lineDTO.setExchangeRateDate(line.getExchangeRateDate());
-                                                    lineDTO.setUsdDebit(line.getUsdDebit());
-                                                    lineDTO.setUsdCredit(line.getUsdCredit());
-
-                                                    return lineDTO;
-                                                })
-                                                .collect(Collectors.toList());
-                                        dto2.setLines(linesDTOs);
-                                        log.debug("✅ Mapped {} lines for ecriture {}", linesDTOs.size(), ecriture.getId());
-                                    }
-
-                                    return dto2;
-                                })
-                                .collect(Collectors.toList());
+                            return dto2;
+                        }).collect(Collectors.toList());
                         dto.setEcritures(ecrituresDTOs);
                         log.info("✅ Mapped {} ecritures for piece {}", ecrituresDTOs.size(), piece.getId());
                     }
@@ -1387,5 +1423,26 @@ public class PieceServiceImpl implements PieceService {
             piece.getEcritures().clear(); // ✅ vide la liste proprement
         }
         return pieceRepository.save(piece);
+    }
+
+    /**
+     * Validates if the file type is accepted (PDF or JPEG only)
+     */
+    private boolean isValidFileType(String fileExtension) {
+        if (fileExtension == null) {
+            return false;
+        }
+        String ext = fileExtension.toLowerCase();
+        return ext.equals("pdf") || ext.equals("jpeg") || ext.equals("jpg");
+    }
+
+    /**
+     * Extracts file extension from filename
+     */
+    private String getFileExtension(String filename) {
+        if (filename == null || filename.lastIndexOf(".") == -1) {
+            return null;
+        }
+        return filename.substring(filename.lastIndexOf(".") + 1);
     }
 }

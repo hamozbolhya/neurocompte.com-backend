@@ -41,12 +41,19 @@ public interface ExerciceRepository extends JpaRepository<Exercise, Long> {
     Optional<Exercise> validateExerciseAndCabinet(@Param("exerciseId") Long exerciseId,
                                                   @Param("cabinetId") Long cabinetId);
 
-    @Query("SELECT ex FROM Exercise ex " +
-            "JOIN ex.dossier d " +
-            "JOIN d.pieces p " +
-            "JOIN p.ecritures e " +
-            "WHERE e.id = :ecritureId")
-    List<Exercise> findExercisesByEcritureId(@Param("ecritureId") Long ecritureId);
-
-
+    // ✅ COMPREHENSIVE OVERLAP DETECTION: Covers all overlap scenarios
+    @Query("SELECT COUNT(e) > 0 FROM Exercise e WHERE e.dossier = :dossier AND " +
+            "(" +
+            // Scenario 1: New exercise starts during existing exercise
+            "(e.startDate <= :startDate AND e.endDate >= :startDate) OR " +
+            // Scenario 2: New exercise ends during existing exercise
+            "(e.startDate <= :endDate AND e.endDate >= :endDate) OR " +
+            // Scenario 3: New exercise completely contains existing exercise
+            "(e.startDate >= :startDate AND e.endDate <= :endDate) OR " +
+            // Scenario 4: Existing exercise completely contains new exercise
+            "(e.startDate <= :startDate AND e.endDate >= :endDate)" +
+            ")")
+    boolean existsOverlappingExercise(@Param("dossier") Dossier dossier,
+                                      @Param("startDate") LocalDate startDate,
+                                      @Param("endDate") LocalDate endDate);
 }

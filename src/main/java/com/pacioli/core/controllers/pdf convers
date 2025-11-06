@@ -1,0 +1,171 @@
+//            if (isPdf) {
+//                log.info("PDF file detected, converting first page for storage");
+//
+//                try {
+//                    // Convert PDF to images but only use first page for processing
+//                    List<MultipartFile> convertedImages = convertPdfToImages(file);
+//                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
+//
+//                    if (!convertedImages.isEmpty()) {
+//                        // Format the filename (just using UUID, not page specific)
+//                        formattedFilename = uuid + ".png";
+//
+//                        // Check if this is a bank statement and call appropriate service
+//                        boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
+//                        log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
+//
+//                        if (isBankStatement) {
+//                            log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
+//                            // Call bank service AI - create BankStatementRequest object
+//                            BankStatementRequest bankRequest = new BankStatementRequest(dossierId, convertedImages.get(0), uuid);
+//                            BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
+//                            if (bankResponse.isSuccess()) {
+//                                log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
+//                            } else {
+//                                log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
+//                            }
+//                        } else {
+//                            log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
+//                            // Call normal AI service
+//                            sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
+//                        }
+//
+//// Save first page as thumbnail/preview
+//                        saveFileToDisk(convertedImages.get(0), formattedFilename);
+//                        piece.setFilename(formattedFilename);
+//                        piece.setStatus(PieceStatus.UPLOADED);
+//
+//                        Piece savedPiece = pieceRepository.save(piece);
+//                        log.info("Piece saved with ID: {}", savedPiece.getId());
+//                        return savedPiece;
+//                    } else {
+//                        log.warn("No images were converted from the PDF, falling back to save as-is");
+//                    }
+//                } catch (Exception e) {
+//                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
+//                    log.info("Falling back to saving the PDF as-is");
+//                }
+//            }
+
+
+
+this inside piece service impl after
+   // Step 5: Check file type and handle conversion if needed
+            boolean isPdf = isPdfFile(file);
+            log.info("Is this a PDF file? {}", isPdf);
+
+
+               private boolean isPdfFile(MultipartFile file) {
+                    String filename = file.getOriginalFilename();
+                    String contentType = file.getContentType();
+
+                    log.info("Checking if file is PDF. Filename: {}, Content Type: {}", filename, contentType);
+
+                    boolean hasExtension = (filename != null && filename.toLowerCase().endsWith(".pdf"));
+                    boolean hasContentType = (contentType != null && (contentType.equals("application/pdf") || contentType.equals("application/x-pdf")));
+
+                    log.info("Has PDF extension: {}, Has PDF content type: {}", hasExtension, hasContentType);
+
+                    // Only check header if both filename and content-type checks fail
+                    if (!hasExtension && !hasContentType) {
+                        try {
+                            // Use a BufferedInputStream to support mark/reset
+                            InputStream inputStream = file.getInputStream();
+                            if (!inputStream.markSupported()) {
+                                inputStream = new BufferedInputStream(inputStream);
+                            }
+
+                            inputStream.mark(5); // Mark the position
+                            byte[] header = new byte[5];
+                            int bytesRead = inputStream.read(header);
+                            inputStream.reset(); // Reset to the marked position
+
+                            if (bytesRead >= 5) {
+                                String headerStr = new String(header);
+                                boolean hasPdfHeader = headerStr.startsWith("%PDF-");
+                                log.info("Has PDF header: {}", hasPdfHeader);
+                                return hasPdfHeader;
+                            }
+                        } catch (Exception e) {
+                            log.warn("Error checking file header: {}", e.getMessage());
+                        }
+                    }
+
+                    return hasExtension || hasContentType;
+                }
+
+                private List<MultipartFile> convertPdfToImages(MultipartFile pdfFile) throws IOException {
+                    List<MultipartFile> imageFiles = new ArrayList<>();
+                    final long MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB in bytes
+
+                    try {
+                        // Log that we're starting conversion
+                        log.info("Starting PDF conversion for file: {}", pdfFile.getOriginalFilename());
+
+                        PDDocument document = PDDocument.load(pdfFile.getInputStream());
+                        log.info("PDF loaded successfully. Number of pages: {}", document.getNumberOfPages());
+
+                        PDFRenderer pdfRenderer = new PDFRenderer(document);
+
+                        for (int page = 0; page < document.getNumberOfPages(); page++) {
+                            log.info("Processing page {}", (page + 1));
+
+                            BufferedImage image = pdfRenderer.renderImageWithDPI(page, 300, ImageType.RGB);
+                            log.info("Page {} rendered. Image dimensions: {}x{}", (page + 1), image.getWidth(), image.getHeight());
+
+                            ByteArrayOutputStream imageStream = new ByteArrayOutputStream();
+
+                            // Start with high quality compression
+                            float quality = 1.0f;
+                            byte[] imageBytes;
+
+                            // Compress until size is below MAX_SIZE_BYTES
+                            do {
+                                imageStream.reset(); // Clear the stream for retry
+
+                                // Use JPEGImageWriter for better compression control
+                                Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+                                ImageWriter writer = writers.next();
+
+                                ImageWriteParam param = writer.getDefaultWriteParam();
+                                param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                                param.setCompressionQuality(quality);
+
+                                ImageOutputStream ios = ImageIO.createImageOutputStream(imageStream);
+                                writer.setOutput(ios);
+                                writer.write(null, new IIOImage(image, null, null), param);
+                                writer.dispose();
+                                ios.close();
+
+                                imageBytes = imageStream.toByteArray();
+                                log.info("Page {} compressed with quality={}, size={} bytes", (page + 1), quality, imageBytes.length);
+
+                                // Reduce quality for next iteration if needed
+                                quality -= 0.1f;
+                            } while (imageBytes.length > MAX_SIZE_BYTES && quality > 0.1f);
+
+                            // If still too large after compression attempts, log a warning
+                            if (imageBytes.length > MAX_SIZE_BYTES) {
+                                log.warn("Page {} still exceeds max size after compression: {} bytes", (page + 1), imageBytes.length);
+                            }
+
+                            String imageName = "page-" + (page + 1) + ".jpg"; // Changed to .jpg since we're using JPEG format
+
+                            MultipartFile imageFile = new InMemoryMultipartFile(imageName, imageName, "image/jpeg", // Changed content type to JPEG
+                                    imageBytes);
+
+                            imageFiles.add(imageFile);
+                            log.info("Added image file to list: {} (size: {} bytes)", imageName, imageBytes.length);
+                        }
+
+                        document.close();
+                        log.info("PDF conversion completed. Total images: {}", imageFiles.size());
+                    } catch (Exception e) {
+                        log.error("Error converting PDF to images: {}", e.getMessage(), e);
+                        throw new IOException("Failed to convert PDF to images", e);
+                    }
+
+                    return imageFiles;
+                }
+
+and this code is indie piece service impl

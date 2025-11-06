@@ -1,33 +1,44 @@
 package com.pacioli.core.services;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.pacioli.core.DTO.PieceDTO;
 import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.models.Piece;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.util.List;
 
 public interface PieceService {
+    // Core CRUD operations
     Piece getPieceById(Long id);
-    List<Piece> getPiecesByDossierIdSortedByDate(Long id);
-    List<Piece> getPiecesByDossier(Long dossierId);
+    PieceDTO getPieceDetails(Long pieceId);
     void deletePiece(Long id);
 
-    Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException;
+    // Query operations
+    List<Piece> getPiecesByDossierIdSortedByDate(Long id);
+    Page<PieceDTO> getPiecesByDossier(Long dossierId, Pageable pageable);
 
-    // NEW: Method with JsonNode for exact precision (called from AI processing)
+    // Business operations
+    Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country);
     Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData, JsonNode originalAiResponse);
 
-    // KEEP: Original method for backward compatibility (called from controllers)
+    // Status operations
+    Piece updatePieceStatus(Long id, String status);
+    Piece forcePieceNotDuplicate(Long pieceId);
+
+    // Statistics operations
+    PieceStatsDTO getPieceStatsByDossier(Long dossierId);
+    List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId);
+
+    // File operations
+    byte[] getPieceFilesAsZip(Long pieceId);
+
+    // Notification operations
+    void notifyPiecesUpdate(Long dossierId);
+
     default Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
         return saveEcrituresAndFacture(pieceId, dossierId, pieceData, null);
     }
-    void notifyPiecesUpdate(Long dossierId);
-    Piece updatePieceStatus(Long id, String request);
-    PieceStatsDTO getPieceStatsByDossier(Long dossierId);
-    List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId);
-    byte[] getPieceFilesAsZip(Long pieceId);
-
-    Piece forcePieceNotDuplicate(Long pieceId);
 }

@@ -9,6 +9,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -66,24 +69,23 @@ public class PieceController {
     }
 
     @GetMapping
-    public ResponseEntity<List<PieceDTO>> getPieces(@RequestParam(required = false) Long dossierId) {
-        if (dossierId != null) {
-            List<Piece> pieces = pieceService.getPiecesByDossier(dossierId);
-            // Convert to DTOs with original piece information
-            List<PieceDTO> pieceDTOs = pieces.stream()
-                    .map(piece -> {
-                        PieceDTO dto = getPieceDTO(piece);
-                        // Add FactureData if exists
-                        addFactureDataIfExists(piece, dto);
-                        // Add Ecritures if exists - UPDATED WITH LINES MAPPING
-                        extracted(piece, dto);
-                        return dto;
-                    })
-                    .collect(Collectors.toList());
+    public ResponseEntity<Page<PieceDTO>> getPieces(
+            @RequestParam(required = false) Long dossierId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
+        if (dossierId != null) {
+            Pageable pageable = PageRequest.of(page, size);
+            Page<PieceDTO> pieceDTOs = pieceService.getPiecesByDossier(dossierId, pageable);
             return ResponseEntity.ok(pieceDTOs);
         }
-        return ResponseEntity.ok(new ArrayList<>());
+        return ResponseEntity.ok(Page.empty());
+    }
+
+    @GetMapping("/{id}/details")
+    public ResponseEntity<PieceDTO> getPieceDetails(@PathVariable Long id) {
+        PieceDTO pieceDetails = pieceService.getPieceDetails(id);
+        return ResponseEntity.ok(pieceDetails);
     }
 
     @DeleteMapping("/{id}")

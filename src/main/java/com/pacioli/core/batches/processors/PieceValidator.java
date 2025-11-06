@@ -3,6 +3,7 @@ package com.pacioli.core.batches.processors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -11,10 +12,41 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class PieceValidator {
 
-    @Autowired private ObjectMapper objectMapper;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     public boolean isValidAIResponse(JsonNode root) {
-        return root.has("outputText") && validateEcritures(root.get("outputText"));
+        log.info("🔍 Validating AI response structure - Root keys: {}", root.fieldNames());
+
+        // Check for normalized structure first
+        if (root.has("ecritures")) {
+            log.info("✅ Found normalized ecritures structure");
+            return validateEcrituresArray(root.get("ecritures"));
+        }
+
+        // Check for original outputText structure
+        if (root.has("outputText")) {
+            log.info("📄 Found outputText structure");
+            return validateEcritures(root.get("outputText"));
+        }
+
+        // Check if root itself is the ecritures array
+        if (root.isArray()) {
+            log.info("📄 Root is direct ecritures array");
+            return validateEcrituresArray(root);
+        }
+
+        log.error("❌ Invalid AI response structure - no ecritures or outputText found");
+        return false;
+    }
+
+    private boolean validateEcrituresArray(JsonNode ecritures) {
+        if (ecritures == null || !ecritures.isArray() || ecritures.size() == 0) {
+            log.error("❌ Invalid ecritures array - null, not array, or empty");
+            return false;
+        }
+
+        return validateAllEcritureEntries(ecritures);
     }
 
     public boolean validateEcritures(JsonNode node) {
@@ -27,9 +59,19 @@ public class PieceValidator {
             }
 
             JsonNode parsedJson = parseJsonText(textValue);
-            JsonNode ecritures = findEcrituresNode(parsedJson);
 
-            return isValidEcrituresArray(ecritures);
+            // Check for ecritures in parsed JSON
+            if (parsedJson.has("ecritures")) {
+                return isValidEcrituresArray(parsedJson.get("ecritures"));
+            } else if (parsedJson.has("Ecritures")) {
+                return isValidEcrituresArray(parsedJson.get("Ecritures"));
+            } else if (parsedJson.isArray()) {
+                // Direct array of ecritures
+                return isValidEcrituresArray(parsedJson);
+            }
+
+            log.error("❌ No ecritures found in parsed outputText");
+            return false;
 
         } catch (Exception e) {
             log.error("💥 Error validating ecritures: {}", e.getMessage(), e);
@@ -37,23 +79,14 @@ public class PieceValidator {
         }
     }
 
+
     private JsonNode parseJsonText(String textValue) throws JsonProcessingException {
         return objectMapper.readTree(textValue);
     }
 
-    private JsonNode findEcrituresNode(JsonNode parsedJson) {
-        if (parsedJson.has("ecritures")) return parsedJson.get("ecritures");
-        if (parsedJson.has("Ecritures")) return parsedJson.get("Ecritures");
-        return null;
-    }
 
     private boolean isValidEcrituresArray(JsonNode ecritures) {
-        if (ecritures == null || !ecritures.isArray() || ecritures.size() == 0) {
-            log.error("❌ Invalid ecritures array");
-            return false;
-        }
-
-        return validateAllEcritureEntries(ecritures);
+        return validateEcrituresArray(ecritures);
     }
 
     private boolean validateAllEcritureEntries(JsonNode ecritures) {
@@ -63,6 +96,7 @@ public class PieceValidator {
                 return false;
             }
         }
+        log.info("✅ All {} ecriture entries are valid", ecritures.size());
         return true;
     }
 
@@ -80,18 +114,28 @@ public class PieceValidator {
                 hasValidNumericFields(entry, numericFields);
     }
 
+
     public boolean validateBankEcritureFields(JsonNode entry) {
         if (entry == null) {
             log.error("❌ Bank ecriture entry is null");
             return false;
         }
 
-        // Bank statements don't require FactureNum
-        String[] requiredFields = {"Date", "JournalCode", "JournalLib", "CompteNum", "CompteLib", "EcritLib", "Devise"};
+        // Bank statements might have empty dates or other fields
+        // Make validation more flexible than normal pieces
+        String[] requiredFields = {"JournalCode", "JournalLib", "CompteNum", "CompteLib", "EcritLib"};
         String[] numericFields = {"DebitAmt", "CreditAmt"};
 
-        return hasAllRequiredFields(entry, requiredFields) &&
-                hasValidNumericFields(entry, numericFields);
+        // Check required fields (allow empty values for some)
+        for (String field : requiredFields) {
+            if (!entry.has(field)) {
+                log.error("❌ Missing required field in bank entry: {}", field);
+                return false;
+            }
+        }
+
+        // Check numeric fields
+        return hasValidNumericFields(entry, numericFields);
     }
 
     private boolean hasAllRequiredFields(JsonNode entry, String[] fields) {
@@ -138,7 +182,23 @@ public class PieceValidator {
     }
 
     public boolean isValidBankAIResponse(JsonNode root) {
-        return root.has("outputText") && validateBankEcritures(root.get("outputText"));
+        log.info("🏦 Validating bank AI response structure - Root keys: {}", root.fieldNames());
+
+        // Check if it's already a normalized response with ecritures
+        if (root.has("ecritures")) {
+            JsonNode ecrituresNode = root.get("ecritures");
+            log.info("🏦 Validating normalized bank response with {} entries", ecrituresNode.size());
+            return isValidBankEcrituresArray(ecrituresNode);
+        }
+
+        // Check for outputText structure (original format)
+        if (root.has("outputText")) {
+            log.info("🏦 Validating bank response with outputText");
+            return validateBankEcritures(root.get("outputText"));
+        }
+
+        log.error("❌ Bank AI response has neither 'ecritures' nor 'outputText'");
+        return false;
     }
 
     public boolean validateBankEcritures(JsonNode node) {
@@ -151,9 +211,9 @@ public class PieceValidator {
             }
 
             JsonNode parsedJson = parseJsonText(textValue);
-            JsonNode ecritures = findBankEcrituresNode(parsedJson);
+            JsonNode entries = findBankEcrituresNode(parsedJson);
 
-            return isValidBankEcrituresArray(ecritures);
+            return isValidBankEcrituresArray(entries);
 
         } catch (Exception e) {
             log.error("💥 Error validating bank ecritures: {}", e.getMessage(), e);
@@ -161,21 +221,45 @@ public class PieceValidator {
         }
     }
 
-    private JsonNode findBankEcrituresNode(JsonNode parsedJson) {
+    // In PieceValidator.java - ADD THIS METHOD
+    JsonNode findBankEcrituresNode(JsonNode parsedJson) {
+        log.info("🏦 Processing bank statement structure - Root keys: {}", parsedJson.fieldNames());
+
+        // First check if we already have a flat ecritures array (from normalized response)
+        if (parsedJson.has("ecritures")) {
+            JsonNode ecrituresNode = parsedJson.get("ecritures");
+            log.info("🏦 Found flat ecritures array with {} entries", ecrituresNode.size());
+            return ecrituresNode;
+        }
+
+        // Then check for the nested Ecritures → entries structure
         if (parsedJson.has("Ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("Ecritures");
+            log.info("🏦 Found nested Ecritures structure with {} transaction groups", ecrituresNode.size());
+
             if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                JsonNode firstItem = ecrituresNode.get(0);
-                if (firstItem.isArray() && firstItem.size() > 0) {
-                    JsonNode entriesNode = firstItem.get(0);
-                    if (entriesNode.has("entries")) {
-                        return entriesNode.get("entries");
+                ArrayNode allEntries = objectMapper.createArrayNode();
+
+                for (JsonNode transactionGroup : ecrituresNode) {
+                    if (transactionGroup.isObject() && transactionGroup.has("entries")) {
+                        JsonNode entries = transactionGroup.get("entries");
+                        if (entries.isArray()) {
+                            entries.forEach(allEntries::add);
+                        }
                     }
+                }
+
+                if (allEntries.size() > 0) {
+                    log.info("🏦 Combined {} entries from {} transaction groups", allEntries.size(), ecrituresNode.size());
+                    return allEntries;
                 }
             }
         }
+
+        log.warn("❌ Could not find bank ecritures in expected format");
         return null;
     }
+
 
     private boolean isValidBankEcrituresArray(JsonNode entries) {
         if (entries == null || !entries.isArray() || entries.size() == 0) {
@@ -183,6 +267,7 @@ public class PieceValidator {
             return false;
         }
 
+        // For bank statements, allow some flexibility with required fields
         return validateAllBankEcritureEntries(entries);
     }
 

@@ -89,6 +89,8 @@ public class Piece {
     @ToString.Exclude  // Prevent circular reference in toString
     private List<Ecriture> ecritures;
 
+    private String fileHash;
+
 
     // Add these custom hashCode() and equals() methods to your model classes to prevent circular references
 

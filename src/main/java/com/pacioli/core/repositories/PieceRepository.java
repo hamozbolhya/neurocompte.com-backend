@@ -3,6 +3,8 @@ package com.pacioli.core.repositories;
 import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,12 +13,49 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
-    List<Piece> findByDossierId(Long dossierId);
+
+    // ==================== DUPLICATION DETECTION METHODS ====================
+
+    // Find by filename (exact match)
+    Optional<Piece> findByFilename(String filename);
+
+    // Find by file hash
+    List<Piece> findByFileHash(String fileHash);
+
+    // Find similar AI data with amount range
+    @Query("SELECT p FROM Piece p WHERE " +
+            "p.dossier.id = :dossierId AND " +
+            "p.aiAmount BETWEEN :minAmount AND :maxAmount AND " +
+            "p.aiCurrency = :currency AND " +
+            "p.uploadDate = :uploadDate AND " +
+            "p.isDuplicate = false AND " +
+            "p.status != 'DUPLICATE'")
+    List<Piece> findSimilarAIData(@Param("dossierId") Long dossierId,
+                                  @Param("minAmount") Double minAmount,
+                                  @Param("maxAmount") Double maxAmount,
+                                  @Param("currency") String currency,
+                                  @Param("uploadDate") Date uploadDate);
+
+    // Find by AI data with tolerance
+    @Query("SELECT p FROM Piece p WHERE " +
+            "p.dossier.id = :dossierId AND " +
+            "p.aiCurrency = :currency AND " +
+            "ABS(p.aiAmount - :amount) <= :tolerance AND " +
+            "p.isDuplicate = false AND " +
+            "p.status != 'DUPLICATE'")
+    List<Piece> findByAIDataWithTolerance(@Param("dossierId") Long dossierId,
+                                          @Param("amount") Double amount,
+                                          @Param("currency") String currency,
+                                          @Param("tolerance") Double tolerance);
+
+    // ==================== EXISTING METHODS ====================
+
+    Page<Piece> findByDossierId(Long dossierId, Pageable pageable);
     List<Piece> findAllByDossierIdAndOriginalFileName(Long dossierId, String originalFileName);
-    // ADD THIS METHOD:
     List<Piece> findByOriginalPieceId(Long originalPieceId);
 
     @Query("SELECT p FROM Piece p " +
@@ -28,7 +67,9 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
             "ORDER BY p.uploadDate DESC")
     List<Piece> findByDossierIdWithDetailsOrderByUploadDateDesc(@Param("dossierId") Long dossierId);
 
-    List<Piece> findTop20ByStatusOrderByUploadDateAsc(PieceStatus status);
+    @Query("SELECT p FROM Piece p WHERE p.status = :status ORDER BY p.uploadDate ASC")
+    List<Piece> findTopNByStatusOrderByUploadDateAsc(@Param("status") PieceStatus status,
+                                                     Pageable pageable);
 
     /**
      * Count the number of pieces uploaded by a specific user in a specific cabinet
@@ -145,13 +186,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     Long countByDossierCabinetIdAndStatus(Long cabinetId, PieceStatus status);
 
     Long countByDossierCabinetIdAndType(Long cabinetId, String type);
-
-    // Cabinet and period-based queries
-//    Long countByDossierCabinetIdAndUploadDateBetween(Long cabinetId, Date startDate, Date endDate);
-//
-//    Long countByDossierCabinetIdAndStatusAndUploadDateBetween(Long cabinetId, PieceStatus status, Date startDate, Date endDate);
-//
-//    Long countByDossierCabinetIdAndTypeAndUploadDateBetween(Long cabinetId, String type, Date startDate, Date endDate);
 
     Long countByIsForcedTrue();
 

@@ -1,0 +1,55 @@
+//            if (isPdf) {
+//                log.info("PDF file detected, converting first page for storage");
+//
+//                try {
+//                    // Convert PDF to images but only use first page for processing
+//                    List<MultipartFile> convertedImages = convertPdfToImages(file);
+//                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
+//
+//                    if (!convertedImages.isEmpty()) {
+//                        // Format the filename (just using UUID, not page specific)
+//                        formattedFilename = uuid + ".png";
+//
+//                        // Check if this is a bank statement and call appropriate service
+//                        boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
+//                        log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
+//
+//                        if (isBankStatement) {
+//                            log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
+//                            // Call bank service AI - create BankStatementRequest object
+//                            BankStatementRequest bankRequest = new BankStatementRequest(dossierId, convertedImages.get(0), uuid);
+//                            BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
+//                            if (bankResponse.isSuccess()) {
+//                                log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
+//                            } else {
+//                                log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
+//                            }
+//                        } else {
+//                            log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
+//                            // Call normal AI service
+//                            sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
+//                        }
+//
+//// Save first page as thumbnail/preview
+//                        saveFileToDisk(convertedImages.get(0), formattedFilename);
+//                        piece.setFilename(formattedFilename);
+//                        piece.setStatus(PieceStatus.UPLOADED);
+//
+//                        Piece savedPiece = pieceRepository.save(piece);
+//                        log.info("Piece saved with ID: {}", savedPiece.getId());
+//                        return savedPiece;
+//                    } else {
+//                        log.warn("No images were converted from the PDF, falling back to save as-is");
+//                    }
+//                } catch (Exception e) {
+//                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
+//                    log.info("Falling back to saving the PDF as-is");
+//                }
+//            }
+
+
+
+this inside piece service impl after
+   // Step 5: Check file type and handle conversion if needed
+            boolean isPdf = isPdfFile(file);
+            log.info("Is this a PDF file? {}", isPdf);Ï

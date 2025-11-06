@@ -3,6 +3,7 @@ package com.pacioli.core.repositories;
 import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -29,6 +30,10 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     List<Piece> findByDossierIdWithDetailsOrderByUploadDateDesc(@Param("dossierId") Long dossierId);
 
     List<Piece> findTop20ByStatusOrderByUploadDateAsc(PieceStatus status);
+
+    @Query("SELECT p FROM Piece p WHERE p.status = :status ORDER BY p.uploadDate ASC")
+    List<Piece> findTopNByStatusOrderByUploadDateAsc(@Param("status") PieceStatus status,
+                                                     Pageable pageable);
 
     /**
      * Count the number of pieces uploaded by a specific user in a specific cabinet

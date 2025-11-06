@@ -17,7 +17,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -47,12 +47,16 @@ import java.util.zip.ZipOutputStream;
 
 import com.pacioli.core.services.AI.services.BankApiService;
 import com.pacioli.core.DTO.AI.BankStatementResponse;
+import org.springframework.web.server.ResponseStatusException;
 
 @Slf4j
 @Service
 public class PieceServiceImpl implements PieceService {
     @Autowired
     private final PieceRepository pieceRepository;
+    @Autowired
+    private AccountCreationService accountCreationService;
+
     private final FactureDataRepository factureDataRepository;
     private final EcritureRepository ecritureRepository;
     private final LineRepository lineRepository;
@@ -94,132 +98,74 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) throws IOException {
         try {
-            // Step 0: Validate file type - only accept PDF and JPEG
+            // Step 0: Validate file is not null
+            if (file == null || file.isEmpty()) {
+                throw new IOException("Aucun fichier fourni.");
+            }
+
+            // Step 1: Validate & extract extension safely
             String originalFilename = file.getOriginalFilename();
             String fileExtension = getFileExtension(originalFilename);
 
             if (!isValidFileType(fileExtension)) {
-                log.error("Type de fichier non accepté: {}", fileExtension);
                 throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
             }
 
-            log.info("File type validation passed: {}", fileExtension);
+            log.info("✅ File type validation OK: {}", fileExtension);
 
-            // Step 1: Deserialize the Piece
+            // Step 2: Deserialize piece JSON
             Piece piece = deserializePiece(pieceData, dossierId);
-            log.info("Piece deserialized: {}", piece.getOriginalFileName());
+            log.info("📄 Piece deserialized: {}", piece.getOriginalFileName());
 
-            // Step 3: Fetch Dossier from the database
-            Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
-            log.info("Dossier found with ID: {}", dossierId);
+            // Step 3: Load Dossier
+            Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier introuvable pour l'ID: " + dossierId));
 
-            // Step 4: Link Dossier to Piece
             piece.setDossier(dossier);
-            piece.setOriginalFileName(piece.getOriginalFileName());
             piece.setUploadDate(new Date());
-            piece.setIsDuplicate(false); // Initialize as not duplicate
+            piece.setIsDuplicate(false);
 
-            // Generate a single formatted filename with UUID for all pages
-            String extension = originalFilename.substring(originalFilename.lastIndexOf('.') + 1);
+            // Step 4: Generate filename
             String uuid = UUID.randomUUID().toString();
-            String formattedFilename = uuid + "." + extension;
+            String formattedFilename = uuid + "." + fileExtension;
 
-            // Step 5: Check file type and handle conversion if needed
-            boolean isPdf = isPdfFile(file);
-            log.info("Is this a PDF file? {}", isPdf);
-
-//            if (isPdf) {
-//                log.info("PDF file detected, converting first page for storage");
-//
-//                try {
-//                    // Convert PDF to images but only use first page for processing
-//                    List<MultipartFile> convertedImages = convertPdfToImages(file);
-//                    log.info("Conversion complete. Number of images: {}", convertedImages.size());
-//
-//                    if (!convertedImages.isEmpty()) {
-//                        // Format the filename (just using UUID, not page specific)
-//                        formattedFilename = uuid + ".png";
-//
-//                        // Check if this is a bank statement and call appropriate service
-//                        boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
-//                        log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
-//
-//                        if (isBankStatement) {
-//                            log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
-//                            // Call bank service AI - create BankStatementRequest object
-//                            BankStatementRequest bankRequest = new BankStatementRequest(dossierId, convertedImages.get(0), uuid);
-//                            BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
-//                            if (bankResponse.isSuccess()) {
-//                                log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
-//                            } else {
-//                                log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
-//                            }
-//                        } else {
-//                            log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
-//                            // Call normal AI service
-//                            sendFileToAI(convertedImages.get(0), formattedFilename, dossierId, country);
-//                        }
-//
-//// Save first page as thumbnail/preview
-//                        saveFileToDisk(convertedImages.get(0), formattedFilename);
-//                        piece.setFilename(formattedFilename);
-//                        piece.setStatus(PieceStatus.UPLOADED);
-//
-//                        Piece savedPiece = pieceRepository.save(piece);
-//                        log.info("Piece saved with ID: {}", savedPiece.getId());
-//                        return savedPiece;
-//                    } else {
-//                        log.warn("No images were converted from the PDF, falling back to save as-is");
-//                    }
-//                } catch (Exception e) {
-//                    log.error("Error during PDF conversion: {}", e.getMessage(), e);
-//                    log.info("Falling back to saving the PDF as-is");
-//                }
-//            }
-
-            // Not a PDF or conversion failed - save as-is and send to AI
-            log.info("Processing as regular file");
-
-            if (!isValidFileType(fileExtension)) {
-                log.error("Type de fichier non accepté: {}", fileExtension);
-                throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
-            }
-            if (!isValidFileType(fileExtension)) {
-                log.error("Type de fichier non accepté: {}", fileExtension);
-                throw new IOException("Type de fichier non accepté. Seuls les fichiers PDF et JPEG sont autorisés.");
-            }
-            // Send the file to AI (just once)
-            // Check if this is a bank statement and call appropriate service
-            boolean isBankStatement = "Relevés bancaires".equals(piece.getType());
-            log.info("📊 Detected piece type: {} -> Is bank statement: {}", piece.getType(), isBankStatement);
+            // Step 5: Determine if it's a Bank Statement
+            boolean isBankStatement = "Relevés bancaires".equalsIgnoreCase(piece.getType());
+            log.info("📊 Piece Type: {} → Bank Statement: {}", piece.getType(), isBankStatement);
 
             if (isBankStatement) {
-                log.info("🏦 Calling BANK SERVICE AI for file: {}", formattedFilename);
-                // Call bank service AI - create BankStatementRequest object
+                log.info("🏦 Sending to BANK AI Service");
                 BankStatementRequest bankRequest = new BankStatementRequest(dossierId, file, uuid);
                 BankStatementResponse bankResponse = bankApiService.uploadBankStatement(bankRequest);
-                if (bankResponse.isSuccess()) {
-                    log.info("✅ Bank statement successfully sent to bank AI service: {}", bankResponse.getFileUrl());
-                } else {
-                    log.warn("⚠️ Bank AI service responded with error: {}", bankResponse.getMessage());
+
+                if (!bankResponse.isSuccess()) {
+                    log.warn("⚠️ Bank AI service returned error: {}", bankResponse.getMessage());
                 }
             } else {
-                log.info("📄 Calling NORMAL AI SERVICE for file: {}", formattedFilename);
-                // Call normal AI service
+                log.info("🤖 Sending to Normal AI Service");
                 sendFileToAI(file, formattedFilename, dossierId, country);
             }
 
+            // Step 6: Save physical file
             saveFileToDisk(file, formattedFilename);
+
+            // Step 7: Persist piece
             piece.setFilename(formattedFilename);
             piece.setStatus(PieceStatus.UPLOADED);
 
             Piece savedPiece = pieceRepository.save(piece);
-            log.info("Piece saved with ID: {}", savedPiece.getId());
+            log.info("✅ Piece saved with ID: {}", savedPiece.getId());
+
             return savedPiece;
 
+        } catch (IOException e) {
+            // Expected validation or processing errors → 400 BAD_REQUEST
+            log.error("Validation/processing error: {}", e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+
         } catch (Exception e) {
-            log.error("Error in savePiece: {}", e.getMessage(), e);
-            throw new IOException("Failed to save piece", e);
+            // Unexpected errors → 500 INTERNAL_SERVER_ERROR
+            log.error("Unexpected internal error:", e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne lors de l'enregistrement de la pièce.", e);
         }
     }
 
@@ -881,67 +827,28 @@ public class PieceServiceImpl implements PieceService {
     /**
      * Thread-safe method to find or create an account
      */
+    // REPLACE this method in PieceServiceImpl:
     private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal, String accountLabel, Map<String, Account> accountMap) {
-        // First check in-memory cache
-        Account account = accountMap.get(accountNumber);
-        if (account != null) {
-            return account;
+        // First check in the local cache
+        if (accountMap.containsKey(accountNumber)) {
+            log.debug("✅ Found account in cache: {}", accountNumber);
+            return accountMap.get(accountNumber);
         }
 
-        // Try to find existing account in database with proper Optional handling
-        Optional<Account> existingAccount = Optional.ofNullable(accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId()));
-        if (existingAccount.isPresent()) {
-            account = existingAccount.get();
+        // ✅ USE THE THREAD-SAFE ACCOUNT CREATION SERVICE
+        try {
+            Account account = accountCreationService.findOrCreateAccount(accountNumber, dossier, journal, accountLabel);
+
+            // Update the local cache
             accountMap.put(accountNumber, account);
+            log.debug("✅ Created/Found account via service: {}", accountNumber);
+
             return account;
+
+        } catch (Exception e) {
+            log.error("❌ Error in findOrCreateAccount for account {}: {}", accountNumber, e.getMessage());
+            throw e;
         }
-
-        // Account doesn't exist, try to create it with retry logic for concurrent scenarios
-        int maxRetries = 3;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                Account newAccount = new Account();
-                newAccount.setAccount(accountNumber);
-                newAccount.setLabel(accountLabel);
-                newAccount.setDossier(dossier);
-                newAccount.setJournal(journal);
-                newAccount.setHasEntries(true);
-
-                log.info("Creating new Account (attempt {}): {}", attempt, accountNumber);
-                account = accountRepository.save(newAccount);
-                accountMap.put(accountNumber, account);
-                return account;
-
-            } catch (DataIntegrityViolationException e) {
-                log.warn("Account creation conflict detected on attempt {} for account: {}", attempt, accountNumber);
-
-                if (attempt == maxRetries) {
-                    log.error("Failed to create account after {} attempts: {}", maxRetries, accountNumber);
-                    throw new RuntimeException("Failed to create account after " + maxRetries + " attempts: " + accountNumber, e);
-                }
-
-                // Wait a bit and retry to fetch the account that might have been created by another thread
-                try {
-                    Thread.sleep(100 + (attempt * 50)); // Exponential backoff
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Thread interrupted while waiting to retry account creation", ie);
-                }
-
-                // Try to fetch the account again - it might have been created by another thread
-                Optional<Account> retryAccount = Optional.ofNullable(accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId()));
-                if (retryAccount.isPresent()) {
-                    account = retryAccount.get();
-                    accountMap.put(accountNumber, account);
-                    return account;
-                }
-
-                // If we still can't find it, continue to next attempt
-                log.warn("Account still not found after conflict, retrying creation...");
-            }
-        }
-
-        throw new RuntimeException("Failed to find or create account: " + accountNumber);
     }
 
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
@@ -1440,9 +1347,8 @@ public class PieceServiceImpl implements PieceService {
      * Extracts file extension from filename
      */
     private String getFileExtension(String filename) {
-        if (filename == null || filename.lastIndexOf(".") == -1) {
-            return null;
-        }
-        return filename.substring(filename.lastIndexOf(".") + 1);
+        if (filename == null || !filename.contains(".")) return null;
+        return filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
     }
+
 }

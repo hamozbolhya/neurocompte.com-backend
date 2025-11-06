@@ -1,5 +1,6 @@
 package com.pacioli.core.batches;
 
+import com.pacioli.core.config.batch.BatchProcessingConfig;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
 import com.pacioli.core.repositories.PieceRepository;
@@ -9,26 +10,31 @@ import com.pacioli.core.batches.processors.AIResponseProcessor;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 @EnableScheduling
 public class AIPieceProcessingService {
-    private static final int BATCH_SIZE = 20;
-
-    @Autowired private PieceRepository pieceRepository;
-    @Autowired private PieceService pieceService;
-    @Autowired private DuplicateDetectionService duplicateDetectionService;
-    @Autowired private AIResponseProcessor aiResponseProcessor;
+    @Autowired
+    private BatchProcessingConfig batchConfig;
+    @Autowired
+    private PieceRepository pieceRepository;
+    @Autowired
+    private PieceService pieceService;
+    @Autowired
+    private DuplicateDetectionService duplicateDetectionService;
+    @Autowired
+    private AIResponseProcessor aiResponseProcessor;
 
     @Scheduled(fixedRate = 60000)
     @Transactional
@@ -45,16 +51,37 @@ public class AIPieceProcessingService {
         log.info("✅ Batch processing completed");
     }
 
+    // scheduled method for bank statements (every 5 minutes)
+    @Scheduled(fixedRate = 300000) // 300000 ms = 5 minutes
+    @Transactional
+    public void processBankPieceBatch() {
+        List<Piece> pendingPieces = findPendingPieces();
+
+        // Filter only bank statements
+        List<Piece> bankPieces = pendingPieces.stream()
+                .filter(piece -> "Relevés bancaires".equals(piece.getType()))
+                .collect(Collectors.toList());
+
+        if (!bankPieces.isEmpty()) {
+            log.info("🏦 Starting BANK batch processing of {} pieces", bankPieces.size());
+            processPiecesConcurrently(bankPieces);
+        } else {
+            log.info("⏭️ No pending bank statements to process");
+        }
+    }
+
     private List<Piece> findPendingPieces() {
+        // Now we can use the configurable batch size!
         List<Piece> uploadedPieces = pieceRepository
-                .findTop20ByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED)
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
                 .stream()
                 .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
                 .collect(Collectors.toList());
 
+        // Same for processing pieces
         if (uploadedPieces.isEmpty()) {
             return pieceRepository
-                    .findTop20ByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING)
+                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
                     .stream()
                     .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
                     .collect(Collectors.toList());
@@ -64,16 +91,19 @@ public class AIPieceProcessingService {
     }
 
     private void processPiecesConcurrently(List<Piece> pieces) {
-        ExecutorService executor = Executors.newFixedThreadPool(BATCH_SIZE);
         List<CompletableFuture<Void>> futures = pieces.stream()
-                .map(piece -> CompletableFuture.runAsync(() -> processSinglePiece(piece), executor))
+                .map(this::processSinglePieceAsync)
                 .collect(Collectors.toList());
 
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } finally {
-            executor.shutdown();
-        }
+        // Wait for all completions
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .orTimeout(10, TimeUnit.MINUTES) // Add timeout
+                .join();
+    }
+
+    @Async("batchTaskExecutor")
+    public CompletableFuture<Void> processSinglePieceAsync(Piece piece) {
+        return CompletableFuture.runAsync(() -> processSinglePiece(piece));
     }
 
     private void processSinglePiece(Piece piece) {
@@ -87,7 +117,7 @@ public class AIPieceProcessingService {
 
             log.info("🔄 Processing piece {} - current status: {}", currentPiece.getId(), currentPiece.getStatus());
 
-            // Process the piece through AI
+            // Process the piece through AI - use configurable retries
             aiResponseProcessor.processPieceWithRetry(currentPiece, 1);
 
             // ✅ CRITICAL FIX: Reload the piece after AI processing to get updated AI data

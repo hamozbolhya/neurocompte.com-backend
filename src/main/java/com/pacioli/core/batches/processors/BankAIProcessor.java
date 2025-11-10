@@ -144,7 +144,7 @@ public class BankAIProcessor extends BaseAIProcessor {
         try {
             log.info("🔍 Starting extractAmountAndCurrency");
             log.info("🔍 Ecritures node size: {}", ecrituresNode.size());
-            log.info("🔍 First entry: {}", firstEntry);
+            //log.info("🔍 First entry: {}", firstEntry);
 
             // Extract amount
             double originalAmount = calculateLargestAmount(ecrituresNode);

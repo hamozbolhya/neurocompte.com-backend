@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
@@ -243,4 +244,7 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     @Query("SELECT COUNT(p) FROM Piece p WHERE p.dossier.cabinet.id = :cabinetId AND p.isForced = true AND p.uploadDate BETWEEN :startDate AND :endDate")
     Long countByDossierCabinetIdAndIsForcedTrueAndUploadDateBetween(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    Page<Piece> findByDossierCabinetUsersId(UUID userId, Pageable pageable);
+
 }

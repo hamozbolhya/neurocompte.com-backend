@@ -16,6 +16,7 @@ public class EcritureExportDTO {
     private String journalName;
     private String pieceFilename;
     private String accountLabel;
+    private String accountNumber;
     private String lineLabel;
     private Double debit;
     private Double credit;
@@ -61,6 +62,7 @@ public class EcritureExportDTO {
             String journalName,
             String pieceFilename,
             String accountLabel,
+            String accountNumber,
             String lineLabel,
             Double debit,
             Double credit,
@@ -80,6 +82,7 @@ public class EcritureExportDTO {
         this.journalName = journalName;
         this.pieceFilename = pieceFilename;
         this.accountLabel = accountLabel;
+        this.accountNumber = accountNumber;
         this.lineLabel = lineLabel;
         this.debit = debit;
         this.credit = credit;
@@ -102,6 +105,7 @@ public class EcritureExportDTO {
             String journalName,
             String pieceFilename,
             String accountLabel,
+            String accountNumber,
             String lineLabel,
             Double debit,
             Double credit,
@@ -139,6 +143,7 @@ public class EcritureExportDTO {
         this.journalName = journalName;
         this.pieceFilename = pieceFilename;
         this.accountLabel = accountLabel;
+        this.accountNumber = accountNumber;
         this.lineLabel = lineLabel;
         this.debit = debit;
         this.credit = credit;

@@ -300,6 +300,18 @@ public class PieceServiceImpl implements PieceService {
         }
     }
 
+    @Override
+    @Transactional
+    public Page<PieceDTO> getPiecesForUser(UUID userId, Pageable pageable) {
+        // ✅ REMOVED SECURITY CHECK - Now handled in controller
+        Page<Piece> piecesPage = pieceRepository.findByDossierCabinetUsersId(userId, pageable);
+        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream()
+                .map(pieceDTOMapper::toBasicDTO)
+                .collect(Collectors.toList());
+        return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
+    }
+
+
     // Core CRUD operations
     @Override
     @Transactional
@@ -314,6 +326,7 @@ public class PieceServiceImpl implements PieceService {
     @Override
     @Transactional
     public List<Piece> getPiecesByDossierIdSortedByDate(Long dossierId) {
+        // ✅ REMOVED SECURITY CHECK - Now handled in controller
         return pieceRepository.findByDossierIdWithDetailsOrderByUploadDateDesc(dossierId);
     }
 

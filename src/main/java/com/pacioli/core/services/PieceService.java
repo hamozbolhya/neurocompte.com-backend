@@ -9,6 +9,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface PieceService {
     // Core CRUD operations
@@ -19,6 +20,7 @@ public interface PieceService {
     // Query operations
     List<Piece> getPiecesByDossierIdSortedByDate(Long id);
     Page<PieceDTO> getPiecesByDossier(Long dossierId, Pageable pageable);
+    Page<PieceDTO> getPiecesForUser(UUID userId, Pageable pageable);
 
     // Business operations
     Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country);

@@ -1,6 +1,7 @@
 package com.pacioli.core.repositories;
 
 import com.pacioli.core.DTO.DossierDTO;
+import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Dossier;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;

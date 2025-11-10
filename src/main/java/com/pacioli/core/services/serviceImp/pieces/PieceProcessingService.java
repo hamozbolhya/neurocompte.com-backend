@@ -269,7 +269,7 @@ public class PieceProcessingService {
                     boolean hasConversionInfo = (line.getOriginalCurrency() != null && line.getConvertedCurrency() != null && !line.getOriginalCurrency().equals(line.getConvertedCurrency()));
 
                     if (hasConversionInfo) {
-                        log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}", line.getOriginalCurrency(), line.getConvertedCurrency());
+                        //log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}", line.getOriginalCurrency(), line.getConvertedCurrency());
 
                         // Set exact precision from original AI response if available
                         if (originalEcritures != null && j < originalEcritures.size()) {
@@ -387,8 +387,8 @@ public class PieceProcessingService {
                         }
                     }
 
-                    log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}",
-                            line.getLabel(), line.getOriginalCurrency(), line.getConvertedCurrency(), line.getExchangeRate(), line.getOriginalDebit(), line.getConvertedDebit());
+                    //log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}",
+                      //      line.getLabel(), line.getOriginalCurrency(), line.getConvertedCurrency(), line.getExchangeRate(), line.getOriginalDebit(), line.getConvertedDebit());
 
                     // Handle account creation
                     String accountNumber = line.getAccount().getAccount();
@@ -494,7 +494,7 @@ public class PieceProcessingService {
                             }
 
                             if (existingAccount != null) {
-                                log.info("Matched existing Account: {}", existingAccount);
+                                //log.info("Matched existing Account: {}", existingAccount);
                                 line.setAccount(existingAccount);
                             } else {
                                 account.setDossier(dossier);
@@ -524,7 +524,7 @@ public class PieceProcessingService {
      */
     private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal, String accountLabel, Map<String, Account> accountMap) {
         if (accountMap.containsKey(accountNumber)) {
-            log.debug("✅ Found account in cache: {}", accountNumber);
+            //log.debug("✅ Found account in cache: {}", accountNumber);
             return accountMap.get(accountNumber);
         }
 

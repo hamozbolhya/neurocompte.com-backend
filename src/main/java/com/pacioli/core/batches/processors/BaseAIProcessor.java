@@ -119,7 +119,7 @@ public abstract class BaseAIProcessor {
         log.info("🔍 calculateLargestAmount - Ecritures structure: {}", ecritures);
 
         for (JsonNode entry : ecritures) {
-            log.info("🔍 Processing entry: {}", entry);
+            //log.info("🔍 Processing entry: {}", entry);
 
             // Check for bank statement structure
             if (entry.has("entries") && entry.get("entries").isArray()) {

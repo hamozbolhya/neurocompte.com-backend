@@ -77,11 +77,12 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
 
     @Query("""
                 SELECT new com.pacioli.core.DTO.EcritureExportDTO(
-                    e.uniqueEntryNumber, 
+                    e.uniqueEntryNumber,
                     e.entryDate, 
                     j.name, 
                     p.filename, 
                     a.label, 
+                    a.account,
                     l.label, 
                     l.debit,
                     l.credit,

@@ -118,7 +118,7 @@ public class AIResponseNormalizer {
                     if (transactionGroup.has("entries") && transactionGroup.get("entries").isArray()) {
                         JsonNode entries = transactionGroup.get("entries");
                         entries.forEach(allEntries::add);
-                        log.debug("🏦 Added {} entries from transaction group", entries.size());
+                       // log.debug("🏦 Added {} entries from transaction group", entries.size());
                     }
                 }
 

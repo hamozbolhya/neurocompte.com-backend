@@ -24,6 +24,5 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Long countByCabinetId(Long cabinetId);
 
-    @Query("SELECT COUNT(u) FROM User u WHERE u.cabinet.id = :cabinetId AND u.isDeleted = false")
-    Long countActiveByCabinetId(@Param("cabinetId") Long cabinetId);
+    boolean existsByIdAndCabinetId(UUID userId, Long cabinetId);
 }

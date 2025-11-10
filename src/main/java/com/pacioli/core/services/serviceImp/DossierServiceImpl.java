@@ -25,6 +25,7 @@ import java.util.UUID;
 public class DossierServiceImpl implements DossierService {
 
     private final DossierRepository dossierRepository;
+
     private final CompanyAiService companyAiService;
 
     @Autowired
@@ -38,6 +39,9 @@ public class DossierServiceImpl implements DossierService {
 
     @Autowired
     private JournalRepository journalRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     public DossierServiceImpl(DossierRepository dossierRepository, CompanyAiService companyAiService) {
@@ -130,26 +134,6 @@ public class DossierServiceImpl implements DossierService {
         return savedDossier;
     }
 
-    private void createDefaultJournals(Dossier dossier) {
-        List<Journal> defaultJournals = List.of(
-                new Journal("HA", "Achats", dossier.getCabinet(), dossier),
-                new Journal("VE", "Ventes", dossier.getCabinet(), dossier),
-                new Journal("BQ", "Banque", dossier.getCabinet(), dossier),
-                new Journal("CA", "Caisse", dossier.getCabinet(), dossier),
-                new Journal("PA", "Paie", dossier.getCabinet(), dossier),
-                new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier)
-        );
-
-        // Filter out journals that already exist for this dossier
-        List<Journal> journalsToCreate = defaultJournals.stream()
-                .filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId()))
-                .toList();
-
-        // Save only new journals
-        if (!journalsToCreate.isEmpty()) {
-            journalRepository.saveAll(journalsToCreate);
-        }
-    }
 
     @Override
     @Transactional
@@ -180,6 +164,7 @@ public class DossierServiceImpl implements DossierService {
 
         return dossier;
     }
+
 
     private void validateExerciseDateRange(Dossier dossier, Exercise updatedExercise, Exercise existingExercise) {
         // Check for overlap with existing exercises
@@ -212,11 +197,6 @@ public class DossierServiceImpl implements DossierService {
     public DossierDTO getTheDossierById(Long dossierId) {
         return dossierRepository.findDossierById(dossierId)
                 .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
-    }
-
-    @Override
-    public Page<Dossier> getDossiers(Pageable pageable) {
-        return dossierRepository.findAll(pageable);
     }
 
     @Override
@@ -333,40 +313,7 @@ public class DossierServiceImpl implements DossierService {
             log.info("[{}] No need to update company in AI service (no name or country change)", requestId);
         }
 
-        // Convert Dossier to DossierDTO
-        DossierDTO dto = new DossierDTO();
-        dto.setId(savedDossier.getId());
-        dto.setName(savedDossier.getName());
-        dto.setICE(savedDossier.getICE());
-        dto.setAddress(savedDossier.getAddress());
-        dto.setCity(savedDossier.getCity());
-        dto.setPhone(savedDossier.getPhone());
-        dto.setEmail(savedDossier.getEmail());
-        dto.setDecimalPrecision(savedDossier.getDecimalPrecision());
-
-        // Set pays object from country relationship including currency
-        if (savedDossier.getCountry() != null) {
-            PaysDTO paysDTO = new PaysDTO();
-            paysDTO.setCountry(savedDossier.getCountry().getName());
-            paysDTO.setCode(savedDossier.getCountry().getCode());
-
-            // Add currency information if available
-            if (savedDossier.getCountry().getCurrency() != null) {
-                PaysDTO.CurrencyDTO currencyDTO = new PaysDTO.CurrencyDTO();
-                currencyDTO.setCode(savedDossier.getCountry().getCurrency().getCode());
-                currencyDTO.setName(savedDossier.getCountry().getCurrency().getName());
-                paysDTO.setCurrency(currencyDTO);
-            }
-
-            dto.setPays(paysDTO);
-        }
-
-        // Set cabinet DTO
-        DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
-        cabinetDTO.setId(savedDossier.getCabinet().getId());
-        dto.setCabinet(cabinetDTO);
-
-        return dto;
+        return convertToDTO(savedDossier);
     }
 
     @Override
@@ -434,6 +381,131 @@ public class DossierServiceImpl implements DossierService {
 
         // Return the updated DTO
         return getTheDossierById(dossierId);
+    }
+
+    /**
+     * Secure version - gets dossier only if user has access
+     */
+    public DossierDTO getDossierForUser(Long dossierId, UUID userId) {
+        log.info("User {} accessing dossier {}", userId, dossierId);
+
+        Dossier dossier = dossierRepository.findByIdAndCabinetUsersId(dossierId, userId)
+                .orElseThrow(() -> new SecurityException("Dossier not found or access denied"));
+
+        return convertToDTO(dossier); // Reuse your existing conversion logic
+    }
+
+
+    /**
+     * Secure version - gets all dossiers user has access to
+     */
+    public Page<Dossier> getDossiersForUser(UUID userId, Pageable pageable) {
+        log.info("User {} fetching accessible dossiers", userId);
+        return dossierRepository.findByCabinetUsersId(userId, pageable);
+    }
+
+    /**
+     * Secure create - validates user can create in this cabinet
+     */
+    public Dossier createDossierSecure(Dossier dossier, List<Exercise> exercicesData, UUID userId) {
+        // ✅ SECURITY CHECK
+        if (!userHasAccessToCabinet(userId, dossier.getCabinet().getId())) {
+            throw new SecurityException("User cannot create dossier in this cabinet");
+        }
+
+        // Reuse your existing create logic
+        return createDossier(dossier, exercicesData);
+    }
+
+
+    /**
+     * Security check for cabinet access
+     */
+    public boolean userHasAccessToCabinet(UUID userId, Long cabinetId) {
+        return userRepository.existsByIdAndCabinetId(userId, cabinetId);
+    }
+
+    /**
+     * Security check method - reusable across service
+     */
+    public boolean userHasAccessToDossier(UUID userId, Long dossierId) {
+        return dossierRepository.existsByIdAndCabinetUsersId(dossierId, userId);
+    }
+
+
+    public DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId) {
+        if (!userHasAccessToDossier(userId, id)) {
+            throw new SecurityException("User cannot update this dossier");
+        }
+        return updateDossier(id, dossierDetails); // Reuse existing logic
+    }
+
+    /**
+     * Secure version of deleteDossier
+     */
+    public void deleteDossierSecure(Long dossierId, UUID userId) {
+        if (!userHasAccessToDossier(userId, dossierId)) {
+            throw new SecurityException("User cannot delete this dossier");
+        }
+        deleteDossier(dossierId); // Reuse existing logic
+    }
+
+    private static DossierDTO convertToDTO(Dossier savedDossier) {
+        // Convert Dossier to DossierDTO
+        DossierDTO dto = new DossierDTO();
+        dto.setId(savedDossier.getId());
+        dto.setName(savedDossier.getName());
+        dto.setICE(savedDossier.getICE());
+        dto.setAddress(savedDossier.getAddress());
+        dto.setCity(savedDossier.getCity());
+        dto.setPhone(savedDossier.getPhone());
+        dto.setEmail(savedDossier.getEmail());
+        dto.setDecimalPrecision(savedDossier.getDecimalPrecision());
+
+        // Set pays object from country relationship including currency
+        if (savedDossier.getCountry() != null) {
+            PaysDTO paysDTO = new PaysDTO();
+            paysDTO.setCountry(savedDossier.getCountry().getName());
+            paysDTO.setCode(savedDossier.getCountry().getCode());
+
+            // Add currency information if available
+            if (savedDossier.getCountry().getCurrency() != null) {
+                PaysDTO.CurrencyDTO currencyDTO = new PaysDTO.CurrencyDTO();
+                currencyDTO.setCode(savedDossier.getCountry().getCurrency().getCode());
+                currencyDTO.setName(savedDossier.getCountry().getCurrency().getName());
+                paysDTO.setCurrency(currencyDTO);
+            }
+
+            dto.setPays(paysDTO);
+        }
+
+        // Set cabinet DTO
+        DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
+        cabinetDTO.setId(savedDossier.getCabinet().getId());
+        dto.setCabinet(cabinetDTO);
+
+        return dto;
+    }
+
+    private void createDefaultJournals(Dossier dossier) {
+        List<Journal> defaultJournals = List.of(
+                new Journal("HA", "Achats", dossier.getCabinet(), dossier),
+                new Journal("VE", "Ventes", dossier.getCabinet(), dossier),
+                new Journal("BQ", "Banque", dossier.getCabinet(), dossier),
+                new Journal("CA", "Caisse", dossier.getCabinet(), dossier),
+                new Journal("PA", "Paie", dossier.getCabinet(), dossier),
+                new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier)
+        );
+
+        // Filter out journals that already exist for this dossier
+        List<Journal> journalsToCreate = defaultJournals.stream()
+                .filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId()))
+                .toList();
+
+        // Save only new journals
+        if (!journalsToCreate.isEmpty()) {
+            journalRepository.saveAll(journalsToCreate);
+        }
     }
 
 }

@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 public interface DossierRepository extends JpaRepository<Dossier, Long> {
@@ -51,5 +52,7 @@ public interface DossierRepository extends JpaRepository<Dossier, Long> {
     Long countByCreatorAndCabinetId(@Param("cabinetId") Long cabinetId);
     Long countByCabinetId(Long cabinetId);
     Optional<Dossier> findByNameAndCabinetId(String name, Long cabinetId);
-
+    Page<Dossier> findByCabinetUsersId(UUID userId, Pageable pageable);
+    boolean existsByIdAndCabinetUsersId(Long dossierId, UUID userId);
+    Optional<Dossier> findByIdAndCabinetUsersId(Long id, UUID userId);
 }

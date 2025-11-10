@@ -8,6 +8,7 @@ import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Exercise;
 import com.pacioli.core.repositories.CountryRepository;
+import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.DossierService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -30,8 +32,12 @@ import java.util.UUID;
 public class DossierController {
 
     private final DossierService dossierService;
+
     @Autowired
     private CountryRepository countryRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     public DossierController(DossierService dossierService) {
@@ -40,9 +46,9 @@ public class DossierController {
 
     @Validated
     @PostMapping
-    public ResponseEntity<DossierDTO> createDossier(@Valid @RequestBody DossierRequest request) {
+    public ResponseEntity<DossierDTO> createDossier(@Valid @RequestBody DossierRequest request, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
         String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Creating new dossier. Request: {}", requestId, request);
+        log.info("[{}] User {} creating new dossier. Request: {}", requestId, principal.getUsername(), request);
 
         try {
             // Validate request
@@ -57,13 +63,15 @@ public class DossierController {
             // Convert DTO to entity
             Dossier dossierEntity = convertToEntity(request.getDossier());
 
-           // ✅ Add this country validation here
+           // country validation here
             if (dossierEntity.getCountry() == null || dossierEntity.getCountry().getCode() == null || dossierEntity.getCountry().getCode().isBlank()) {
                 log.error("[{}] Validation failed: Country is required", requestId);
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le pays est requis pour créer un dossier.");
             }
             // Create dossier
-            Dossier createdDossier = dossierService.createDossier(dossierEntity, request.getExercises());
+            UUID userId = extractUserId(principal);
+            Dossier createdDossier = dossierService.createDossierSecure(dossierEntity, request.getExercises(), userId);
+
             log.info("[{}] Dossier created successfully with ID: {}", requestId, createdDossier.getId());
 
             // Convert back to DTO for response
@@ -83,6 +91,248 @@ public class DossierController {
             // All other errors
             log.error("[{}] Unexpected error creating dossier: {}", requestId, e.getMessage(), e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur inattendue est survenue lors de la création du dossier: " + e.getMessage(), e);
+        }
+    }
+
+    // Endpoint to get details of a dossier by ID
+    @GetMapping("/{dossierId}")
+    public ResponseEntity<DossierDTO> getDossierById(@PathVariable Long dossierId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        log.info("User {} fetching dossier by ID: {}", principal.getUsername(), dossierId);
+        try {
+            UUID userId = extractUserId(principal);
+            DossierDTO dossier = dossierService.getDossierForUser(dossierId, userId);
+            return ResponseEntity.ok(dossier);
+        } catch (SecurityException e) {
+            log.error("User {} attempted to access unauthorized dossier {}", principal.getUsername(), dossierId);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Accès refusé: " + e.getMessage(), e);
+        }
+    }
+
+    @GetMapping
+    public Page<Dossier> getDossiers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching all accessible dossiers", principal.getUsername());
+        UUID userId = extractUserId(principal);
+        return dossierService.getDossiersForUser(userId, PageRequest.of(page, size));
+    }
+
+    @GetMapping("/cabinet/{cabinetId}")
+    public Page<DossierDTO> getDossiersByCabinetId(
+            @PathVariable Long cabinetId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching dossiers for cabinet: {}", principal.getUsername(), cabinetId);
+
+        try {
+            UUID userId = extractUserId(principal);
+
+            // ✅ SECURITY CHECK: Verify user belongs to the requested cabinet
+            if (!dossierService.userHasAccessToCabinet(userId, cabinetId)) {
+                log.error("User {} attempted to access unauthorized cabinet {}", principal.getUsername(), cabinetId);
+                throw new SecurityException("User cannot access this cabinet");
+            }
+
+            return dossierService.getDossiersByCabinetId(cabinetId, PageRequest.of(page, size));
+        } catch (SecurityException e) {
+            log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Accès refusé: " + e.getMessage(), e);
+        }
+    }
+
+    @PutMapping("/{dossierId}/exercises")
+    public ResponseEntity<Object> updateExercises(
+            @PathVariable Long dossierId,
+            @Valid @RequestBody List<Exercise> updatedExercises,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} updating exercises for dossier ID: {}", principal.getUsername(), dossierId);
+
+        try {
+            UUID userId = extractUserId(principal);
+
+            // ✅ SECURITY CHECK: Verify user has access to this dossier
+            if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+                log.error("User {} attempted to update unauthorized dossier {}", principal.getUsername(), dossierId);
+                throw new SecurityException("User cannot access this dossier");
+            }
+
+            if (updatedExercises == null || updatedExercises.isEmpty()) {
+                throw new IllegalArgumentException("The exercise list cannot be empty.");
+            }
+
+            Dossier updatedDossier = dossierService.updateExercises(dossierId, updatedExercises);
+            return ResponseEntity.ok(updatedDossier);
+        } catch (SecurityException e) {
+            log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+        } catch (IllegalArgumentException ex) {
+            log.error("Validation failed: {}", ex.getMessage());
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        } catch (Exception ex) {
+            log.error("Unexpected error: {}", ex.getMessage(), ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
+        }
+    }
+
+    @DeleteMapping("/{dossierId}/exercises")
+    public ResponseEntity<?> deleteExercises(
+            @PathVariable Long dossierId,
+            @RequestBody List<Long> exerciseIds,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        try {
+            log.info("User {} deleting exercises from dossier ID: {}, Exercises: {}", principal.getUsername(), dossierId, exerciseIds);
+
+            UUID userId = extractUserId(principal);
+
+            // ✅ SECURITY CHECK: Verify user has access to this dossier
+            if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+                log.error("User {} attempted to delete from unauthorized dossier {}", principal.getUsername(), dossierId);
+                throw new SecurityException("User cannot access this dossier");
+            }
+
+            if (exerciseIds == null || exerciseIds.isEmpty()) {
+                throw new IllegalArgumentException("Les identifiants des exercices ne peuvent pas être vides");
+            }
+
+            dossierService.deleteExercises(dossierId, exerciseIds);
+            return ResponseEntity.noContent().build();
+        } catch (SecurityException e) {
+            log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+        } catch (IllegalArgumentException ex) {
+            log.error("Validation failed: {}", ex.getMessage());
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        } catch (Exception ex) {
+            log.error("Unexpected error during deletion: {}", ex.getMessage(), ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue : " + ex.getMessage());
+        }
+    }
+
+    @PutMapping("/details/{id}")
+    public ResponseEntity<DossierDTO> updateDossier(
+            @PathVariable Long id,
+            @RequestBody DossierDTO dossierDetails,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} updating dossier with ID: {}", principal.getUsername(), id);
+
+        try {
+            UUID userId = extractUserId(principal);
+
+            // Convert DTO to entity for the update
+            Dossier dossierEntity = convertToEntity(dossierDetails);
+            dossierEntity.setId(id); // Ensure the ID is set for update
+
+            // ✅ SECURE: Use secure update method
+            DossierDTO updatedDossier = dossierService.updateDossierSecure(id, dossierEntity, userId);
+            return ResponseEntity.ok(updatedDossier);
+        } catch (SecurityException e) {
+            log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Accès refusé: " + e.getMessage(), e);
+        }
+    }
+
+    @DeleteMapping("/{dossierId}")
+    public ResponseEntity<?> deleteDossier(
+            @PathVariable Long dossierId,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] User {} deleting dossier with ID: {}", requestId, principal.getUsername(), dossierId);
+
+        try {
+            UUID userId = extractUserId(principal);
+
+            // ✅ SECURE: Use secure delete method
+            dossierService.deleteDossierSecure(dossierId, userId);
+            log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
+
+            return ResponseEntity.noContent().build();
+        } catch (SecurityException e) {
+            log.error("[{}] Access denied: {}", requestId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
+        } catch (RuntimeException ex) {
+            log.error("[{}] Error deleting dossier: {}", requestId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+        } catch (Exception ex) {
+            log.error("[{}] Unexpected error during dossier deletion: {}", requestId, ex.getMessage(), ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
+        }
+    }
+
+    // Add this new endpoint to DossierController
+    @PutMapping("/{dossierId}/activity")
+    public ResponseEntity<DossierDTO> updateActivity(
+            @PathVariable Long dossierId,
+            @RequestBody Map<String, String> request,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] User {} updating activity for dossier ID: {}", requestId, principal.getUsername(), dossierId);
+
+        try {
+            UUID userId = extractUserId(principal);
+
+            // ✅ SECURITY CHECK: Verify user has access to this dossier
+            if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+                log.error("[{}] User {} attempted to update unauthorized dossier {}", requestId, principal.getUsername(), dossierId);
+                throw new SecurityException("User cannot access this dossier");
+            }
+
+            String activity = request.get("activity");
+            DossierDTO updatedDossier = dossierService.updateActivity(dossierId, activity);
+            log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
+
+            return ResponseEntity.ok(updatedDossier);
+        } catch (SecurityException e) {
+            log.error("[{}] Access denied: {}", requestId, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Accès refusé: " + e.getMessage(), e);
+        } catch (RuntimeException ex) {
+            log.error("[{}] Error updating activity: {}", requestId, ex.getMessage());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
+        } catch (Exception ex) {
+            log.error("[{}] Unexpected error: {}", requestId, ex.getMessage(), ex);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur inattendue est survenue: " + ex.getMessage());
+        }
+    }
+
+
+    private UUID extractUserId(org.springframework.security.core.userdetails.User principal) {
+        if (principal == null) {
+            log.error("Principal is null - user not authenticated");
+            throw new SecurityException("User not authenticated");
+        }
+
+        String username = principal.getUsername();
+        log.debug("Extracting user ID for username: {}", username);
+
+        try {
+            // Look up the user by the actual logged-in username
+            com.pacioli.core.models.User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> {
+                        log.error("User not found for username: {}", username);
+                        return new SecurityException("User not found");
+                    });
+
+            if (user.getId() == null) {
+                log.error("User ID is null for user: {}", username);
+                throw new SecurityException("User ID not found");
+            }
+
+            log.debug("Successfully extracted user ID: {} for user: {}", user.getId(), username);
+            return user.getId();
+
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error extracting user ID for username {}: {}", username, e.getMessage(), e);
+            throw new SecurityException("Error extracting user information: " + e.getMessage());
         }
     }
 
@@ -165,124 +415,5 @@ public class DossierController {
         }
 
         return dto;
-    }
-
-    // Endpoint to get details of a dossier by ID
-    @GetMapping("/{dossierId}")
-    public ResponseEntity<DossierDTO> getDossierById(@PathVariable Long dossierId) {
-        log.info("START FETCH DOSSIER BY ID -----> {}", dossierId);
-        DossierDTO dossier = dossierService.getTheDossierById(dossierId);
-        return ResponseEntity.ok(dossier);
-    }
-
-    @GetMapping
-    public Page<Dossier> getDossiers(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "5") int size) {
-        return dossierService.getDossiers(PageRequest.of(page, size));
-    }
-
-    @GetMapping("/cabinet/{cabinetId}")
-    public Page<DossierDTO> getDossiersByCabinetId(@PathVariable Long cabinetId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "5") int size) {
-        return dossierService.getDossiersByCabinetId(cabinetId, PageRequest.of(page, size));
-    }
-
-    @PutMapping("/{dossierId}/exercises")
-    public ResponseEntity<Object> updateExercises(@PathVariable Long dossierId, @Valid @RequestBody List<Exercise> updatedExercises) {
-        try {
-            log.info("Request Body: {}", updatedExercises);
-
-            if (updatedExercises == null || updatedExercises.isEmpty()) {
-                throw new IllegalArgumentException("The exercise list cannot be empty.");
-            }
-
-            Dossier updatedDossier = dossierService.updateExercises(dossierId, updatedExercises);
-            return ResponseEntity.ok(updatedDossier);
-        } catch (IllegalArgumentException ex) {
-            log.error("Validation failed: {}", ex.getMessage());
-            // Return the error message in the response body
-            return ResponseEntity.badRequest().body(ex.getMessage());
-        } catch (Exception ex) {
-            log.error("Unexpected error: {}", ex.getMessage(), ex);
-            // Return the unexpected error message in the response body
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
-        }
-    }
-
-    @DeleteMapping("/{dossierId}/exercises")
-    public ResponseEntity<?> deleteExercises(@PathVariable Long dossierId, @RequestBody List<Long> exerciseIds) {
-        try {
-            log.info("Delete Request for Dossier ID: {}, Exercises: {}", dossierId, exerciseIds);
-
-            if (exerciseIds == null || exerciseIds.isEmpty()) {
-                throw new IllegalArgumentException("Les identifiants des exercices ne peuvent pas être vides");
-            }
-
-            dossierService.deleteExercises(dossierId, exerciseIds);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException ex) {
-            log.error("Validation failed: {}", ex.getMessage());
-            // Return a detailed error response
-            return ResponseEntity.badRequest().body(ex.getMessage());
-        } catch (Exception ex) {
-            log.error("Unexpected error during deletion: {}", ex.getMessage(), ex);
-            // Return a general error response
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue : " + ex.getMessage());
-        }
-    }
-
-    @PutMapping("/details/{id}")
-    public ResponseEntity<DossierDTO> updateDossier(@PathVariable Long id, @RequestBody DossierDTO dossierDetails) {
-
-        log.info("Updating dossier with ID: {} and details: {}", id, dossierDetails);
-
-        // Convert DTO to entity for the update
-        Dossier dossierEntity = convertToEntity(dossierDetails);
-        dossierEntity.setId(id); // Ensure the ID is set for update
-
-        // Update the dossier
-        DossierDTO updatedDossier = dossierService.updateDossier(id, dossierEntity);
-
-        return ResponseEntity.ok(updatedDossier);
-    }
-
-    @DeleteMapping("/{dossierId}")
-    public ResponseEntity<?> deleteDossier(@PathVariable Long dossierId) {
-        String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Deleting dossier with ID: {}", requestId, dossierId);
-
-        try {
-            // Call the service to delete the dossier and associated company in AI service
-            dossierService.deleteDossier(dossierId);
-            log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
-
-            return ResponseEntity.noContent().build();
-        } catch (RuntimeException ex) {
-            log.error("[{}] Error deleting dossier: {}", requestId, ex.getMessage());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-        } catch (Exception ex) {
-            log.error("[{}] Unexpected error during dossier deletion: {}", requestId, ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur inattendue est survenue lors de la suppression du dossier: " + ex.getMessage());
-        }
-    }
-
-    // Add this new endpoint to DossierController
-    @PutMapping("/{dossierId}/activity")
-    public ResponseEntity<DossierDTO> updateActivity(@PathVariable Long dossierId, @RequestBody Map<String, String> request) {
-
-        String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Updating activity for dossier ID: {}", requestId, dossierId);
-
-        try {
-            String activity = request.get("activity");
-            DossierDTO updatedDossier = dossierService.updateActivity(dossierId, activity);
-            log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
-
-            return ResponseEntity.ok(updatedDossier);
-        } catch (RuntimeException ex) {
-            log.error("[{}] Error updating activity: {}", requestId, ex.getMessage());
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
-        } catch (Exception ex) {
-            log.error("[{}] Unexpected error: {}", requestId, ex.getMessage(), ex);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur inattendue est survenue: " + ex.getMessage());
-        }
     }
 }

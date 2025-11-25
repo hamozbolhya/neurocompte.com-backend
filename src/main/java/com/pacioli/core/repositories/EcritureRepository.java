@@ -82,6 +82,7 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
                     j.name, 
                     p.filename, 
                     a.label, 
+                    a.account,
                     l.label, 
                     l.debit,
                     l.credit,

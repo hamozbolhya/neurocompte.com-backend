@@ -313,6 +313,4 @@ public class PieceController {
         Piece updated = pieceService.forcePieceNotDuplicate(id);
         return ResponseEntity.ok(updated);
     }
-
-
 }

@@ -16,6 +16,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -55,7 +56,7 @@ public class AIPieceProcessingService {
     @Scheduled(fixedRate = 300000) // 300000 ms = 5 minutes
     @Transactional
     public void processBankPieceBatch() {
-        List<Piece> pendingPieces = findPendingPieces();
+        List<Piece> pendingPieces = findPendingPiecesForBank();
 
         // Filter only bank statements
         List<Piece> bankPieces = pendingPieces.stream()
@@ -68,6 +69,32 @@ public class AIPieceProcessingService {
         } else {
             log.info("⏭️ No pending bank statements to process");
         }
+    }
+
+    private List<Piece> findPendingPiecesForBank() {
+        // Get UPLOADED bank pieces first (priority for new pieces)
+        List<Piece> uploadedPieces = pieceRepository
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                .collect(Collectors.toList());
+
+        // If we have UPLOADED pieces, use them and don't include PROCESSING pieces
+        // This maintains the same logic as the original method
+        if (!uploadedPieces.isEmpty()) {
+            return uploadedPieces;
+        }
+
+        // Only get PROCESSING pieces if no UPLOADED pieces found
+        List<Piece> processingPieces = pieceRepository
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                .collect(Collectors.toList());
+
+        return processingPieces;
     }
 
     private List<Piece> findPendingPieces() {

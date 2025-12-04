@@ -209,11 +209,12 @@ public class BankAIProcessor extends BaseAIProcessor {
     @Override
     protected void handleInvalidResponse(Piece piece, int attempt, String jsonResponse) throws InterruptedException {
         if (attempt < batchConfig.getMaxRetries()) {
-            log.warn("🏦 Retrying bank piece {} (attempt {}/{})", piece.getId(), attempt, batchConfig.getMaxRetries());
-            Thread.sleep(batchConfig.getRetryDelayMs());
+            log.warn("🔄 Retrying bank piece {} due to invalid AI response (attempt {}/{})",
+                    piece.getId(), attempt, batchConfig.getMaxRetries());
+            Thread.sleep(batchConfig.getRetryDelayMs()); // This will now be 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
-            log.error("❌ Bank file rejected after all attempts");
+            log.error("❌ Bank file rejected - invalid AI response after all attempts: {}", jsonResponse);
             rejectPiece(piece, "Invalid AI response after all attempts");
         }
     }
@@ -221,9 +222,9 @@ public class BankAIProcessor extends BaseAIProcessor {
     @Override
     protected void handleProcessingError(Piece piece, int attempt, Exception e) throws InterruptedException {
         if (attempt < batchConfig.getMaxRetries()) {
-            log.warn("🏦 Retrying bank piece {} after error (attempt {}/{}): {}",
+            log.warn("🔄 Retrying bank piece {} after error (attempt {}/{}): {}",
                     piece.getId(), attempt, batchConfig.getMaxRetries(), e.getMessage());
-            Thread.sleep(batchConfig.getRetryDelayMs());
+            Thread.sleep(batchConfig.getRetryDelayMs()); // This will now be 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
             rejectPiece(piece, "Failed after all attempts: " + e.getMessage());

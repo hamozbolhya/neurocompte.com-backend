@@ -139,11 +139,14 @@ public class NormalAIProcessor extends BaseAIProcessor {
     @Override
     protected void handleInvalidResponse(Piece piece, int attempt, String jsonResponse) throws InterruptedException {
         if (attempt < batchConfig.getMaxRetries()) {
-            log.warn("🔄 Retrying piece {} (attempt {}/{})", piece.getId(), attempt, batchConfig.getMaxRetries());
-            Thread.sleep(batchConfig.getRetryDelayMs());
+            log.warn("🔄 Retrying piece {} due to invalid AI response (attempt {}/{})",
+                    piece.getId(), attempt, batchConfig.getMaxRetries());
+
+            // For normal pieces, use shorter delay or immediate retry
+            Thread.sleep(30000); // 30 seconds instead of 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
-            log.error("❌ File rejected after all attempts");
+            log.error("❌ File rejected - invalid AI response after all attempts: {}", jsonResponse);
             rejectPiece(piece, "Invalid AI response after all attempts");
         }
     }
@@ -153,7 +156,9 @@ public class NormalAIProcessor extends BaseAIProcessor {
         if (attempt < batchConfig.getMaxRetries()) {
             log.warn("🔄 Retrying piece {} after error (attempt {}/{}): {}",
                     piece.getId(), attempt, batchConfig.getMaxRetries(), e.getMessage());
-            Thread.sleep(batchConfig.getRetryDelayMs());
+
+            // For normal pieces, use shorter delay or immediate retry
+            Thread.sleep(30000); // 30 seconds instead of 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
             rejectPiece(piece, "Failed after all attempts: " + e.getMessage());

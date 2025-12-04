@@ -18,7 +18,8 @@ public class FactureDataBuilder extends BaseDTOBuilder {
         try {
             // Set invoice number
             factureData.setInvoiceNumber(extractInvoiceNumber(entry));
-
+            // ✅ IMPORTANT: Make sure this uses the entry parameter
+            setInvoiceDate(factureData, entry);
             // Set invoice date
             setInvoiceDate(factureData, entry);
 

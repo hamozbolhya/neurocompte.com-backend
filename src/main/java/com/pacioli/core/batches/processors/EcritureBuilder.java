@@ -6,9 +6,7 @@ import com.pacioli.core.batches.DTO.BaseDTOBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 @Slf4j
 @Component
@@ -23,49 +21,102 @@ public class EcritureBuilder extends BaseDTOBuilder {
         }
 
         try {
-            EcrituresDTO2 ecriture = new EcrituresDTO2();
-            ecriture.setUniqueEntryNumber(UUID.randomUUID().toString());
+            // First, extract all entries (flatten transaction groups if needed)
+            List<JsonNode> allEntries = extractAllEntries(ecrituresNode);
 
-            String dateStr = extractStringSafely(ecrituresNode.get(0), "Date", "");
-            String formattedDate = formatDateToStandard(dateStr);
-            ecriture.setEntryDate(formattedDate);
+            // Group entries by date
+            Map<String, List<JsonNode>> entriesByDate = groupEntriesByDate(allEntries);
 
-            ecriture.setJournal(buildJournal(ecrituresNode.get(0)));
+            // Create one Ecriture per date
+            for (Map.Entry<String, List<JsonNode>> dateGroup : entriesByDate.entrySet()) {
+                String date = dateGroup.getKey();
+                List<JsonNode> entriesForDate = dateGroup.getValue();
 
-            List<LineDTO> lines = buildLines(ecrituresNode);
-            ecriture.setLines(lines);
+                EcrituresDTO2 ecriture = createEcritureForDate(date, entriesForDate);
+                if (ecriture != null) {
+                    ecritures.add(ecriture);
+                }
+            }
 
-            ecritures.add(ecriture);
-            log.info("✅ Built ecriture with {} lines", lines.size());
+            log.info("✅ Built {} ecritures for {} different dates", ecritures.size(), entriesByDate.size());
 
         } catch (Exception e) {
-            log.error("❌ Error building ecriture: {}", e.getMessage());
+            log.error("❌ Error building ecritures: {}", e.getMessage());
         }
 
         return ecritures;
     }
 
-    private List<LineDTO> buildLines(JsonNode ecrituresNode) {
-        List<LineDTO> lines = new ArrayList<>();
+    private List<JsonNode> extractAllEntries(JsonNode ecrituresNode) {
+        List<JsonNode> allEntries = new ArrayList<>();
 
-        if (ecrituresNode == null || !ecrituresNode.isArray()) {
-            log.error("❌ Invalid ecrituresNode in buildLines");
-            return lines;
+        for (JsonNode node : ecrituresNode) {
+            if (node.has("entries") && node.get("entries").isArray()) {
+                // This is a bank transaction group with multiple entries
+                JsonNode entries = node.get("entries");
+                for (JsonNode entry : entries) {
+                    allEntries.add(entry);
+                }
+            } else {
+                // This is a regular single entry
+                allEntries.add(node);
+            }
         }
 
-        for (JsonNode entry : ecrituresNode) {
-            try {
+        log.info("🔍 Extracted {} total entries", allEntries.size());
+        return allEntries;
+    }
+
+    private Map<String, List<JsonNode>> groupEntriesByDate(List<JsonNode> allEntries) {
+        Map<String, List<JsonNode>> entriesByDate = new LinkedHashMap<>();
+
+        for (JsonNode entry : allEntries) {
+            String dateStr = extractStringSafely(entry, "Date", "");
+            String formattedDate = formatDateToStandard(dateStr);
+
+            entriesByDate.computeIfAbsent(formattedDate, k -> new ArrayList<>()).add(entry);
+        }
+
+        log.info("📊 Grouped entries into {} date groups", entriesByDate.size());
+        for (Map.Entry<String, List<JsonNode>> entry : entriesByDate.entrySet()) {
+            log.info("   - Date {}: {} entries", entry.getKey(), entry.getValue().size());
+        }
+
+        return entriesByDate;
+    }
+
+    private EcrituresDTO2 createEcritureForDate(String date, List<JsonNode> entriesForDate) {
+        try {
+            if (entriesForDate.isEmpty()) {
+                return null;
+            }
+
+            // Use the first entry for journal information
+            JsonNode firstEntry = entriesForDate.get(0);
+
+            EcrituresDTO2 ecriture = new EcrituresDTO2();
+            ecriture.setUniqueEntryNumber(UUID.randomUUID().toString());
+            ecriture.setEntryDate(date);
+            ecriture.setJournal(buildJournal(firstEntry));
+
+            // Create lines for all entries in this date
+            List<LineDTO> lines = new ArrayList<>();
+            for (JsonNode entry : entriesForDate) {
                 LineDTO line = buildLine(entry);
                 if (line != null) {
                     lines.add(line);
                 }
-            } catch (Exception e) {
-                log.error("❌ Error building line from entry: {}", e.getMessage());
             }
-        }
+            ecriture.setLines(lines);
 
-        log.info("✅ Built {} lines from ecritures", lines.size());
-        return lines;
+            log.info("📝 Created ecriture for date {} with {} lines", date, lines.size());
+
+            return ecriture;
+
+        } catch (Exception e) {
+            log.error("❌ Error creating ecriture for date {}: {}", date, e.getMessage());
+            return null;
+        }
     }
 
     private LineDTO buildLine(JsonNode entry) {

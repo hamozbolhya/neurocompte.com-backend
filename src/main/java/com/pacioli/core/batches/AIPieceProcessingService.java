@@ -41,21 +41,25 @@ public class AIPieceProcessingService {
     public void processPieceBatch() {
         List<Piece> pendingPieces = findPendingPieces();
 
-        if (pendingPieces.isEmpty()) {
-            log.info("⏭️ No pending pieces to process");
+        // Filter out bank statements (process all EXCEPT bank)
+        List<Piece> nonBankPieces = pendingPieces.stream()
+                .filter(piece -> !"Relevés bancaires".equals(piece.getType()))
+                .collect(Collectors.toList());
+
+        if (nonBankPieces.isEmpty()) {
+            log.info("⏭️ No pending non-bank pieces to process");
             return;
         }
 
-        log.info("⭐️ Starting batch processing of {} pieces", pendingPieces.size());
-        processPiecesConcurrently(pendingPieces);
-        log.info("✅ Batch processing completed");
+        log.info("⭐️ Starting batch processing of {} non-bank pieces", nonBankPieces.size());
+        processPiecesConcurrently(nonBankPieces);
+        log.info("✅ Non-bank batch processing completed");
     }
 
-    // scheduled method for bank statements (every 5 minutes)
     @Scheduled(fixedRate = 300000) // 300000 ms = 5 minutes
     @Transactional
     public void processBankPieceBatch() {
-        List<Piece> pendingPieces = findPendingPieces();
+        List<Piece> pendingPieces = findPendingPiecesForBank();
 
         // Filter only bank statements
         List<Piece> bankPieces = pendingPieces.stream()
@@ -70,24 +74,53 @@ public class AIPieceProcessingService {
         }
     }
 
+    private List<Piece> findPendingPiecesForBank() {
+        // Get UPLOADED bank pieces first (priority for new pieces)
+        List<Piece> uploadedPieces = pieceRepository
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                .collect(Collectors.toList());
+
+        // If we have UPLOADED pieces, use them and don't include PROCESSING pieces
+        if (!uploadedPieces.isEmpty()) {
+            return uploadedPieces;
+        }
+
+        // Only get PROCESSING pieces if no UPLOADED pieces found
+        List<Piece> processingPieces = pieceRepository
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                .collect(Collectors.toList());
+
+        return processingPieces;
+    }
+
+    // scheduled method for bank statements (every 5 minutes)
     private List<Piece> findPendingPieces() {
-        // Now we can use the configurable batch size!
+        // Get UPLOADED pieces first (new pieces - priority)
         List<Piece> uploadedPieces = pieceRepository
                 .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
                 .stream()
                 .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
                 .collect(Collectors.toList());
 
-        // Same for processing pieces
-        if (uploadedPieces.isEmpty()) {
-            return pieceRepository
-                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
-                    .stream()
-                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                    .collect(Collectors.toList());
+        // If we have UPLOADED pieces, process them immediately (1-minute cycle)
+        if (!uploadedPieces.isEmpty()) {
+            return uploadedPieces;
         }
 
-        return uploadedPieces;
+        // Only get PROCESSING pieces if no UPLOADED pieces found
+        List<Piece> processingPieces = pieceRepository
+                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
+                .stream()
+                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                .collect(Collectors.toList());
+
+        return processingPieces;
     }
 
     private void processPiecesConcurrently(List<Piece> pieces) {

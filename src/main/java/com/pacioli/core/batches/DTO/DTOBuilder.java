@@ -135,6 +135,9 @@ public class DTOBuilder {
             // Set ecritures
             pieceDTO.setEcritures(ecritureBuilder.buildEcritures(convertedEcritures));
 
+            if (firstEntry != null) {
+                pieceDTO.setFactureData(factureDataBuilder.buildFactureData(firstEntry));
+            }
             // Set currency information
             pieceDTO.setAiCurrency(piece.getAiCurrency());
             pieceDTO.setAiAmount(piece.getAiAmount());

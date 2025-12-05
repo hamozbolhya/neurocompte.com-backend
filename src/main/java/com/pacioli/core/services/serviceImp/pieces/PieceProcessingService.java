@@ -74,8 +74,23 @@ public class PieceProcessingService {
         try {
             String responseText = originalAiResponse.asText();
             JsonNode parsedOriginal = objectMapper.readTree(responseText);
+
+            // Try different possible locations for ecritures
             JsonNode originalEcritures = parsedOriginal.get("ecritures");
-            return originalEcritures != null ? originalEcritures : parsedOriginal.get("Ecritures");
+            if (originalEcritures == null) {
+                originalEcritures = parsedOriginal.get("Ecritures");
+            }
+            if (originalEcritures == null && parsedOriginal.isArray()) {
+                originalEcritures = parsedOriginal;
+            }
+
+            if (originalEcritures != null) {
+                log.debug("Found {} original ecritures",
+                        originalEcritures.isArray() ? originalEcritures.size() : 1);
+            }
+
+            return originalEcritures;
+
         } catch (Exception e) {
             log.error("Error parsing original AI response: {}", e.getMessage());
             return null;
@@ -215,194 +230,223 @@ public class PieceProcessingService {
     /**
      * Save Ecritures for piece
      */
+    @Transactional
     public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
-        log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
+        log.info("🔥🔥🔥 SAVE ECritures START =========================================");
+        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
-        log.info("Fetched Dossier ID: {}", dossier.getId());
+        try {
+            // DEBUG: Log the incoming pieceData
+            log.debug("🔥 Raw pieceData length: {}", pieceData.length());
+            try {
+                JsonNode root = objectMapper.readTree(pieceData);
+                log.info("🔥 Root keys: {}", root.fieldNames());
 
-        // Parse original AI response to get exact string values
-        JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
+                if (root.has("ecritures")) {
+                    JsonNode ecrituresNode = root.get("ecritures");
+                    log.info("🔥 Found 'ecritures' field with {} elements",
+                            ecrituresNode.isArray() ? ecrituresNode.size() : "not an array");
 
-        // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
-                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-        List<Journal> journals = journalRepository.findByDossierId(dossierId);
-
-        List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
-
-        for (int i = 0; i < ecritures.size(); i++) {
-            Ecriture ecriture = ecritures.get(i);
-            ecriture.setPiece(piece);
-
-            if (ecriture.getManuallyUpdated() == null) {
-                ecriture.setManuallyUpdated(false);
+                    if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                        log.info("🔥 First ecriture in pieceData has keys: {}",
+                                ecrituresNode.get(0).fieldNames());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Error parsing pieceData for debug: {}", e.getMessage());
             }
 
-            // Find or create Journal
-            Journal journal = journals.stream()
-                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                        Journal newJournal = new Journal(ecriture.getJournal().getName(), ecriture.getJournal().getType(), dossier.getCabinet(), dossier);
-                        Journal savedJournal = journalRepository.save(newJournal);
-                        journals.add(savedJournal);
-                        return savedJournal;
-                    });
-            ecriture.setJournal(journal);
+            Dossier dossier = dossierRepository.findById(dossierId)
+                    .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+            log.info("🔥 Fetched Dossier: {} (ID: {})", dossier.getName(), dossier.getId());
 
-            try {
-                Ecriture savedEcriture = ecritureRepository.save(ecriture);
+            // Parse original AI response to get exact string values
+            JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
+            log.info("🔥 Original AI response parsed: {}", originalEcritures != null);
 
-                // Process lines
-                for (int j = 0; j < ecriture.getLines().size(); j++) {
-                    Line line = ecriture.getLines().get(j);
-                    line.setEcriture(savedEcriture);
+            // Fetch existing Accounts and Journals for the Dossier
+            Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
+                    .collect(Collectors.toMap(Account::getAccount, Function.identity()));
+            log.info("🔥 Loaded {} existing accounts", accountMap.size());
 
-                    if (line.getManuallyUpdated() == null) {
-                        line.setManuallyUpdated(false);
-                    }
+            List<Journal> journals = journalRepository.findByDossierId(dossierId);
+            log.info("🔥 Loaded {} existing journals", journals.size());
 
-                    // Handle currency conversion info
-                    boolean hasConversionInfo = (line.getOriginalCurrency() != null && line.getConvertedCurrency() != null && !line.getOriginalCurrency().equals(line.getConvertedCurrency()));
+            // ✅ THIS SHOULD RETURN ALL ECritures
+            List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
+            log.info("🔥🔥 Deserialized {} Ecritures for piece {}", ecritures.size(), piece.getId());
 
-                    if (hasConversionInfo) {
-                        //log.info("💱 Using conversion info from DTO - Original: {}, Converted: {}", line.getOriginalCurrency(), line.getConvertedCurrency());
+            if (ecritures.isEmpty()) {
+                log.warn("⚠️ No Ecritures to save!");
+                return;
+            }
 
-                        // Set exact precision from original AI response if available
-                        if (originalEcritures != null && j < originalEcritures.size()) {
-                            JsonNode originalEntry = originalEcritures.get(j);
+            int totalLines = 0;
+            int totalSavedEcritures = 0;
 
-                            if (line.getOriginalDebit() != null) {
-                                line.setOriginalDebitExact(String.valueOf(line.getOriginalDebit()));
-                            }
-                            if (line.getConvertedDebit() != null) {
-                                line.setConvertedDebitExact(String.valueOf(line.getConvertedDebit()));
-                            }
-                            if (line.getDebit() != null) {
-                                line.setDebitExact(String.valueOf(line.getDebit()));
-                            }
+            for (int i = 0; i < ecritures.size(); i++) {
+                Ecriture ecriture = ecritures.get(i);
+                log.info("🔥 Processing Ecriture {} of {}: uniqueNumber={}, date={}",
+                        i + 1, ecritures.size(),
+                        ecriture.getUniqueEntryNumber(), ecriture.getEntryDate());
 
-                            if (line.getOriginalCredit() != null) {
-                                line.setOriginalCreditExact(String.valueOf(line.getOriginalCredit()));
-                            }
-                            if (line.getConvertedCredit() != null) {
-                                line.setConvertedCreditExact(String.valueOf(line.getConvertedCredit()));
-                            }
-                            if (line.getCredit() != null) {
-                                line.setCreditExact(String.valueOf(line.getCredit()));
-                            }
+                // Link to piece
+                ecriture.setPiece(piece);
+                log.debug("🔥 Linked to piece {}", piece.getId());
 
-                            // Set exchange rate exact if available
-                            if (line.getExchangeRate() != null) {
-                                line.setExchangeRateExact(String.valueOf(line.getExchangeRate()));
-                            }
-                        }
-                    } else {
-                        log.info("💱 No conversion info in DTO, using original AI response");
-
-                        if (originalEcritures != null && j < originalEcritures.size()) {
-                            JsonNode originalEntry = originalEcritures.get(j);
-
-                            // Set amounts using exact string values
-                            if (originalEntry.has("OriginalDebitAmt")) {
-                                // Currency conversion case
-                                line.setOriginalDebitExact(originalEntry.get("OriginalDebitAmt").asText());
-                                line.setDebitExact(originalEntry.get("OriginalDebitAmt").asText());
-                                line.setConvertedDebitExact(originalEntry.get("DebitAmt").asText());
-
-                                line.setOriginalCreditExact(originalEntry.get("OriginalCreditAmt").asText());
-                                line.setCreditExact(originalEntry.get("OriginalCreditAmt").asText());
-                                line.setConvertedCreditExact(originalEntry.get("CreditAmt").asText());
-                            } else {
-                                // No conversion case
-                                line.setDebitExact(originalEntry.get("DebitAmt").asText());
-                                line.setCreditExact(originalEntry.get("CreditAmt").asText());
-                            }
-
-                            // Set USD amounts if available
-                            if (originalEntry.has("UsdDebitAmt")) {
-                                line.setUsdDebitExact(originalEntry.get("UsdDebitAmt").asText());
-                            }
-                            if (originalEntry.has("UsdCreditAmt")) {
-                                line.setUsdCreditExact(originalEntry.get("UsdCreditAmt").asText());
-                            }
-
-                            // Set exchange rate
-                            if (originalEntry.has("ExchangeRate")) {
-                                line.setExchangeRateExact(originalEntry.get("ExchangeRate").asText());
-                            }
-
-                            // Set currencies ONLY if not already set from DTO
-                            if (line.getOriginalCurrency() == null) {
-                                if (originalEntry.has("OriginalDevise")) {
-                                    line.setOriginalCurrency(originalEntry.get("OriginalDevise").asText());
-                                }
-                            }
-
-                            if (line.getConvertedCurrency() == null) {
-                                if (originalEntry.has("Devise")) {
-                                    line.setConvertedCurrency(originalEntry.get("Devise").asText());
-                                }
-                            }
-
-                            // Set exchange rate date
-                            if (originalEntry.has("ExchangeRateDate") && !originalEntry.get("ExchangeRateDate").isNull()) {
-                                try {
-                                    String dateStr = originalEntry.get("ExchangeRateDate").asText();
-                                    if (dateStr != null && !dateStr.isEmpty() && !dateStr.equals("null")) {
-                                        line.setExchangeRateDate(dateStr);
-                                    } else {
-                                        line.setExchangeRateDate(null);
-                                    }
-                                } catch (Exception e) {
-                                    log.trace("Error parsing exchange rate date: {}", e.getMessage());
-                                    line.setExchangeRateDate(null);
-                                }
-                            } else {
-                                // If not provided or is null in JSON, try to get from piece
-                                if (piece.getExchangeRateDate() != null) {
-                                    line.setExchangeRateDate(piece.getExchangeRateDate().toString());
-                                    log.info("📅 Set exchange rate date from piece: {}", piece.getExchangeRateDate());
-                                } else {
-                                    line.setExchangeRateDate(null);
-                                }
-                            }
-
-                            // If still null, get from piece
-                            if (line.getExchangeRateDate() == null && piece.getExchangeRateDate() != null) {
-                                line.setExchangeRateDate(piece.getExchangeRateDate().toString());
-                                log.info("📅 Set exchange rate date from piece: {}", piece.getExchangeRateDate());
-                            }
-                        }
-
-                        // If still no currency info, set from piece or default
-                        if (line.getOriginalCurrency() == null && line.getConvertedCurrency() == null) {
-                            String currency = piece.getAiCurrency() != null ? piece.getAiCurrency() : DEFAULT_CURRENCY;
-                            line.setOriginalCurrency(currency);
-                            line.setConvertedCurrency(currency);
-                            log.info("💱 Set default currency: {}", currency);
-                        }
-                    }
-
-                    //log.info("💱 Final Line currency info - Label: {}, Original: {}, Converted: {}, ExchangeRate: {}, OriginalDebit: {}, ConvertedDebit: {}",
-                      //      line.getLabel(), line.getOriginalCurrency(), line.getConvertedCurrency(), line.getExchangeRate(), line.getOriginalDebit(), line.getConvertedDebit());
-
-                    // Handle account creation
-                    String accountNumber = line.getAccount().getAccount();
-                    Account account = findOrCreateAccount(accountNumber, dossier, journal, line.getAccount().getLabel(), accountMap);
-                    line.setAccount(account);
+                if (ecriture.getManuallyUpdated() == null) {
+                    ecriture.setManuallyUpdated(false);
                 }
 
-                // Save Lines
-                lineRepository.saveAll(ecriture.getLines());
+                // Find or create Journal
+                Journal journal = findOrCreateJournal(ecriture, dossier, journals);
+                ecriture.setJournal(journal);
+                log.debug("🔥 Set journal: {}", journal.getName());
 
-            } catch (Exception e) {
-                log.error("Error saving Ecriture: {}", e.getMessage(), e);
-                throw e;
+                try {
+                    // ✅ SAVE ECriture first
+                    Ecriture savedEcriture = ecritureRepository.save(ecriture);
+                    log.info("✅ Saved Ecriture {}: ID={}, uniqueNumber={}",
+                            i + 1, savedEcriture.getId(), savedEcriture.getUniqueEntryNumber());
+                    totalSavedEcritures++;
+
+                    if (ecriture.getLines() == null || ecriture.getLines().isEmpty()) {
+                        log.warn("⚠️ Ecriture {} has no lines!", i + 1);
+                        continue;
+                    }
+
+                    log.info("🔥 Processing {} lines for Ecriture {}",
+                            ecriture.getLines().size(), i + 1);
+
+                    // Process lines
+                    for (int j = 0; j < ecriture.getLines().size(); j++) {
+                        Line line = ecriture.getLines().get(j);
+                        line.setEcriture(savedEcriture); // Link to saved ecriture
+
+                        if (line.getManuallyUpdated() == null) {
+                            line.setManuallyUpdated(false);
+                        }
+
+                        log.debug("🔥 Line {}: label={}, account={}",
+                                j + 1, line.getLabel(),
+                                line.getAccount() != null ? line.getAccount().getAccount() : "null");
+
+                        // Handle currency conversion info from original AI response
+                        processLineConversion(line, j, originalEcritures, piece);
+
+                        // Handle account creation
+                        String accountNumber = line.getAccount() != null ?
+                                line.getAccount().getAccount() : null;
+
+                        if (accountNumber != null) {
+                            String accountLabel = line.getAccount().getLabel();
+                            Account account = findOrCreateAccount(accountNumber, dossier, journal,
+                                    accountLabel, accountMap);
+                            line.setAccount(account);
+                            log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
+                        } else {
+                            log.warn("⚠️ Line {} has no account number!", j + 1);
+                        }
+                    }
+
+                    // ✅ SAVE LINES after linking
+                    lineRepository.saveAll(ecriture.getLines());
+                    totalLines += ecriture.getLines().size();
+
+                    log.info("✅ Saved {} lines for Ecriture {}",
+                            ecriture.getLines().size(), savedEcriture.getId());
+
+                } catch (Exception e) {
+                    log.error("❌ Error saving Ecriture {}: {}", i + 1, e.getMessage(), e);
+                    throw e;
+                }
             }
+
+            log.info("🔥🔥🔥 SAVE ECritures COMPLETE =======================================");
+            log.info("✅ Successfully saved {} Ecritures with total {} lines for piece {}",
+                    totalSavedEcritures, totalLines, piece.getId());
+
+        } catch (Exception e) {
+            log.error("❌❌❌ FATAL ERROR in saveEcrituresForPiece: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to save ecritures: " + e.getMessage(), e);
+        }
+    }
+
+    private Journal findOrCreateJournal(Ecriture ecriture, Dossier dossier, List<Journal> journals) {
+        String journalName = ecriture.getJournal() != null ?
+                ecriture.getJournal().getName() : "BQ"; // Default to "BQ" for bank
+        String journalType = ecriture.getJournal() != null ?
+                ecriture.getJournal().getType() : "Banque"; // Default to "Banque" for bank
+
+        log.debug("🔥 Looking for journal: name={}, type={}", journalName, journalType);
+
+        Journal journal = journals.stream()
+                .filter(j -> j.getName().equalsIgnoreCase(journalName))
+                .findFirst()
+                .orElseGet(() -> {
+                    log.info("🔥 Creating new Journal: {} ({})", journalName, journalType);
+                    Journal newJournal = new Journal(journalName, journalType,
+                            dossier.getCabinet(), dossier);
+                    Journal savedJournal = journalRepository.save(newJournal);
+                    journals.add(savedJournal);
+                    return savedJournal;
+                });
+
+        log.debug("🔥 Using journal: {} (ID: {})", journal.getName(), journal.getId());
+        return journal;
+    }
+
+    private void processLineConversion(Line line, int lineIndex, JsonNode originalEcritures, Piece piece) {
+        if (originalEcritures != null && originalEcritures.isArray() &&
+                lineIndex < originalEcritures.size()) {
+
+            JsonNode originalEntry = originalEcritures.get(lineIndex);
+
+            // Set exact string values from original AI response
+            if (originalEntry.has("OriginalDebitAmt")) {
+                line.setOriginalDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                line.setDebitExact(originalEntry.get("OriginalDebitAmt").asText());
+                line.setConvertedDebitExact(originalEntry.get("DebitAmt").asText());
+
+                line.setOriginalCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                line.setCreditExact(originalEntry.get("OriginalCreditAmt").asText());
+                line.setConvertedCreditExact(originalEntry.get("CreditAmt").asText());
+            } else {
+                line.setDebitExact(originalEntry.get("DebitAmt").asText());
+                line.setCreditExact(originalEntry.get("CreditAmt").asText());
+            }
+
+            // Set currencies
+            if (line.getOriginalCurrency() == null) {
+                if (originalEntry.has("OriginalDevise")) {
+                    line.setOriginalCurrency(originalEntry.get("OriginalDevise").asText());
+                }
+            }
+
+            if (line.getConvertedCurrency() == null) {
+                if (originalEntry.has("Devise")) {
+                    line.setConvertedCurrency(originalEntry.get("Devise").asText());
+                }
+            }
+
+            // Set exchange rate
+            if (originalEntry.has("ExchangeRate")) {
+                line.setExchangeRateExact(originalEntry.get("ExchangeRate").asText());
+            }
+
+            // Set exchange rate date
+            if (originalEntry.has("ExchangeRateDate") &&
+                    !originalEntry.get("ExchangeRateDate").isNull()) {
+                String dateStr = originalEntry.get("ExchangeRateDate").asText();
+                if (dateStr != null && !dateStr.isEmpty() && !dateStr.equals("null")) {
+                    line.setExchangeRateDate(dateStr);
+                }
+            }
+        }
+
+        // Fallback to piece data
+        if (line.getExchangeRateDate() == null && piece.getExchangeRateDate() != null) {
+            line.setExchangeRateDate(piece.getExchangeRateDate().toString());
         }
     }
 
@@ -465,76 +509,123 @@ public class PieceProcessingService {
                 return Collections.emptyList();
             }
 
-            log.info("Raw Ecritures JSON Node: {}", ecrituresNode);
+            log.info("🔥 DESERIALIZE: Found {} ecritures in JSON (isArray: {})",
+                    ecrituresNode.size(), ecrituresNode.isArray());
+
+            if (!ecrituresNode.isArray()) {
+                log.error("❌ 'ecritures' is not an array!");
+                return Collections.emptyList();
+            }
+
+            // Check structure of first ecriture
+            if (ecrituresNode.size() > 0) {
+                JsonNode firstEcriture = ecrituresNode.get(0);
+                log.info("🔥 First ecriture keys: {}", firstEcriture.fieldNames());
+                if (firstEcriture.has("lines")) {
+                    JsonNode lines = firstEcriture.get("lines");
+                    log.info("🔥 First ecriture has {} lines",
+                            lines.isArray() ? lines.size() : "not an array");
+                }
+            }
 
             Map<String, Account> accountMap = accountRepository.findByDossierId(dossier.getId()).stream()
                     .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-            log.info("Initial Account Map: {}", accountMap);
+            log.info("Initial Account Map size: {}", accountMap.size());
 
             List<Ecriture> ecritures = new ArrayList<>();
-            for (JsonNode ecritureNode : ecrituresNode) {
-                Ecriture ecriture = objectMapper.treeToValue(ecritureNode, Ecriture.class);
-                if (ecriture.getManuallyUpdated() == null) {
-                    ecriture.setManuallyUpdated(false);
-                }
+            for (int i = 0; i < ecrituresNode.size(); i++) {
+                JsonNode ecritureNode = ecrituresNode.get(i);
 
-                if (ecriture.getLines() != null) {
-                    for (Line line : ecriture.getLines()) {
-                        Account account = line.getAccount();
-                        if (line.getManuallyUpdated() == null) {
-                            line.setManuallyUpdated(false);
-                        }
-                        if (account != null) {
-                            Account existingAccount = accountMap.get(account.getAccount());
-                            if (existingAccount == null) {
-                                existingAccount = accountRepository.findByAccountAndDossierId(account.getAccount(), dossier.getId());
-                                if (existingAccount != null) {
-                                    accountMap.put(existingAccount.getAccount(), existingAccount);
-                                }
-                            }
+                log.info("🔥 Processing ecriture {} of {}", i + 1, ecrituresNode.size());
 
-                            if (existingAccount != null) {
-                                //log.info("Matched existing Account: {}", existingAccount);
-                                line.setAccount(existingAccount);
-                            } else {
-                                account.setDossier(dossier);
-                                log.info("Prepared new Account with Dossier: {}", account);
-                                accountMap.put(account.getAccount(), account);
-                            }
-                        } else {
-                            log.warn("Line does not have an account: {}", line.getLabel());
-                        }
+                try {
+                    Ecriture ecriture = objectMapper.treeToValue(ecritureNode, Ecriture.class);
+
+                    if (ecriture.getManuallyUpdated() == null) {
+                        ecriture.setManuallyUpdated(false);
                     }
-                } else {
-                    log.warn("Ecriture has no lines: {}", ecriture.getUniqueEntryNumber());
-                }
 
-                log.info("Deserialized Ecriture: {}", ecriture);
-                ecritures.add(ecriture);
+                    log.info("🔥 Ecriture {}: uniqueNumber={}, date={}",
+                            i + 1,
+                            ecriture.getUniqueEntryNumber(),
+                            ecriture.getEntryDate());
+
+                    if (ecriture.getLines() != null) {
+                        log.info("🔥 Ecriture {} has {} lines", i + 1, ecriture.getLines().size());
+
+                        for (int j = 0; j < ecriture.getLines().size(); j++) {
+                            Line line = ecriture.getLines().get(j);
+                            line.setEcriture(ecriture); // CRITICAL: Link line to ecriture
+
+                            if (line.getManuallyUpdated() == null) {
+                                line.setManuallyUpdated(false);
+                            }
+
+                            log.debug("🔥 Line {}: label={}, debit={}, credit={}",
+                                    j + 1, line.getLabel(), line.getDebit(), line.getCredit());
+
+                            Account account = line.getAccount();
+                            if (account != null) {
+                                Account existingAccount = accountMap.get(account.getAccount());
+                                if (existingAccount == null) {
+                                    existingAccount = accountRepository.findByAccountAndDossierId(
+                                            account.getAccount(), dossier.getId());
+                                    if (existingAccount != null) {
+                                        accountMap.put(existingAccount.getAccount(), existingAccount);
+                                    }
+                                }
+
+                                if (existingAccount != null) {
+                                    line.setAccount(existingAccount);
+                                } else {
+                                    account.setDossier(dossier);
+                                    log.info("🔥 Prepared new Account: {}", account.getAccount());
+                                    accountMap.put(account.getAccount(), account);
+                                }
+                            } else {
+                                log.warn("🔥 Line {} has no account!", j + 1);
+                            }
+                        }
+                    } else {
+                        log.warn("🔥 Ecriture {} has NO lines!", i + 1);
+                    }
+
+                    ecritures.add(ecriture);
+                    log.info("✅ Added ecriture {} to list", i + 1);
+
+                } catch (Exception e) {
+                    log.error("❌ Failed to deserialize ecriture {}: {}", i + 1, e.getMessage(), e);
+                    throw e;
+                }
             }
+
+            log.info("✅ Successfully deserialized {} Ecritures", ecritures.size());
             return ecritures;
+
         } catch (IOException e) {
-            log.error("Failed to parse 'ecritures' JSON: {}", e.getMessage(), e);
+            log.error("❌ Failed to parse 'ecritures' JSON: {}", e.getMessage(), e);
             throw new IllegalArgumentException("Invalid JSON format for 'ecritures': " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("❌ Unexpected error in deserializeEcritures: {}", e.getMessage(), e);
+            throw e;
         }
     }
-
     /**
      * Find or create account
      */
-    private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal, String accountLabel, Map<String, Account> accountMap) {
+    private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal,
+                                        String accountLabel, Map<String, Account> accountMap) {
         if (accountMap.containsKey(accountNumber)) {
-            //log.debug("✅ Found account in cache: {}", accountNumber);
             return accountMap.get(accountNumber);
         }
 
         try {
-            Account account = accountCreationService.findOrCreateAccount(accountNumber, dossier, journal, accountLabel);
+            Account account = accountCreationService.findOrCreateAccount(
+                    accountNumber, dossier, journal, accountLabel);
             accountMap.put(accountNumber, account);
-            log.debug("✅ Created/Found account via service: {}", accountNumber);
             return account;
         } catch (Exception e) {
-            log.error("❌ Error in findOrCreateAccount for account {}: {}", accountNumber, e.getMessage());
+            log.error("❌ Error finding/creating account {}: {}", accountNumber, e.getMessage());
             throw e;
         }
     }

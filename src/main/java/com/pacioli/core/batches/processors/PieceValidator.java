@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -229,6 +230,14 @@ public class PieceValidator {
         if (parsedJson.has("ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("ecritures");
             log.info("🏦 Found flat ecritures array with {} entries", ecrituresNode.size());
+
+            // Check if these are transaction groups or regular entries
+            if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
+                JsonNode firstItem = ecrituresNode.get(0);
+                if (firstItem.has("isTransactionGroup") && firstItem.get("isTransactionGroup").asBoolean()) {
+                    log.info("🏦 Found transaction group structure");
+                }
+            }
             return ecrituresNode;
         }
 
@@ -244,13 +253,23 @@ public class PieceValidator {
                     if (transactionGroup.isObject() && transactionGroup.has("entries")) {
                         JsonNode entries = transactionGroup.get("entries");
                         if (entries.isArray()) {
-                            entries.forEach(allEntries::add);
+                            // Create transaction group node
+                            ObjectNode groupNode = objectMapper.createObjectNode();
+                            groupNode.set("entries", entries);
+                            groupNode.put("isTransactionGroup", true);
+
+                            // Add date from first entry if available
+                            if (entries.size() > 0 && entries.get(0).has("Date")) {
+                                groupNode.put("Date", entries.get(0).get("Date").asText());
+                            }
+
+                            allEntries.add(groupNode);
                         }
                     }
                 }
 
                 if (allEntries.size() > 0) {
-                    log.info("🏦 Combined {} entries from {} transaction groups", allEntries.size(), ecrituresNode.size());
+                    log.info("🏦 Created {} transaction groups", allEntries.size());
                     return allEntries;
                 }
             }
@@ -259,7 +278,6 @@ public class PieceValidator {
         log.warn("❌ Could not find bank ecritures in expected format");
         return null;
     }
-
 
     private boolean isValidBankEcrituresArray(JsonNode entries) {
         if (entries == null || !entries.isArray() || entries.size() == 0) {
@@ -273,9 +291,27 @@ public class PieceValidator {
 
     private boolean validateAllBankEcritureEntries(JsonNode entries) {
         for (int i = 0; i < entries.size(); i++) {
-            if (!validateBankEcritureFields(entries.get(i))) {
-                log.error("❌ Invalid bank ecriture at index {}: {}", i, entries.get(i));
-                return false;
+            JsonNode entry = entries.get(i);
+
+            // Check if this is a transaction group
+            if (entry.has("isTransactionGroup") && entry.get("isTransactionGroup").asBoolean() &&
+                    entry.has("entries") && entry.get("entries").isArray()) {
+
+                // Validate each entry in the transaction group
+                JsonNode innerEntries = entry.get("entries");
+                for (int j = 0; j < innerEntries.size(); j++) {
+                    if (!validateBankEcritureFields(innerEntries.get(j))) {
+                        log.error("❌ Invalid bank ecriture at index {} in transaction group {}: {}",
+                                j, i, innerEntries.get(j));
+                        return false;
+                    }
+                }
+            } else {
+                // Regular entry validation
+                if (!validateBankEcritureFields(entry)) {
+                    log.error("❌ Invalid bank ecriture at index {}: {}", i, entry);
+                    return false;
+                }
             }
         }
         return true;

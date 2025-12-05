@@ -142,34 +142,53 @@ public class BankAIProcessor extends BaseAIProcessor {
 
     private void extractAmountAndCurrency(Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
         try {
-            log.info("🔍 Starting extractAmountAndCurrency");
-            log.info("🔍 Ecritures node size: {}", ecrituresNode.size());
-            //log.info("🔍 First entry: {}", firstEntry);
+            log.info("🔍 Starting extractAmountAndCurrency for bank statement");
 
-            // Extract amount
-            double originalAmount = calculateLargestAmount(ecrituresNode);
-            piece.setAiAmount(originalAmount);
-            log.info("💰 Extracted AI amount: {}", originalAmount);
+            // Calculate total amount from ALL transactions
+            double totalAmount = 0.0;
+            for (JsonNode node : ecrituresNode) {
+                if (node.has("entries") && node.get("entries").isArray()) {
+                    JsonNode entries = node.get("entries");
+                    for (JsonNode entry : entries) {
+                        double debit = parseDoubleSafely(entry, "DebitAmt");
+                        double credit = parseDoubleSafely(entry, "CreditAmt");
+                        totalAmount += Math.max(debit, credit);
+                    }
+                } else {
+                    double debit = parseDoubleSafely(node, "DebitAmt");
+                    double credit = parseDoubleSafely(node, "CreditAmt");
+                    totalAmount += Math.max(debit, credit);
+                }
+            }
 
-            // Extract currency
-            String bankCurrency = extractAndNormalizeCurrency(firstEntry);
+            piece.setAiAmount(totalAmount);
+            log.info("💰 Total bank statement amount: {}", totalAmount);
+
+            // Extract currency from first valid entry
+            String bankCurrency = null;
+            for (JsonNode node : ecrituresNode) {
+                if (node.has("entries") && node.get("entries").isArray() &&
+                        node.get("entries").size() > 0) {
+                    bankCurrency = extractAndNormalizeCurrency(node.get("entries").get(0));
+                    break;
+                } else if (node.has("Devise")) {
+                    bankCurrency = extractAndNormalizeCurrency(node);
+                    break;
+                }
+            }
+
             piece.setAiCurrency(bankCurrency);
-            log.info("💰 Extracted AI currency: {}", bankCurrency);
+            log.info("💰 Extracted bank currency: {}", bankCurrency);
 
-            // Get dossier currency
+            // ... rest of the method remains the same
             String dossierCurrency = getDossierCurrencyCode(piece.getDossier());
             log.info("💰 Dossier currency: {}", dossierCurrency);
 
-            // Extract transaction date
             String transactionDateStr = extractStringSafely(firstEntry, "Date", null);
             LocalDate transactionDate = parseDate(transactionDateStr != null ? transactionDateStr : piece.getUploadDate().toString());
             log.info("📅 Transaction date: {}", transactionDate);
 
-            // Apply currency conversion using dedicated service
             currencyDataExtractionService.calculateAndApplyExchangeRate(piece, bankCurrency, dossierCurrency, transactionDate);
-
-            log.info("🏦 Extracted bank data - AI Amount: {}, Currency: {}, Converted Currency: {}, Exchange Rate: {}",
-                    originalAmount, bankCurrency, piece.getConvertedCurrency(), piece.getExchangeRate());
 
         } catch (Exception e) {
             log.error("❌ Error in extractAmountAndCurrency: {}", e.getMessage(), e);

@@ -109,7 +109,7 @@ public class AIResponseNormalizer {
 
         if (parsedJson.has("Ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("Ecritures");
-            log.info("🏦 Found Ecritures node with {} elements", ecrituresNode.size());
+            log.info("🏦 Found Ecritures node with {} transaction groups", ecrituresNode.size());
 
             if (ecrituresNode.isArray()) {
                 ArrayNode allEntries = objectMapper.createArrayNode();
@@ -117,22 +117,26 @@ public class AIResponseNormalizer {
                 for (JsonNode transactionGroup : ecrituresNode) {
                     if (transactionGroup.has("entries") && transactionGroup.get("entries").isArray()) {
                         JsonNode entries = transactionGroup.get("entries");
-                        entries.forEach(allEntries::add);
-                       // log.debug("🏦 Added {} entries from transaction group", entries.size());
+
+                        // Create a new object for each transaction group
+                        ObjectNode transactionEntry = objectMapper.createObjectNode();
+                        transactionEntry.set("entries", entries);
+                        transactionEntry.put("isTransactionGroup", true);
+
+                        // If first entry has Date, use it for the group
+                        if (entries.size() > 0 && entries.get(0).has("Date")) {
+                            transactionEntry.put("Date", entries.get(0).get("Date").asText());
+                        }
+
+                        allEntries.add(transactionEntry);
                     }
                 }
 
                 if (allEntries.size() > 0) {
-                    log.info("🏦 Successfully extracted {} total entries", allEntries.size());
+                    log.info("🏦 Created {} transaction groups", allEntries.size());
                     return allEntries;
-                } else {
-                    log.warn("⚠️ No entries extracted from transaction groups");
                 }
-            } else {
-                log.warn("⚠️ Ecritures node is not an array");
             }
-        } else {
-            log.warn("⚠️ No Ecritures found in parsed JSON");
         }
 
         log.error("❌ Could not extract bank ecritures from structure");

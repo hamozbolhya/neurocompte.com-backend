@@ -43,7 +43,8 @@ public class CurrencyConversionService {
         String targetCurrency = piece.getConvertedCurrency();
 
         for (JsonNode entry : ecrituresNode) {
-            ObjectNode convertedEntry = createConvertedEntry(entry, sourceCurrency, targetCurrency, exchangeRate, piece);
+            ObjectNode convertedEntry = createConvertedEntry(entry, sourceCurrency, targetCurrency,
+                    exchangeRate, piece);
             convertedEcritures.add(convertedEntry);
         }
 
@@ -58,9 +59,43 @@ public class CurrencyConversionService {
         // Copy all original fields
         entry.fields().forEachRemaining(field -> convertedEntry.set(field.getKey(), field.getValue()));
 
-        // Get original amounts
-        double debitAmt = parseDoubleSafely(entry.get("DebitAmt").asText());
-        double creditAmt = parseDoubleSafely(entry.get("CreditAmt").asText());
+        // Check if this is a transaction group
+        if (entry.has("isTransactionGroup") && entry.get("isTransactionGroup").asBoolean() &&
+                entry.has("entries") && entry.get("entries").isArray()) {
+
+            // Convert each entry in the transaction group
+            ArrayNode convertedEntries = objectMapper.createArrayNode();
+            JsonNode originalEntries = entry.get("entries");
+
+            for (JsonNode originalEntry : originalEntries) {
+                ObjectNode convertedIndividualEntry = convertIndividualEntry(
+                        originalEntry, sourceCurrency, targetCurrency, exchangeRate, piece
+                );
+                convertedEntries.add(convertedIndividualEntry);
+            }
+
+            convertedEntry.set("entries", convertedEntries);
+
+        } else {
+            // Regular entry conversion
+            return convertIndividualEntry(entry, sourceCurrency, targetCurrency, exchangeRate, piece);
+        }
+
+        return convertedEntry;
+    }
+
+    private ObjectNode convertIndividualEntry(JsonNode entry, String sourceCurrency, String targetCurrency,
+                                              double exchangeRate, Piece piece) {
+        ObjectNode convertedEntry = objectMapper.createObjectNode();
+
+        // Copy all original fields
+        entry.fields().forEachRemaining(field -> convertedEntry.set(field.getKey(), field.getValue()));
+
+        // Get original amounts with null safety
+        double debitAmt = parseDoubleSafely(entry.get("DebitAmt") != null ?
+                entry.get("DebitAmt").asText() : "0");
+        double creditAmt = parseDoubleSafely(entry.get("CreditAmt") != null ?
+                entry.get("CreditAmt").asText() : "0");
 
         // Apply conversion
         double convertedDebitAmt = debitAmt * exchangeRate;
@@ -81,6 +116,7 @@ public class CurrencyConversionService {
 
         return convertedEntry;
     }
+
 
     private double parseDoubleSafely(String value) {
         if (value == null || value.trim().isEmpty()) return 0.0;

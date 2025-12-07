@@ -7,7 +7,8 @@ import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.services.PieceService;
 import com.pacioli.core.services.serviceImp.DuplicateDetectionService;
 import com.pacioli.core.batches.processors.AIResponseProcessor;
-import jakarta.transaction.Transactional;
+import jakarta.persistence.EntityManager;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
@@ -16,8 +17,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -25,6 +28,8 @@ import java.util.stream.Collectors;
 @Slf4j
 @EnableScheduling
 public class AIPieceProcessingService {
+    private final Semaphore processingSemaphore = new Semaphore(5); // Limit concurrent processing
+
     @Autowired
     private BatchProcessingConfig batchConfig;
     @Autowired
@@ -36,91 +41,125 @@ public class AIPieceProcessingService {
     @Autowired
     private AIResponseProcessor aiResponseProcessor;
 
+
     @Scheduled(fixedRate = 60000)
-    @Transactional
+    @Transactional(timeout = 30)
     public void processPieceBatch() {
-        List<Piece> pendingPieces = findPendingPieces();
-
-        // Filter out bank statements (process all EXCEPT bank)
-        List<Piece> nonBankPieces = pendingPieces.stream()
-                .filter(piece -> !"Relevés bancaires".equals(piece.getType()))
-                .collect(Collectors.toList());
-
-        if (nonBankPieces.isEmpty()) {
-            log.info("⏭️ No pending non-bank pieces to process");
+        if (!processingSemaphore.tryAcquire()) {
+            log.warn("⚠️ Too many concurrent batch processes, skipping this cycle");
             return;
         }
 
-        log.info("⭐️ Starting batch processing of {} non-bank pieces", nonBankPieces.size());
-        processPiecesConcurrently(nonBankPieces);
-        log.info("✅ Non-bank batch processing completed");
+        try {
+            List<Piece> pendingPieces = findPendingPieces();
+
+            // Filter out bank statements (process all EXCEPT bank)
+            List<Piece> nonBankPieces = pendingPieces.stream()
+                    .filter(piece -> !"Relevés bancaires".equals(piece.getType()))
+                    .collect(Collectors.toList());
+
+            if (nonBankPieces.isEmpty()) {
+                log.info("⏭️ No pending non-bank pieces to process");
+                return;
+            }
+
+            log.info("⭐️ Starting batch processing of {} non-bank pieces", nonBankPieces.size());
+            processPiecesConcurrently(nonBankPieces);
+            log.info("✅ Non-bank batch processing completed");
+
+        } catch (Exception e) {
+            log.error("❌ Error in processPieceBatch: {}", e.getMessage());
+        } finally {
+            processingSemaphore.release();
+        }
     }
 
     @Scheduled(fixedRate = 300000) // 300000 ms = 5 minutes
-    @Transactional
+    @Transactional(timeout = 30)
     public void processBankPieceBatch() {
-        List<Piece> pendingPieces = findPendingPiecesForBank();
+        if (!processingSemaphore.tryAcquire()) {
+            log.warn("⚠️ Too many concurrent batch processes, skipping bank processing");
+            return;
+        }
 
-        // Filter only bank statements
-        List<Piece> bankPieces = pendingPieces.stream()
-                .filter(piece -> "Relevés bancaires".equals(piece.getType()))
-                .collect(Collectors.toList());
+        try {
+            List<Piece> pendingPieces = findPendingPiecesForBank();
 
-        if (!bankPieces.isEmpty()) {
-            log.info("🏦 Starting BANK batch processing of {} pieces", bankPieces.size());
-            processPiecesConcurrently(bankPieces);
-        } else {
-            log.info("⏭️ No pending bank statements to process");
+            // Filter only bank statements
+            List<Piece> bankPieces = pendingPieces.stream()
+                    .filter(piece -> "Relevés bancaires".equals(piece.getType()))
+                    .collect(Collectors.toList());
+
+            if (!bankPieces.isEmpty()) {
+                log.info("🏦 Starting BANK batch processing of {} pieces", bankPieces.size());
+                processPiecesConcurrently(bankPieces);
+            } else {
+                log.info("⏭️ No pending bank statements to process");
+            }
+        } catch (Exception e) {
+            log.error("❌ Error in processBankPieceBatch: {}", e.getMessage());
+        } finally {
+            processingSemaphore.release();
         }
     }
 
     private List<Piece> findPendingPiecesForBank() {
-        // Get UPLOADED bank pieces first (priority for new pieces)
-        List<Piece> uploadedPieces = pieceRepository
-                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
-                .stream()
-                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
-                .collect(Collectors.toList());
+        try {
+            // Get UPLOADED bank pieces first (priority for new pieces)
+            List<Piece> uploadedPieces = pieceRepository
+                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
+                    .stream()
+                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                    .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                    .collect(Collectors.toList());
 
-        // If we have UPLOADED pieces, use them and don't include PROCESSING pieces
-        if (!uploadedPieces.isEmpty()) {
-            return uploadedPieces;
+            // If we have UPLOADED pieces, use them and don't include PROCESSING pieces
+            if (!uploadedPieces.isEmpty()) {
+                return uploadedPieces;
+            }
+
+            // Only get PROCESSING pieces if no UPLOADED pieces found
+            List<Piece> processingPieces = pieceRepository
+                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
+                    .stream()
+                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                    .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
+                    .collect(Collectors.toList());
+
+            return processingPieces;
+        } catch (Exception e) {
+            log.error("❌ Error finding pending bank pieces: {}", e.getMessage());
+            return Collections.emptyList();
         }
-
-        // Only get PROCESSING pieces if no UPLOADED pieces found
-        List<Piece> processingPieces = pieceRepository
-                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
-                .stream()
-                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                .filter(piece -> "Relevés bancaires".equals(piece.getType())) // Only bank statements
-                .collect(Collectors.toList());
-
-        return processingPieces;
     }
 
     // scheduled method for bank statements (every 5 minutes)
     private List<Piece> findPendingPieces() {
-        // Get UPLOADED pieces first (new pieces - priority)
-        List<Piece> uploadedPieces = pieceRepository
-                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
-                .stream()
-                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                .collect(Collectors.toList());
+        try {
+            // Get UPLOADED pieces first (new pieces - priority)
+            List<Piece> uploadedPieces = pieceRepository
+                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.UPLOADED, Pageable.ofSize(batchConfig.getBatchSize()))
+                    .stream()
+                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                    .collect(Collectors.toList());
 
-        // If we have UPLOADED pieces, process them immediately (1-minute cycle)
-        if (!uploadedPieces.isEmpty()) {
-            return uploadedPieces;
+            // If we have UPLOADED pieces, process them immediately (1-minute cycle)
+            if (!uploadedPieces.isEmpty()) {
+                return uploadedPieces;
+            }
+
+            // Only get PROCESSING pieces if no UPLOADED pieces found
+            List<Piece> processingPieces = pieceRepository
+                    .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
+                    .stream()
+                    .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
+                    .collect(Collectors.toList());
+
+            return processingPieces;
+        } catch (Exception e) {
+            log.error("❌ Error finding pending pieces: {}", e.getMessage());
+            return Collections.emptyList();
         }
-
-        // Only get PROCESSING pieces if no UPLOADED pieces found
-        List<Piece> processingPieces = pieceRepository
-                .findTopNByStatusOrderByUploadDateAsc(PieceStatus.PROCESSING, Pageable.ofSize(batchConfig.getBatchSize()))
-                .stream()
-                .filter(piece -> !duplicateDetectionService.isDuplicate(piece))
-                .collect(Collectors.toList());
-
-        return processingPieces;
     }
 
     private void processPiecesConcurrently(List<Piece> pieces) {
@@ -128,18 +167,28 @@ public class AIPieceProcessingService {
                 .map(this::processSinglePieceAsync)
                 .collect(Collectors.toList());
 
-        // Wait for all completions
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .orTimeout(10, TimeUnit.MINUTES) // Add timeout
-                .join();
+        // Wait for all completions with timeout
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .orTimeout(5, TimeUnit.MINUTES) // 5 minute timeout
+                    .join();
+        } catch (Exception e) {
+            log.error("❌ Timeout or error in batch processing: {}", e.getMessage());
+        }
     }
-
     @Async("batchTaskExecutor")
     public CompletableFuture<Void> processSinglePieceAsync(Piece piece) {
-        return CompletableFuture.runAsync(() -> processSinglePiece(piece));
+        return CompletableFuture.runAsync(() -> {
+            try {
+                processSinglePiece(piece);
+            } catch (Exception e) {
+                log.error("❌ Error processing piece {}: {}", piece.getId(), e.getMessage());
+            }
+        });
     }
 
     private void processSinglePiece(Piece piece) {
+        EntityManager entityManager = null;
         try {
             Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
 
@@ -153,22 +202,18 @@ public class AIPieceProcessingService {
             // Process the piece through AI - use configurable retries
             aiResponseProcessor.processPieceWithRetry(currentPiece, 1);
 
-            // ✅ CRITICAL FIX: Reload the piece after AI processing to get updated AI data
-            Piece processedPiece = pieceRepository.findById(piece.getId())
-                    .orElseThrow(() -> new RuntimeException("Piece not found after processing: " + piece.getId()));
-
-            log.info("✅ AI processing completed for piece {} - new status: {}, AI Amount: {}, AI Currency: {}",
-                    processedPiece.getId(), processedPiece.getStatus(),
-                    processedPiece.getAiAmount(), processedPiece.getAiCurrency());
+            log.info("✅ AI processing completed for piece {}", piece.getId());
 
             // ✅ CRITICAL FIX: Force WebSocket notification with the updated piece data
-            notifyPiecesUpdate(processedPiece.getDossier().getId());
+            notifyPiecesUpdate(piece.getDossier().getId());
 
         } catch (Exception e) {
             log.error("❌ Failed to process piece {}: {}", piece.getId(), e.getMessage());
             rejectPiece(piece, "Processing failed: " + e.getMessage());
         }
     }
+
+
 
     private boolean shouldSkipProcessing(Piece piece) {
         boolean shouldSkip = piece.getStatus() == PieceStatus.PROCESSED ||

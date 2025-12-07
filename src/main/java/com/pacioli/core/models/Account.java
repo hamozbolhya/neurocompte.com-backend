@@ -3,6 +3,7 @@ package com.pacioli.core.models;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Data;
+import java.util.Date;
 
 @Entity
 @Data
@@ -13,16 +14,45 @@ public class Account {
     private Long id;
 
     private String label;
-    private String account;
-    private Boolean hasEntries;
 
-    @ManyToOne(optional = true) // Allow null values for journal
+    @Column(name = "account")
+    private String account; // Account number
+
+    @Column(name = "has_entries")
+    private Boolean hasEntries = false;
+
+    // Add if you need these fields
+    @Column(name = "is_active")
+    private Boolean isActive = true;
+
+    @Column(name = "created_at")
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date createdAt = new Date();
+
+    @Column(name = "updated_at")
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date updatedAt = new Date();
+
+    @ManyToOne(optional = true)
     @JoinColumn(name = "journal_id")
-    @JsonBackReference("journal-accounts") // Match the reference in Journal
+    @JsonBackReference("journal-accounts")
     private Journal journal;
 
-    @ManyToOne(optional = false, fetch = FetchType.LAZY) // Each account belongs to a Dossier (required)
-    @JoinColumn(name = "dossier_id", nullable = false) // Add dossier_id as foreign key
-    @JsonBackReference("dossier-accounts") // Match the reference in Dossier
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "dossier_id", nullable = false)
+    @JsonBackReference("dossier-accounts")
     private Dossier dossier;
+
+    @PrePersist
+    protected void onCreate() {
+        if (createdAt == null) {
+            createdAt = new Date();
+        }
+        updatedAt = new Date();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = new Date();
+    }
 }

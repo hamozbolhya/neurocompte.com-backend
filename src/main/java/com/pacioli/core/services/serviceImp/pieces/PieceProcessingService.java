@@ -27,7 +27,6 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class PieceProcessingService {
 
-    private static final String DEFAULT_CURRENCY = "USD";
     private static final String DEFAULT_DEVISE = "MAD";
 
     private final PieceRepository pieceRepository;
@@ -230,41 +229,21 @@ public class PieceProcessingService {
     /**
      * Save Ecritures for piece
      */
-    @Transactional
+    @Transactional(timeout = 60)
     public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("🔥🔥🔥 SAVE ECritures START =========================================");
         log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         try {
-            // DEBUG: Log the incoming pieceData
-            log.debug("🔥 Raw pieceData length: {}", pieceData.length());
-            try {
-                JsonNode root = objectMapper.readTree(pieceData);
-                log.info("🔥 Root keys: {}", root.fieldNames());
-
-                if (root.has("ecritures")) {
-                    JsonNode ecrituresNode = root.get("ecritures");
-                    log.info("🔥 Found 'ecritures' field with {} elements",
-                            ecrituresNode.isArray() ? ecrituresNode.size() : "not an array");
-
-                    if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                        log.info("🔥 First ecriture in pieceData has keys: {}",
-                                ecrituresNode.get(0).fieldNames());
-                    }
-                }
-            } catch (Exception e) {
-                log.error("Error parsing pieceData for debug: {}", e.getMessage());
-            }
-
             Dossier dossier = dossierRepository.findById(dossierId)
                     .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
             log.info("🔥 Fetched Dossier: {} (ID: {})", dossier.getName(), dossier.getId());
 
-            // Parse original AI response to get exact string values
+            // Parse original AI response
             JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
             log.info("🔥 Original AI response parsed: {}", originalEcritures != null);
 
-            // Fetch existing Accounts and Journals for the Dossier
+            // ✅ CRITICAL FIX: Load ALL accounts for this dossier first
             Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
                     .collect(Collectors.toMap(Account::getAccount, Function.identity()));
             log.info("🔥 Loaded {} existing accounts", accountMap.size());
@@ -272,7 +251,7 @@ public class PieceProcessingService {
             List<Journal> journals = journalRepository.findByDossierId(dossierId);
             log.info("🔥 Loaded {} existing journals", journals.size());
 
-            // ✅ THIS SHOULD RETURN ALL ECritures
+            // Deserialize ecritures
             List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
             log.info("🔥🔥 Deserialized {} Ecritures for piece {}", ecritures.size(), piece.getId());
 
@@ -283,6 +262,11 @@ public class PieceProcessingService {
 
             int totalLines = 0;
             int totalSavedEcritures = 0;
+
+            // ✅ CRITICAL FIX: Process ALL accounts BEFORE saving any ecritures
+            log.info("🔄 Pre-creating all accounts before saving ecritures...");
+            preCreateAllAccounts(ecritures, dossier, journals, accountMap);
+            log.info("✅ Pre-created/retrieved all accounts");
 
             for (int i = 0; i < ecritures.size(); i++) {
                 Ecriture ecriture = ecritures.get(i);
@@ -303,25 +287,14 @@ public class PieceProcessingService {
                 ecriture.setJournal(journal);
                 log.debug("🔥 Set journal: {}", journal.getName());
 
-                try {
-                    // ✅ SAVE ECriture first
-                    Ecriture savedEcriture = ecritureRepository.save(ecriture);
-                    log.info("✅ Saved Ecriture {}: ID={}, uniqueNumber={}",
-                            i + 1, savedEcriture.getId(), savedEcriture.getUniqueEntryNumber());
-                    totalSavedEcritures++;
-
-                    if (ecriture.getLines() == null || ecriture.getLines().isEmpty()) {
-                        log.warn("⚠️ Ecriture {} has no lines!", i + 1);
-                        continue;
-                    }
-
-                    log.info("🔥 Processing {} lines for Ecriture {}",
+                // ✅ CRITICAL FIX: Process lines and set accounts BEFORE saving ecriture
+                if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
+                    log.info("🔥 Processing {} lines for Ecriture {} BEFORE saving",
                             ecriture.getLines().size(), i + 1);
 
-                    // Process lines
                     for (int j = 0; j < ecriture.getLines().size(); j++) {
                         Line line = ecriture.getLines().get(j);
-                        line.setEcriture(savedEcriture); // Link to saved ecriture
+                        line.setEcriture(ecriture); // Link to ecriture (not saved yet)
 
                         if (line.getManuallyUpdated() == null) {
                             line.setManuallyUpdated(false);
@@ -331,30 +304,41 @@ public class PieceProcessingService {
                                 j + 1, line.getLabel(),
                                 line.getAccount() != null ? line.getAccount().getAccount() : "null");
 
-                        // Handle currency conversion info from original AI response
+                        // Handle currency conversion
                         processLineConversion(line, j, originalEcritures, piece);
 
-                        // Handle account creation
+                        // Handle account - should already be in accountMap from pre-creation
                         String accountNumber = line.getAccount() != null ?
                                 line.getAccount().getAccount() : null;
 
                         if (accountNumber != null) {
-                            String accountLabel = line.getAccount().getLabel();
-                            Account account = findOrCreateAccount(accountNumber, dossier, journal,
-                                    accountLabel, accountMap);
+                            Account account = accountMap.get(accountNumber);
+                            if (account == null) {
+                                log.error("❌ Account {} not found in pre-created map!", accountNumber);
+                                throw new RuntimeException("Account " + accountNumber + " not pre-created");
+                            }
                             line.setAccount(account);
                             log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
                         } else {
                             log.warn("⚠️ Line {} has no account number!", j + 1);
                         }
                     }
+                }
 
-                    // ✅ SAVE LINES after linking
-                    lineRepository.saveAll(ecriture.getLines());
-                    totalLines += ecriture.getLines().size();
+                try {
+                    // ✅ NOW save Ecriture with all accounts already set
+                    Ecriture savedEcriture = ecritureRepository.save(ecriture);
+                    log.info("✅ Saved Ecriture {}: ID={}, uniqueNumber={}",
+                            i + 1, savedEcriture.getId(), savedEcriture.getUniqueEntryNumber());
+                    totalSavedEcritures++;
 
-                    log.info("✅ Saved {} lines for Ecriture {}",
-                            ecriture.getLines().size(), savedEcriture.getId());
+                    // ✅ Save lines (accounts are already set, no cascade issues)
+                    if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
+                        lineRepository.saveAll(ecriture.getLines());
+                        totalLines += ecriture.getLines().size();
+                        log.info("✅ Saved {} lines for Ecriture {}",
+                                ecriture.getLines().size(), savedEcriture.getId());
+                    }
 
                 } catch (Exception e) {
                     log.error("❌ Error saving Ecriture {}: {}", i + 1, e.getMessage(), e);
@@ -369,6 +353,84 @@ public class PieceProcessingService {
         } catch (Exception e) {
             log.error("❌❌❌ FATAL ERROR in saveEcrituresForPiece: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to save ecritures: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NEW METHOD: Pre-create all accounts before saving ecritures
+     */
+    private void preCreateAllAccounts(List<Ecriture> ecritures, Dossier dossier,
+                                      List<Journal> journals, Map<String, Account> accountMap) {
+
+        Set<String> accountNumbersToCreate = new HashSet<>();
+
+        // Collect all unique account numbers
+        for (Ecriture ecriture : ecritures) {
+            if (ecriture.getLines() != null) {
+                for (Line line : ecriture.getLines()) {
+                    if (line.getAccount() != null && line.getAccount().getAccount() != null) {
+                        String accountNumber = line.getAccount().getAccount().trim();
+                        if (!accountMap.containsKey(accountNumber)) {
+                            accountNumbersToCreate.add(accountNumber);
+                        }
+                    }
+                }
+            }
+        }
+
+        log.info("📊 Need to create {} new accounts", accountNumbersToCreate.size());
+
+        // Create accounts
+        for (String accountNumber : accountNumbersToCreate) {
+            try {
+                Journal journal = null;
+                String accountLabel = null;
+
+                // Find label and journal from lines
+                for (Ecriture ecriture : ecritures) {
+                    if (ecriture.getLines() != null) {
+                        for (Line line : ecriture.getLines()) {
+                            if (line.getAccount() != null &&
+                                    accountNumber.equals(line.getAccount().getAccount())) {
+                                accountLabel = line.getAccount().getLabel();
+                                if (ecriture.getJournal() != null) {
+                                    journal = ecriture.getJournal();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (accountLabel != null) break;
+                }
+
+                if (accountLabel == null) {
+                    accountLabel = accountNumber;
+                }
+
+                // ✅ Use the simple version to avoid complex retry logic issues
+                Account account = accountCreationService.findOrCreateAccountSimple(
+                        accountNumber, dossier, journal, accountLabel
+                );
+
+                accountMap.put(accountNumber, account);
+                log.debug("✅ Pre-created account: {}", accountNumber);
+
+            } catch (Exception e) {
+                log.error("❌ Failed to pre-create account {}: {}", accountNumber, e.getMessage());
+
+                // Try one more time with a different approach
+                try {
+                    log.warn("Retrying account {} creation with alternative method", accountNumber);
+                    Account account = accountCreationService.findOrCreateAccountAlternative(
+                            accountNumber, dossier, null, accountNumber
+                    );
+                    accountMap.put(accountNumber, account);
+                    log.info("✅ Account created on retry: {}", accountNumber);
+                } catch (Exception ex) {
+                    throw new RuntimeException("Failed to create account " + accountNumber +
+                            " after multiple attempts: " + ex.getMessage(), ex);
+                }
+            }
         }
     }
 
@@ -496,9 +558,6 @@ public class PieceProcessingService {
         return fd;
     }
 
-    /**
-     * Deserialize Ecritures from JSON
-     */
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
         try {
             JsonNode rootNode = objectMapper.readTree(pieceData);
@@ -528,9 +587,8 @@ public class PieceProcessingService {
                 }
             }
 
-            Map<String, Account> accountMap = accountRepository.findByDossierId(dossier.getId()).stream()
-                    .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-            log.info("Initial Account Map size: {}", accountMap.size());
+            // ⚠️ REMOVED: Map<String, Account> accountMap initialization
+            // We won't create accounts here anymore - just store the data
 
             List<Ecriture> ecritures = new ArrayList<>();
             for (int i = 0; i < ecrituresNode.size(); i++) {
@@ -555,7 +613,7 @@ public class PieceProcessingService {
 
                         for (int j = 0; j < ecriture.getLines().size(); j++) {
                             Line line = ecriture.getLines().get(j);
-                            line.setEcriture(ecriture); // CRITICAL: Link line to ecriture
+                            line.setEcriture(ecriture);
 
                             if (line.getManuallyUpdated() == null) {
                                 line.setManuallyUpdated(false);
@@ -566,22 +624,16 @@ public class PieceProcessingService {
 
                             Account account = line.getAccount();
                             if (account != null) {
-                                Account existingAccount = accountMap.get(account.getAccount());
-                                if (existingAccount == null) {
-                                    existingAccount = accountRepository.findByAccountAndDossierId(
-                                            account.getAccount(), dossier.getId());
-                                    if (existingAccount != null) {
-                                        accountMap.put(existingAccount.getAccount(), existingAccount);
-                                    }
-                                }
+                                String accountNumber = account.getAccount();
+                                String accountLabel = account.getLabel();
 
-                                if (existingAccount != null) {
-                                    line.setAccount(existingAccount);
-                                } else {
-                                    account.setDossier(dossier);
-                                    log.info("🔥 Prepared new Account: {}", account.getAccount());
-                                    accountMap.put(account.getAccount(), account);
-                                }
+                                // ⚠️ CRITICAL CHANGE: Don't create account here!
+                                // Just ensure the Account object has the necessary data
+                                account.setAccount(accountNumber);
+                                account.setLabel(accountLabel);
+                                account.setDossier(dossier);
+                                // ⚠️ DO NOT save or persist here
+                                log.info("🔥 Prepared account data for creation: {}", accountNumber);
                             } else {
                                 log.warn("🔥 Line {} has no account!", j + 1);
                             }
@@ -607,25 +659,6 @@ public class PieceProcessingService {
             throw new IllegalArgumentException("Invalid JSON format for 'ecritures': " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("❌ Unexpected error in deserializeEcritures: {}", e.getMessage(), e);
-            throw e;
-        }
-    }
-    /**
-     * Find or create account
-     */
-    private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal,
-                                        String accountLabel, Map<String, Account> accountMap) {
-        if (accountMap.containsKey(accountNumber)) {
-            return accountMap.get(accountNumber);
-        }
-
-        try {
-            Account account = accountCreationService.findOrCreateAccount(
-                    accountNumber, dossier, journal, accountLabel);
-            accountMap.put(accountNumber, account);
-            return account;
-        } catch (Exception e) {
-            log.error("❌ Error finding/creating account {}: {}", accountNumber, e.getMessage());
             throw e;
         }
     }

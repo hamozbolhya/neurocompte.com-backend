@@ -247,4 +247,6 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     Page<Piece> findByDossierCabinetUsersId(UUID userId, Pageable pageable);
 
+    List<Piece> findByStatusAndUploadDateBefore(PieceStatus status, Date date);
+
 }

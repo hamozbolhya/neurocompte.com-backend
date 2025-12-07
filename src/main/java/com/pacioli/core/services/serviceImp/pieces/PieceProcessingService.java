@@ -233,14 +233,14 @@ public class PieceProcessingService {
     @Transactional
     public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("🔥🔥🔥 SAVE ECritures START =========================================");
-        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
+//        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         try {
             // DEBUG: Log the incoming pieceData
             log.debug("🔥 Raw pieceData length: {}", pieceData.length());
             try {
                 JsonNode root = objectMapper.readTree(pieceData);
-                log.info("🔥 Root keys: {}", root.fieldNames());
+//                log.info("🔥 Root keys: {}", root.fieldNames());
 
                 if (root.has("ecritures")) {
                     JsonNode ecrituresNode = root.get("ecritures");
@@ -267,10 +267,10 @@ public class PieceProcessingService {
             // Fetch existing Accounts and Journals for the Dossier
             Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
                     .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-            log.info("🔥 Loaded {} existing accounts", accountMap.size());
+//            log.info("🔥 Loaded {} existing accounts", accountMap.size());
 
             List<Journal> journals = journalRepository.findByDossierId(dossierId);
-            log.info("🔥 Loaded {} existing journals", journals.size());
+//            log.info("🔥 Loaded {} existing journals", journals.size());
 
             // ✅ THIS SHOULD RETURN ALL ECritures
             List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -327,9 +327,9 @@ public class PieceProcessingService {
                             line.setManuallyUpdated(false);
                         }
 
-                        log.debug("🔥 Line {}: label={}, account={}",
-                                j + 1, line.getLabel(),
-                                line.getAccount() != null ? line.getAccount().getAccount() : "null");
+//                        log.debug("🔥 Line {}: label={}, account={}",
+//                                j + 1, line.getLabel(),
+//                                line.getAccount() != null ? line.getAccount().getAccount() : "null");
 
                         // Handle currency conversion info from original AI response
                         processLineConversion(line, j, originalEcritures, piece);
@@ -343,7 +343,7 @@ public class PieceProcessingService {
                             Account account = findOrCreateAccount(accountNumber, dossier, journal,
                                     accountLabel, accountMap);
                             line.setAccount(account);
-                            log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
+//                            log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
                         } else {
                             log.warn("⚠️ Line {} has no account number!", j + 1);
                         }
@@ -561,8 +561,8 @@ public class PieceProcessingService {
                                 line.setManuallyUpdated(false);
                             }
 
-                            log.debug("🔥 Line {}: label={}, debit={}, credit={}",
-                                    j + 1, line.getLabel(), line.getDebit(), line.getCredit());
+//                            log.debug("🔥 Line {}: label={}, debit={}, credit={}",
+//                                    j + 1, line.getLabel(), line.getDebit(), line.getCredit());
 
                             Account account = line.getAccount();
                             if (account != null) {

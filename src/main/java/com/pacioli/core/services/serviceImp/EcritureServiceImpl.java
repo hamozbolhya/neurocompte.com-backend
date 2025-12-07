@@ -339,7 +339,7 @@ public class EcritureServiceImpl implements EcritureService {
         if (ecritureRequest.getManuallyUpdated() != null && ecritureRequest.getManuallyUpdated()) {
             existingEcriture.setManuallyUpdated(true);
             existingEcriture.setManualUpdateDate(LocalDate.now());
-            log.info("Ecriture {} marked as manually updated", ecritureId);
+//            log.info("Ecriture {} marked as manually updated", ecritureId);
         }
 
         // Update the amountUpdated field if it's provided in the request
@@ -373,7 +373,7 @@ public class EcritureServiceImpl implements EcritureService {
         updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
                 ecritureRequest.getManuallyUpdated());
 
-        log.info("✅ Ecriture {} validation passed and updated successfully", ecritureId);
+//        log.info("✅ Ecriture {} validation passed and updated successfully", ecritureId);
         return ecritureRepository.save(existingEcriture);
     }
 
@@ -486,7 +486,7 @@ public class EcritureServiceImpl implements EcritureService {
                 if (manuallyUpdated != null && manuallyUpdated) {
                     existingLine.setManuallyUpdated(true);
                     existingLine.setManualUpdateDate(LocalDate.now());
-                    log.debug("Line {} marked as manually updated", existingLine.getId());
+//                    log.debug("Line {} marked as manually updated", existingLine.getId());
                 }
 
             } else {

@@ -78,7 +78,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
             processValidAIResponse(piece, normalizedResponse);
 
         } catch (Exception e) {
-            log.error("❌ Error processing piece {}: {}", piece.getId(), e.getMessage());
+//            log.error("❌ Error processing piece {}: {}", piece.getId(), e.getMessage());
             handleProcessingError(piece, attempt, e);
         }
     }

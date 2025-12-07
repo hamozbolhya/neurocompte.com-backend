@@ -17,7 +17,7 @@ public class PieceValidator {
     private ObjectMapper objectMapper;
 
     public boolean isValidAIResponse(JsonNode root) {
-        log.info("🔍 Validating AI response structure - Root keys: {}", root.fieldNames());
+//        log.info("🔍 Validating AI response structure - Root keys: {}", root.fieldNames());
 
         // Check for normalized structure first
         if (root.has("ecritures")) {
@@ -183,7 +183,7 @@ public class PieceValidator {
     }
 
     public boolean isValidBankAIResponse(JsonNode root) {
-        log.info("🏦 Validating bank AI response structure - Root keys: {}", root.fieldNames());
+//        log.info("🏦 Validating bank AI response structure - Root keys: {}", root.fieldNames());
 
         // Check if it's already a normalized response with ecritures
         if (root.has("ecritures")) {
@@ -224,7 +224,7 @@ public class PieceValidator {
 
     // In PieceValidator.java - ADD THIS METHOD
     JsonNode findBankEcrituresNode(JsonNode parsedJson) {
-        log.info("🏦 Processing bank statement structure - Root keys: {}", parsedJson.fieldNames());
+//        log.info("🏦 Processing bank statement structure - Root keys: {}", parsedJson.fieldNames());
 
         // First check if we already have a flat ecritures array (from normalized response)
         if (parsedJson.has("ecritures")) {

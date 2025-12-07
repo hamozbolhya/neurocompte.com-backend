@@ -148,7 +148,7 @@ public class AIPieceProcessingService {
                 return;
             }
 
-            log.info("🔄 Processing piece {} - current status: {}", currentPiece.getId(), currentPiece.getStatus());
+//            log.info("🔄 Processing piece {} - current status: {}", currentPiece.getId(), currentPiece.getStatus());
 
             // Process the piece through AI - use configurable retries
             aiResponseProcessor.processPieceWithRetry(currentPiece, 1);

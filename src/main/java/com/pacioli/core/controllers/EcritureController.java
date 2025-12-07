@@ -152,8 +152,8 @@ public class EcritureController {
             @RequestBody Ecriture ecritureRequest
     ) {
         try {
-            log.debug("Received exchange rate update request for ecriture {}: {}",
-                    ecritureId, ecritureRequest);
+//            log.debug("Received exchange rate update request for ecriture {}: {}",
+//                    ecritureId, ecritureRequest);
 
             // Log exchange rate information if present
             if (ecritureRequest.getExchangeRate() != null) {

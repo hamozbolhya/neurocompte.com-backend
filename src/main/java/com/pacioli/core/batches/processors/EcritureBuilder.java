@@ -59,10 +59,10 @@ public class EcritureBuilder extends BaseDTOBuilder {
             // Log details
             for (int i = 0; i < ecritures.size(); i++) {
                 EcrituresDTO2 ecriture = ecritures.get(i);
-                log.debug("Ecriture {}: Date={}, Journal={}, Lines={}",
-                        i, ecriture.getEntryDate(),
-                        ecriture.getJournal() != null ? ecriture.getJournal().getName() : "null",
-                        ecriture.getLines() != null ? ecriture.getLines().size() : 0);
+//                log.debug("Ecriture {}: Date={}, Journal={}, Lines={}",
+//                        i, ecriture.getEntryDate(),
+//                        ecriture.getJournal() != null ? ecriture.getJournal().getName() : "null",
+//                        ecriture.getLines() != null ? ecriture.getLines().size() : 0);
             }
 
         } catch (Exception e) {
@@ -160,8 +160,8 @@ public class EcritureBuilder extends BaseDTOBuilder {
             }
             ecriture.setLines(lines);
 
-            log.debug("🏦 Created bank Ecriture with {} lines for date: {}",
-                    lines.size(), formattedDate);
+//            log.debug("🏦 Created bank Ecriture with {} lines for date: {}",
+//                    lines.size(), formattedDate);
 
             return ecriture;
 

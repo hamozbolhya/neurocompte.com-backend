@@ -80,7 +80,7 @@ public abstract class BaseAIProcessor {
     }
 
     protected JsonNode findEcrituresNodeForAI(JsonNode parsedJson) {
-        log.info("🔍 Searching for ecritures in AI response - Root keys: {}", parsedJson.fieldNames());
+//        log.info("🔍 Searching for ecritures in AI response - Root keys: {}", parsedJson.fieldNames());
 
         // First check for normal format
         if (parsedJson.has("ecritures")) {

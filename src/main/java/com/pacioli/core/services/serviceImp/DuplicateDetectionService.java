@@ -192,7 +192,7 @@ public class DuplicateDetectionService {
                 continue;
             }
 
-            log.debug("Checking ecriture: entryDate={}, maxAmount={}", entryDate, maxAmount);
+//            log.debug("Checking ecriture: entryDate={}, maxAmount={}", entryDate, maxAmount);
 
             // Check against existing ecritures in the dossier
             List<Piece> duplicates = pieceRepository.findByEcritureData(dossierId, entryDate, maxAmount);

@@ -10,6 +10,7 @@ import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.PieceService;
 import com.pacioli.core.services.serviceImp.mappers.PieceDTOMapper;
 import com.pacioli.core.services.serviceImp.pieces.AIService;
+import com.pacioli.core.services.serviceImp.pieces.FileProcessingResult;
 import com.pacioli.core.services.serviceImp.pieces.FileService;
 import com.pacioli.core.services.serviceImp.pieces.PieceProcessingService;
 import jakarta.transaction.Transactional;
@@ -78,19 +79,22 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) {
         try {
-            // Validate and save file
-            String formattedFilename = fileService.validateAndSaveFile(file);
-
-            // Deserialize piece
+            log.info("saving piece {}", pieceData);
             Piece piece = deserializePiece(pieceData, dossierId);
+
+            // Validate and save file - returns both filename and the file to process
+            FileProcessingResult fileResult = fileService.validateAndSaveFile(file, piece.getType());
+            String formattedFilename = fileResult.getFilename();
+            MultipartFile fileToProcess = fileResult.getFileToProcess();
+
             Dossier dossier = dossierRepository.findById(dossierId)
                     .orElseThrow(() -> new IllegalArgumentException("Dossier introuvable pour l'ID: " + dossierId));
 
-            // Initialize piece
+            // Initialize piece with the actual saved filename
             initializePiece(piece, dossier, formattedFilename);
 
-            // Process with AI
-            aiService.processFileBasedOnType(file, formattedFilename, dossierId, country, piece.getType());
+            // Process with AI - send the converted PNG file if PDF was converted
+            aiService.processFileBasedOnType(fileToProcess, formattedFilename, dossierId, country, piece.getType());
 
             // Save and return
             Piece savedPiece = pieceRepository.save(piece);

@@ -28,19 +28,16 @@ public class EcritureBuilder extends BaseDTOBuilder {
             log.debug("First 3 nodes structure:");
             for (int i = 0; i < Math.min(3, ecrituresNode.size()); i++) {
                 JsonNode node = ecrituresNode.get(i);
-                log.debug("Node {} - has entries: {}, has isBankTransaction: {}, has Date: {}",
+                log.debug("Node {} - has entries: {}, has Date: {}",
                         i,
                         node.has("entries") && node.get("entries").isArray(),
-                        node.has("isBankTransaction"),
                         node.has("Date"));
             }
 
             // Check if this is a bank statement
             boolean isBankStatement = false;
             for (JsonNode node : ecrituresNode) {
-                if ((node.has("isBankTransaction") && node.get("isBankTransaction").asBoolean()) ||
-                        (node.has("entries") && node.get("entries").isArray() &&
-                                node.get("entries").size() > 0)) {
+                if (node.has("entries") && node.get("entries").isArray()) {
                     isBankStatement = true;
                     break;
                 }
@@ -50,20 +47,11 @@ public class EcritureBuilder extends BaseDTOBuilder {
                 log.info("🏦 Processing BANK statement: creating one Ecriture per transaction group");
                 ecritures = processBankStatement(ecrituresNode);
             } else {
-                log.info("📄 Processing NORMAL invoice: grouping by date");
+                log.info("📄 Processing NORMAL invoice: creating ONE Ecriture with each line keeping its original date");
                 ecritures = processNormalInvoice(ecrituresNode);
             }
 
             log.info("✅ Built {} ecritures", ecritures.size());
-
-            // Log details
-            for (int i = 0; i < ecritures.size(); i++) {
-                EcrituresDTO2 ecriture = ecritures.get(i);
-//                log.debug("Ecriture {}: Date={}, Journal={}, Lines={}",
-//                        i, ecriture.getEntryDate(),
-//                        ecriture.getJournal() != null ? ecriture.getJournal().getName() : "null",
-//                        ecriture.getLines() != null ? ecriture.getLines().size() : 0);
-            }
 
         } catch (Exception e) {
             log.error("❌ Error building ecritures: {}", e.getMessage(), e);
@@ -78,12 +66,6 @@ public class EcritureBuilder extends BaseDTOBuilder {
         for (JsonNode node : ecrituresNode) {
             // Check if this is a transaction group
             if (node.has("entries") && node.get("entries").isArray()) {
-                EcrituresDTO2 ecriture = createEcritureFromTransactionGroup(node);
-                if (ecriture != null) {
-                    ecritures.add(ecriture);
-                }
-            } else if (node.has("isBankTransaction") && node.get("isBankTransaction").asBoolean()) {
-                // Already marked as bank transaction
                 EcrituresDTO2 ecriture = createEcritureFromTransactionGroup(node);
                 if (ecriture != null) {
                     ecritures.add(ecriture);
@@ -103,26 +85,67 @@ public class EcritureBuilder extends BaseDTOBuilder {
 
     private List<EcrituresDTO2> processNormalInvoice(JsonNode ecrituresNode) {
         List<EcrituresDTO2> ecritures = new ArrayList<>();
-        List<JsonNode> allEntries = new ArrayList<>();
 
-        // Flatten any nested structures
-        for (JsonNode node : ecrituresNode) {
-            allEntries.add(node);
+        if (ecrituresNode.size() == 0) {
+            return ecritures;
         }
 
-        // Group by date
-        Map<String, List<JsonNode>> entriesByDate = groupEntriesByDate(allEntries);
-
-        // Create one Ecriture per date
-        for (Map.Entry<String, List<JsonNode>> dateGroup : entriesByDate.entrySet()) {
-            EcrituresDTO2 ecriture = createEcritureForDate(dateGroup.getKey(), dateGroup.getValue());
-            if (ecriture != null) {
-                ecritures.add(ecriture);
-            }
+        // For normal invoices: Create ONE Ecriture for ALL entries
+        // Use earliest date for the Ecriture itself
+        EcrituresDTO2 ecriture = createSingleEcritureForAllEntries(ecrituresNode);
+        if (ecriture != null) {
+            ecritures.add(ecriture);
         }
 
-        log.info("📄 Created {} Ecritures from normal invoice", ecritures.size());
+        log.info("📄 Created 1 Ecriture with {} lines from normal invoice",
+                ecriture != null ? ecriture.getLines().size() : 0);
         return ecritures;
+    }
+
+    private EcrituresDTO2 createSingleEcritureForAllEntries(JsonNode ecrituresNode) {
+        try {
+            if (ecrituresNode.size() == 0) {
+                return null;
+            }
+
+            EcrituresDTO2 ecriture = new EcrituresDTO2();
+            ecriture.setUniqueEntryNumber(UUID.randomUUID().toString());
+
+            // Find the EARLIEST date among all entries for the Ecriture date
+            String earliestDate = null;
+            JournalDTO journal = null;
+
+            for (JsonNode entry : ecrituresNode) {
+                String entryDateStr = extractStringSafely(entry, "Date", "");
+                String formattedEntryDate = formatDateToStandard(entryDateStr);
+
+                if (earliestDate == null || formattedEntryDate.compareTo(earliestDate) < 0) {
+                    earliestDate = formattedEntryDate;
+                    journal = buildJournal(entry); // Use journal from earliest entry
+                }
+            }
+
+            ecriture.setEntryDate(earliestDate != null ? earliestDate : formatDateToStandard(""));
+            ecriture.setJournal(journal != null ? journal : buildJournal(ecrituresNode.get(0)));
+
+            // Create lines for ALL entries, each line will keep its original date
+            List<LineDTO> lines = new ArrayList<>();
+            for (JsonNode entry : ecrituresNode) {
+                LineDTO line = buildLine(entry);
+                if (line != null) {
+                    lines.add(line);
+                }
+            }
+            ecriture.setLines(lines);
+
+            log.info("📄 Created ONE Ecriture with {} lines using earliest date: {}",
+                    lines.size(), earliestDate);
+            return ecriture;
+
+        } catch (Exception e) {
+            log.error("❌ Error creating single Ecriture for all entries: {}", e.getMessage(), e);
+            return null;
+        }
     }
 
     private EcrituresDTO2 createEcritureFromTransactionGroup(JsonNode transactionGroup) {
@@ -139,7 +162,7 @@ public class EcritureBuilder extends BaseDTOBuilder {
             EcrituresDTO2 ecriture = new EcrituresDTO2();
             ecriture.setUniqueEntryNumber(UUID.randomUUID().toString());
 
-            // Set date
+            // Set date from first entry in the transaction group
             String dateStr = extractStringSafely(firstEntry, "Date", "");
             if (dateStr.isEmpty() && transactionGroup.has("Date")) {
                 dateStr = transactionGroup.get("Date").asText();
@@ -150,7 +173,7 @@ public class EcritureBuilder extends BaseDTOBuilder {
             // Set journal
             ecriture.setJournal(buildJournal(firstEntry));
 
-            // Create lines
+            // Create lines for all entries in this transaction group
             List<LineDTO> lines = new ArrayList<>();
             for (JsonNode entry : entries) {
                 LineDTO line = buildLine(entry);
@@ -160,8 +183,8 @@ public class EcritureBuilder extends BaseDTOBuilder {
             }
             ecriture.setLines(lines);
 
-//            log.debug("🏦 Created bank Ecriture with {} lines for date: {}",
-//                    lines.size(), formattedDate);
+            log.debug("🏦 Created bank Ecriture with {} lines for date: {}",
+                    lines.size(), formattedDate);
 
             return ecriture;
 
@@ -202,53 +225,6 @@ public class EcritureBuilder extends BaseDTOBuilder {
         }
     }
 
-    private EcrituresDTO2 createEcritureForDate(String date, List<JsonNode> entriesForDate) {
-        try {
-            if (entriesForDate.isEmpty()) {
-                return null;
-            }
-
-            JsonNode firstEntry = entriesForDate.get(0);
-
-            EcrituresDTO2 ecriture = new EcrituresDTO2();
-            ecriture.setUniqueEntryNumber(UUID.randomUUID().toString());
-            ecriture.setEntryDate(date);
-            ecriture.setJournal(buildJournal(firstEntry));
-
-            // Create lines for all entries
-            List<LineDTO> lines = new ArrayList<>();
-            for (JsonNode entry : entriesForDate) {
-                LineDTO line = buildLine(entry);
-                if (line != null) {
-                    lines.add(line);
-                }
-            }
-            ecriture.setLines(lines);
-
-            log.debug("📝 Created grouped Ecriture for date {} with {} lines", date, lines.size());
-            return ecriture;
-
-        } catch (Exception e) {
-            log.error("❌ Error creating ecriture for date {}: {}", date, e.getMessage());
-            return null;
-        }
-    }
-
-    private Map<String, List<JsonNode>> groupEntriesByDate(List<JsonNode> allEntries) {
-        Map<String, List<JsonNode>> entriesByDate = new LinkedHashMap<>();
-
-        for (JsonNode entry : allEntries) {
-            String dateStr = extractStringSafely(entry, "Date", "");
-            String formattedDate = formatDateToStandard(dateStr);
-
-            entriesByDate.computeIfAbsent(formattedDate, k -> new ArrayList<>()).add(entry);
-        }
-
-        log.debug("📊 Grouped {} entries into {} date groups",
-                allEntries.size(), entriesByDate.size());
-        return entriesByDate;
-    }
-
     private LineDTO buildLine(JsonNode entry) {
         LineDTO line = new LineDTO();
 
@@ -270,17 +246,15 @@ public class EcritureBuilder extends BaseDTOBuilder {
             line.setOriginalCurrency(extractStringSafely(entry, "OriginalDevise", null));
             line.setConvertedCurrency(extractStringSafely(entry, "Devise", "USD"));
 
-            // Set exchange rate date
-            if (entry.has("ExchangeRateDate")) {
-                String dateStr = entry.get("ExchangeRateDate").asText();
-                if (dateStr != null && !dateStr.isEmpty() && !dateStr.equals("null")) {
-                    try {
-                        // Parse the date
-                        LocalDate exchangeDate = parseDate(dateStr);
-                        line.setExchangeRateDate(LocalDate.parse(exchangeDate.toString()));
-                    } catch (Exception e) {
-                        log.trace("Error parsing exchange rate date: {}", e.getMessage());
-                    }
+            // ⭐⭐⭐ IMPORTANT: Set the line's ORIGINAL DATE in exchangeRateDate ⭐⭐⭐
+            String lineDateStr = extractStringSafely(entry, "Date", "");
+            if (lineDateStr != null && !lineDateStr.isEmpty()) {
+                try {
+                    LocalDate lineDate = parseDate(lineDateStr);
+                    line.setExchangeRateDate(lineDate);
+                    log.trace("📅 Line date saved to exchangeRateDate: {}", lineDate);
+                } catch (Exception e) {
+                    log.trace("Error parsing line date: {}", e.getMessage());
                 }
             }
 
@@ -290,8 +264,9 @@ public class EcritureBuilder extends BaseDTOBuilder {
             account.setLabel(extractStringSafely(entry, "CompteLib", "Unknown Account"));
             line.setAccount(account);
 
-            log.trace("✅ Built line: {} - Debit: {}, Credit: {}",
-                    line.getLabel(), line.getDebit(), line.getCredit());
+            log.trace("✅ Built line: {} - Debit: {}, Credit: {}, Date: {}",
+                    line.getLabel(), line.getDebit(), line.getCredit(),
+                    line.getExchangeRateDate());
 
             return line;
 

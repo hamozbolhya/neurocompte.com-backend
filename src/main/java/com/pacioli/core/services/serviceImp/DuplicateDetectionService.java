@@ -271,7 +271,7 @@ public class DuplicateDetectionService {
             Double minAmount = maxAmount - tolerance;
             Double maxAmountWithTolerance = maxAmount + tolerance;
 
-            log.debug("Checking ecriture with tolerance: entryDate={}, amount={}±{}", entryDate, maxAmount, tolerance);
+//            log.debug("Checking ecriture with tolerance: entryDate={}, amount={}±{}", entryDate, maxAmount, tolerance);
 
             List<Piece> duplicates = pieceRepository.findByEcritureDataWithTolerance(
                     dossierId, entryDate, minAmount, maxAmountWithTolerance);

@@ -281,8 +281,7 @@ public abstract class BaseAIProcessor {
     }
 
     /**
-     * ✅ NEW METHOD: Create a proper JsonNode for the converted response
-     * This replaces the problematic dtoBuilder.createConvertedResponseNode call
+     * ✅ Create a proper JsonNode for the converted response
      */
     protected JsonNode createConvertedResponseNode(PieceDTO pieceDTO, JsonNode originalAiResponse) {
         try {
@@ -310,20 +309,6 @@ public abstract class BaseAIProcessor {
             log.error("❌ Error creating converted response node: {}", e.getMessage(), e);
             // Return empty object as fallback
             return objectMapper.createObjectNode();
-        }
-    }
-
-    protected Double calculateAmountFromAIResponse(JsonNode aiResponse) {
-        try {
-            JsonNode ecritures = findEcrituresNodeForAI(aiResponse);
-            if (ecritures != null && ecritures.isArray()) {
-                return calculateLargestAmount(ecritures);
-            }
-            log.warn("⚠️ No ecritures found in AI response for amount calculation");
-            return null;
-        } catch (Exception e) {
-            log.error("❌ Error calculating amount from AI response: {}", e.getMessage());
-            return null;
         }
     }
 }

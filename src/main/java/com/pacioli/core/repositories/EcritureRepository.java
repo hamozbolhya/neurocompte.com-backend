@@ -2,6 +2,8 @@ package com.pacioli.core.repositories;
 
 import com.pacioli.core.DTO.EcritureExportDTO;
 import com.pacioli.core.models.Ecriture;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -165,5 +167,48 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
 
     @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId AND e.entryDate BETWEEN :startDate AND :endDate")
     Long countEcrituresByCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
+
+    @Query("""
+            SELECT e 
+            FROM Ecriture e
+            JOIN e.piece p
+            JOIN p.dossier d
+            JOIN d.exercises ex
+            WHERE ex.id = :exerciseId
+              AND d.cabinet.id = :cabinetId
+              AND ex.startDate <= e.entryDate
+              AND ex.endDate >= e.entryDate
+        """)
+    Page<Ecriture> findEcrituresByExerciseAndCabinetPaginated(
+            @Param("exerciseId") Long exerciseId,
+            @Param("cabinetId") Long cabinetId,
+            Pageable pageable);
+
+    @Query("""
+            SELECT e
+            FROM Ecriture e
+            JOIN e.piece p
+            JOIN p.dossier d
+            WHERE d.cabinet.id = :cabinetId
+        """)
+    Page<Ecriture> findByCabinetIdPaginated(
+            @Param("cabinetId") Long cabinetId,
+            Pageable pageable);
+
+    // Optional: Single query that handles both cases
+    @Query("""
+            SELECT e 
+            FROM Ecriture e
+            JOIN e.piece p
+            JOIN p.dossier d
+            LEFT JOIN d.exercises ex
+            WHERE (:exerciseId IS NULL OR ex.id = :exerciseId)
+              AND d.cabinet.id = :cabinetId
+              AND (:exerciseId IS NULL OR (ex.startDate <= e.entryDate AND ex.endDate >= e.entryDate))
+        """)
+    Page<Ecriture> findEcrituresByExerciseAndCabinetPaginatedOptional(
+            @Param("exerciseId") Long exerciseId,
+            @Param("cabinetId") Long cabinetId,
+            Pageable pageable);
 }
 

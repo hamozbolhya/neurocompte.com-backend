@@ -8,6 +8,10 @@ import com.pacioli.core.utils.EcritureValidationUtil;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -42,21 +46,31 @@ public class EcritureServiceImpl implements EcritureService {
         return ecritureRepository.findByPieceId(pieceId);
     }
 
-    @Override
-    public List<Ecriture> getEcrituresByExercise(Long exerciseId) {
-        if (exerciseId != null) {
-            return ecritureRepository.findByPiece_Dossier_Exercises_Id(exerciseId);
-        }
-        return List.of(); // Return empty list if exerciseId is null
-    }
+
 
     @Override
-    public List<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId) {
-        List<Ecriture> ecritures = ecritureRepository.findEcrituresByExerciseAndCabinet(exerciseId, cabinetId);
-        return ecritures.stream()
-                .map(e -> mapToDTO(e))
-                .collect(Collectors.toList());
+    public Page<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId, int page, int size) {
+        log.info("Service called with page: {}, size: {}, exerciseId: {}, cabinetId: {}",
+                page, size, exerciseId, cabinetId);
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "entryDate"));
+
+        Page<Ecriture> ecriturePage;
+        if (exerciseId != null) {
+            ecriturePage = ecritureRepository.findEcrituresByExerciseAndCabinetPaginated(
+                    exerciseId, cabinetId, pageable);
+        } else {
+            ecriturePage = ecritureRepository.findByCabinetIdPaginated(cabinetId, pageable);
+        }
+
+        log.info("Repository returned - Total: {}, Page: {}, Size: {}",
+                ecriturePage.getTotalElements(),
+                ecriturePage.getNumber(),
+                ecriturePage.getSize());
+
+        return ecriturePage.map(this::mapToDTO);
     }
+
 
     private EcritureDTO mapToDTO(Ecriture ecriture) {
         EcritureDTO dto = new EcritureDTO();
@@ -115,7 +129,7 @@ public class EcritureServiceImpl implements EcritureService {
             PieceDTO pieceDTO = new PieceDTO();
             pieceDTO.setId(ecriture.getPiece().getId());
             // Map other piece fields as needed
-            dto.setPiece(pieceDTO);
+//            dto.setPiece(pieceDTO);
         }
 
         return dto;
@@ -270,7 +284,7 @@ public class EcritureServiceImpl implements EcritureService {
             // pieceDTO.setFactureData(...);
             // pieceDTO.setEcritures(...);
 
-            dto.setPiece(pieceDTO);
+//            dto.setPiece(pieceDTO);
         }
 
         return dto;

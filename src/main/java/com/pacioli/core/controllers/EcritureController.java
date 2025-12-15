@@ -13,6 +13,7 @@ import com.pacioli.core.services.JournalService;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -42,12 +43,15 @@ public class EcritureController {
 
 
     @GetMapping("/filter")
-    public ResponseEntity<List<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
+    public ResponseEntity<Page<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
             @RequestParam(value = "exerciseId", required = false) Long exerciseId,
             @RequestParam("cabinetId") Long cabinetId,
             @RequestParam("dossierId") Long dossierId,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
             @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
+        log.info("Pagination params - page: {}, size: {}", page, size);
         if (exerciseId != null) {
             UUID userId = extractUserIdFromPrincipal(principal);
 
@@ -63,7 +67,14 @@ public class EcritureController {
             }
         }
 
-        List<EcritureDTO> ecritures = ecritureService.getEcrituresByExerciseAndCabinet(exerciseId, cabinetId);
+        Page<EcritureDTO> ecritures = ecritureService.getEcrituresByExerciseAndCabinet(exerciseId, cabinetId, page, size);
+
+        log.info("Response - Total elements: {}, Total pages: {}, Current page: {}, Content size: {}",
+                ecritures.getTotalElements(),
+                ecritures.getTotalPages(),
+                ecritures.getNumber(),
+                ecritures.getContent().size());
+
         return ResponseEntity.ok(ecritures);
     }
 

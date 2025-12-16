@@ -9,6 +9,7 @@ import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -50,25 +51,26 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Override
     public Page<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId, int page, int size) {
-        log.info("Service called with page: {}, size: {}, exerciseId: {}, cabinetId: {}",
-                page, size, exerciseId, cabinetId);
+        // Get ALL ecritures using the old working query
+        List<Ecriture> allEcritures = ecritureRepository.findEcrituresByExerciseAndCabinet(exerciseId, cabinetId);
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "entryDate"));
+        // Convert to DTOs
+        List<EcritureDTO> allDTOs = allEcritures.stream()
+                .map(e -> mapToDTO(e))
+                .collect(Collectors.toList());
 
-        Page<Ecriture> ecriturePage;
-        if (exerciseId != null) {
-            ecriturePage = ecritureRepository.findEcrituresByExerciseAndCabinetPaginated(
-                    exerciseId, cabinetId, pageable);
-        } else {
-            ecriturePage = ecritureRepository.findByCabinetIdPaginated(cabinetId, pageable);
-        }
+        // Apply pagination in memory
+        int start = page * size;
+        int end = Math.min(start + size, allDTOs.size());
 
-        log.info("Repository returned - Total: {}, Page: {}, Size: {}",
-                ecriturePage.getTotalElements(),
-                ecriturePage.getNumber(),
-                ecriturePage.getSize());
+        List<EcritureDTO> paginatedDTOs = allDTOs.subList(start, end);
 
-        return ecriturePage.map(this::mapToDTO);
+        // Return as Page
+        return new PageImpl<>(
+                paginatedDTOs,
+                PageRequest.of(page, size),
+                allDTOs.size()  // Total size = all ecritures
+        );
     }
 
 
@@ -78,7 +80,6 @@ public class EcritureServiceImpl implements EcritureService {
         dto.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto.setEntryDate(ecriture.getEntryDate());
 
-        // Handle the case where the Journal is null
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
             journalDTO.setId(ecriture.getJournal().getId());
@@ -93,7 +94,6 @@ public class EcritureServiceImpl implements EcritureService {
             LineDTO lineDTO = new LineDTO();
             lineDTO.setId(line.getId());
 
-            // Map Account to AccountDTO
             AccountDTO accountDTO = new AccountDTO();
             if (line.getAccount() != null) {
                 accountDTO.setId(line.getAccount().getId());
@@ -102,12 +102,10 @@ public class EcritureServiceImpl implements EcritureService {
             }
             lineDTO.setAccount(accountDTO);
 
-            // Map basic fields
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
 
-            // Map currency conversion fields
             lineDTO.setOriginalDebit(line.getOriginalDebit());
             lineDTO.setOriginalCredit(line.getOriginalCredit());
             lineDTO.setOriginalCurrency(line.getOriginalCurrency());
@@ -124,17 +122,14 @@ public class EcritureServiceImpl implements EcritureService {
 
         dto.setLines(lineDTOs);
 
-        // Add piece if needed
         if (ecriture.getPiece() != null) {
             PieceDTO pieceDTO = new PieceDTO();
             pieceDTO.setId(ecriture.getPiece().getId());
-            // Map other piece fields as needed
 //            dto.setPiece(pieceDTO);
         }
 
         return dto;
     }
-
 
     @Override
     @Transactional

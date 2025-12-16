@@ -42,6 +42,7 @@ public class EcritureController {
 
 
 
+
     @GetMapping("/filter")
     public ResponseEntity<Page<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
             @RequestParam(value = "exerciseId", required = false) Long exerciseId,
@@ -51,11 +52,9 @@ public class EcritureController {
             @RequestParam(value = "size", defaultValue = "20") int size,
             @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
-        log.info("Pagination params - page: {}, size: {}", page, size);
         if (exerciseId != null) {
             UUID userId = extractUserIdFromPrincipal(principal);
 
-            // ✅ SECURITY CHECK: Verify user has access to this dossier
             if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
                 log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
                 throw new SecurityException("User cannot access this dossier");
@@ -68,13 +67,6 @@ public class EcritureController {
         }
 
         Page<EcritureDTO> ecritures = ecritureService.getEcrituresByExerciseAndCabinet(exerciseId, cabinetId, page, size);
-
-        log.info("Response - Total elements: {}, Total pages: {}, Current page: {}, Content size: {}",
-                ecritures.getTotalElements(),
-                ecritures.getTotalPages(),
-                ecritures.getNumber(),
-                ecritures.getContent().size());
-
         return ResponseEntity.ok(ecritures);
     }
 

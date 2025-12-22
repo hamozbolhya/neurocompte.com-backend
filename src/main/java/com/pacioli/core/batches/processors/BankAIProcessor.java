@@ -217,7 +217,14 @@ public class BankAIProcessor extends BaseAIProcessor {
                 throw new RuntimeException("Bank API failed: " + bankResponse.getMessage());
             }
 
-            return objectMapper.readTree(bankResponse.getJsonResponse());
+            String jsonResponse = bankResponse.getJsonResponse();
+
+            // ✅ NEW: Clean markdown code fences if present
+            if (jsonResponse != null && jsonResponse.contains("```json")) {
+                jsonResponse = cleanMarkdownCodeFences(jsonResponse);
+            }
+
+            return objectMapper.readTree(jsonResponse);
 
         } catch (Exception e) {
             log.error("❌ Bank API call failed: {}", e.getMessage());

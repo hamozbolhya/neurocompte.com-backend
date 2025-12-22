@@ -33,6 +33,10 @@ public class AIResponseNormalizer {
             // For bank responses, we need to extract from outputText
             if (bankResponse.has("outputText")) {
                 String outputText = bankResponse.get("outputText").asText();
+
+                // ✅ NEW: Clean markdown code fences if present
+                outputText = cleanMarkdownCodeFences(outputText);
+
                 JsonNode parsedOutput = objectMapper.readTree(outputText);
                 JsonNode ecrituresNode = extractBankEcritures(parsedOutput);
 
@@ -64,6 +68,10 @@ public class AIResponseNormalizer {
             if (invoiceResponse.has("outputText")) {
                 // Case 1: Response has outputText field (wrapped response)
                 String outputText = invoiceResponse.get("outputText").asText();
+
+                // ✅ NEW: Clean markdown code fences if present
+                outputText = cleanMarkdownCodeFences(outputText);
+
                 JsonNode parsedOutput = objectMapper.readTree(outputText);
 
                 ObjectNode normalized = objectMapper.createObjectNode();
@@ -102,6 +110,30 @@ public class AIResponseNormalizer {
 
         // If normalization fails, return original
         return invoiceResponse;
+    }
+
+    // Clean markdown code fences
+    private String cleanMarkdownCodeFences(String text) {
+        if (text == null) {
+            return "";
+        }
+
+        // Remove ```json and ``` markers
+        String cleaned = text.trim();
+
+        // Remove leading ```json or ```
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7).trim();
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3).trim();
+        }
+
+        // Remove trailing ```
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3).trim();
+        }
+
+        return cleaned;
     }
 
     private JsonNode extractBankEcritures(JsonNode parsedJson) {

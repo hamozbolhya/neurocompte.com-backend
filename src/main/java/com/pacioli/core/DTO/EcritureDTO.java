@@ -12,7 +12,7 @@ public class EcritureDTO {
     private LocalDate entryDate;
     private JournalDTO journal;
     private List<LineDTO> lines;
-//    private PieceDTO piece; // Add this field
+    private PieceDTO piece; // Add this field
     private Boolean amountUpdated;
     private Boolean manuallyUpdated;
     private LocalDate manualUpdateDate;

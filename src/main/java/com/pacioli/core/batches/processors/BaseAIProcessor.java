@@ -280,6 +280,28 @@ public abstract class BaseAIProcessor {
         }
     }
 
+    protected String cleanMarkdownCodeFences(String text) {
+        if (text == null) {
+            return "";
+        }
+
+        String cleaned = text.trim();
+
+        // Remove leading ```json or ```
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7).trim();
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3).trim();
+        }
+
+        // Remove trailing ```
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3).trim();
+        }
+
+        return cleaned;
+    }
+
     /**
      * ✅ Create a proper JsonNode for the converted response
      */

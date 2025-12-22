@@ -98,6 +98,10 @@ public class DTOBuilder {
             log.info("📄 Found outputText, trying to extract ecritures from it");
             try {
                 String outputText = normalizedResponse.get("outputText").asText();
+
+                // ✅ NEW: Clean markdown code fences if present
+                outputText = baseDTOBuilder.cleanMarkdownCodeFences(outputText);
+
                 JsonNode parsedOutput = baseDTOBuilder.objectMapper.readTree(outputText);
                 JsonNode ecritures = baseDTOBuilder.findEcrituresNode(parsedOutput);
                 if (ecritures != null && ecritures.isArray()) {

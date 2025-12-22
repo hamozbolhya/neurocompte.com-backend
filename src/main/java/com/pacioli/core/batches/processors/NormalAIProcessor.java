@@ -2,6 +2,7 @@ package com.pacioli.core.batches.processors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.pacioli.core.batches.clients.AIServiceClient;
 import com.pacioli.core.batches.processors.converters.CurrencyDataExtractionService;
 import com.pacioli.core.batches.processors.detection.DuplicationDetectionService;
@@ -49,6 +50,15 @@ public class NormalAIProcessor extends BaseAIProcessor {
         try {
             log.info("📄 Processing normal piece: {}", piece.getFilename());
             JsonNode aiResponse = aiServiceClient.callAIService(piece.getFilename());
+
+            // Handle markdown in raw AI response if needed
+            if (aiResponse.has("outputText")) {
+                String outputText = aiResponse.get("outputText").asText();
+                if (outputText.contains("```json")) {
+                    // Clean the outputText in the JSON node
+                    ((ObjectNode) aiResponse).put("outputText", cleanMarkdownCodeFences(outputText));
+                }
+            }
 
             // Normalize the response
             JsonNode normalizedResponse = responseNormalizer.normalizeAIResponse(aiResponse, false);

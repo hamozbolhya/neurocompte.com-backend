@@ -279,7 +279,7 @@ public class EcritureServiceImpl implements EcritureService {
             // pieceDTO.setFactureData(...);
             // pieceDTO.setEcritures(...);
 
-//            dto.setPiece(pieceDTO);
+            dto.setPiece(pieceDTO);
         }
 
         return dto;

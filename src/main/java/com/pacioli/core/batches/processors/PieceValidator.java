@@ -59,6 +59,9 @@ public class PieceValidator {
                 return false;
             }
 
+            // ✅ NEW: Clean markdown code fences if present
+            textValue = cleanMarkdownCodeFences(textValue);
+
             JsonNode parsedJson = parseJsonText(textValue);
 
             // Check for ecritures in parsed JSON
@@ -78,6 +81,28 @@ public class PieceValidator {
             log.error("💥 Error validating ecritures: {}", e.getMessage(), e);
             return false;
         }
+    }
+
+    private String cleanMarkdownCodeFences(String text) {
+        if (text == null) {
+            return "";
+        }
+
+        String cleaned = text.trim();
+
+        // Remove leading ```json or ```
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7).trim();
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3).trim();
+        }
+
+        // Remove trailing ```
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3).trim();
+        }
+
+        return cleaned;
     }
 
 
@@ -211,6 +236,9 @@ public class PieceValidator {
                 return false;
             }
 
+            // ✅ NEW: Clean markdown code fences if present
+            textValue = cleanMarkdownCodeFences(textValue);
+
             JsonNode parsedJson = parseJsonText(textValue);
             JsonNode entries = findBankEcrituresNode(parsedJson);
 
@@ -222,7 +250,7 @@ public class PieceValidator {
         }
     }
 
-    // In PieceValidator.java - ADD THIS METHOD
+    // In PieceValidator.java - UPDATE findBankEcrituresNode method
     JsonNode findBankEcrituresNode(JsonNode parsedJson) {
 //        log.info("🏦 Processing bank statement structure - Root keys: {}", parsedJson.fieldNames());
 
@@ -273,6 +301,12 @@ public class PieceValidator {
                     return allEntries;
                 }
             }
+        }
+
+        // ✅ NEW: Also check for direct array structure (some bank responses might be arrays)
+        if (parsedJson.isArray()) {
+            log.info("🏦 Bank response is direct array with {} entries", parsedJson.size());
+            return parsedJson;
         }
 
         log.warn("❌ Could not find bank ecritures in expected format");

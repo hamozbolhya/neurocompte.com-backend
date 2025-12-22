@@ -214,7 +214,12 @@ public class FileService {
             PDDocument document = PDDocument.load(pdfFile.getInputStream());
             log.info("PDF loaded successfully. Number of pages: {}", document.getNumberOfPages());
 
+            // **ADD THIS CONFIGURATION FOR BETTER QUALITY**
             PDFRenderer pdfRenderer = new PDFRenderer(document);
+
+            // **SET THESE PROPERTIES FOR BETTER RENDERING QUALITY**
+            pdfRenderer.setSubsamplingAllowed(false); // Disable subsampling
+            pdfRenderer.setImageDownscalingOptimizationThreshold(1.0f); // Keep original resolution
 
             // Determine how many pages to process
             int totalPages = document.getNumberOfPages();
@@ -227,50 +232,78 @@ public class FileService {
 
             log.info("Converting {} of {} pages", pagesToProcess, totalPages);
 
+            // **INCREASE DPI FOR COMPLEX PDFs**
             int dpi = getPdfConversionDpi();
-            log.info("Using DPI from config: {}", dpi);
+            // Use higher DPI for complex documents
+            int actualDpi = dpi;
+            if (document.getNumberOfPages() > 0) {
+                // Check if document might be complex (has lots of resources)
+                if (document.getPage(0).getResources() != null) {
+                    // If it has many resources, increase DPI
+                    actualDpi = Math.max(dpi, 400); // Minimum 400 DPI for complex PDFs
+                    log.info("Complex PDF detected, using DPI: {}", actualDpi);
+                }
+            }
+
+            log.info("Using DPI: {}", actualDpi);
 
             for (int page = 0; page < pagesToProcess; page++) {
                 log.info("Processing page {}", (page + 1));
 
-                BufferedImage image = pdfRenderer.renderImageWithDPI(page, dpi, ImageType.RGB);
-                log.info("Page {} rendered. Image dimensions: {}x{}", (page + 1), image.getWidth(), image.getHeight());
+                // **USE BETTER RENDERING OPTIONS**
+                BufferedImage image = pdfRenderer.renderImageWithDPI(
+                        page,
+                        actualDpi,
+                        ImageType.RGB
+                );
+
+                log.info("Page {} rendered. Image dimensions: {}x{}",
+                        (page + 1), image.getWidth(), image.getHeight());
+
+                // **ADD ANTI-ALIASING FOR BETTER QUALITY**
+                BufferedImage highQualityImage = new BufferedImage(
+                        image.getWidth(),
+                        image.getHeight(),
+                        BufferedImage.TYPE_INT_RGB
+                );
+
+                java.awt.Graphics2D g2d = highQualityImage.createGraphics();
+                g2d.setRenderingHint(
+                        java.awt.RenderingHints.KEY_INTERPOLATION,
+                        java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC
+                );
+                g2d.setRenderingHint(
+                        java.awt.RenderingHints.KEY_RENDERING,
+                        java.awt.RenderingHints.VALUE_RENDER_QUALITY
+                );
+                g2d.setRenderingHint(
+                        java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+                );
+                g2d.drawImage(image, 0, 0, null);
+                g2d.dispose();
 
                 ByteArrayOutputStream imageStream = new ByteArrayOutputStream();
 
                 // Compress PNG image
-                byte[] imageBytes;
+                byte[] imageBytes = compressImageToPngBytes(highQualityImage, 1.0f); // Maximum quality
 
-                Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
-                if (!writers.hasNext()) {
-                    throw new IOException("No PNG ImageWriter found");
-                }
-
-                ImageWriter writer = writers.next();
-
-                ImageWriteParam param = writer.getDefaultWriteParam();
-                if (param.canWriteCompressed()) {
-                    param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-                    param.setCompressionType("Deflate");
-                    param.setCompressionQuality(0.9f); // PNG compression quality (0.0-1.0)
-                }
-
-                ImageOutputStream ios = ImageIO.createImageOutputStream(imageStream);
-                writer.setOutput(ios);
-                writer.write(null, new IIOImage(image, null, null), param);
-                writer.dispose();
-                ios.close();
-
-                imageBytes = imageStream.toByteArray();
                 log.info("Page {} saved as PNG, size={} bytes", (page + 1), imageBytes.length);
 
                 // Check size limit
                 long maxImageSizeBytes = getMaxFileSizeBytes();
                 if (imageBytes.length > maxImageSizeBytes) {
-                    log.warn("Page {} exceeds max size ({} > {}), resizing image",
+                    log.warn("Page {} exceeds max size ({} > {}), will compress with lower quality",
                             (page + 1), imageBytes.length, maxImageSizeBytes);
-                    BufferedImage resizedImage = resizeImage(image, 1024, 768);
-                    imageBytes = compressImageToPngBytes(resizedImage);
+                    // Try with lower compression quality first
+                    imageBytes = compressImageToPngBytes(highQualityImage, 0.7f);
+
+                    // If still too large, resize
+                    if (imageBytes.length > maxImageSizeBytes) {
+                        log.warn("Still too large after compression, resizing");
+                        BufferedImage resizedImage = resizeImage(highQualityImage, 2048, 1536); // Larger target
+                        imageBytes = compressImageToPngBytes(resizedImage, 0.8f);
+                    }
                 }
 
                 String imageName = "page-" + (page + 1) + ".png";
@@ -306,7 +339,7 @@ public class FileService {
         return new FileProcessingResult(formattedFilename, file);
     }
 
-    private byte[] compressImageToPngBytes(BufferedImage image) throws IOException {
+    private byte[] compressImageToPngBytes(BufferedImage image, float quality) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
@@ -322,7 +355,7 @@ public class FileService {
         if (param.canWriteCompressed()) {
             param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
             param.setCompressionType("Deflate");
-            param.setCompressionQuality(0.8f);
+            param.setCompressionQuality(quality); // Use parameter quality
         }
 
         ImageOutputStream ios = ImageIO.createImageOutputStream(baos);
@@ -332,6 +365,11 @@ public class FileService {
         ios.close();
 
         return baos.toByteArray();
+    }
+
+    // Overload for backward compatibility
+    private byte[] compressImageToPngBytes(BufferedImage image) throws IOException {
+        return compressImageToPngBytes(image, 0.8f); // Default quality
     }
 
     private BufferedImage resizeImage(BufferedImage originalImage, int targetWidth, int targetHeight) {

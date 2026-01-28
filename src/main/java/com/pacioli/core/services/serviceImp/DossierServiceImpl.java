@@ -1,9 +1,13 @@
 package com.pacioli.core.services.serviceImp;
 
+import com.pacioli.core.DTO.Company;
 import com.pacioli.core.DTO.DossierDTO;
+import com.pacioli.core.DTO.PaysDTO;
+import com.pacioli.core.Exceptions.CompanyAiException;
 import com.pacioli.core.Exceptions.ExerciseDateConflictException;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
+import com.pacioli.core.services.CompanyAiService;
 import com.pacioli.core.services.DossierService;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
@@ -13,54 +17,76 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Slf4j
 @Service
 public class DossierServiceImpl implements DossierService {
 
     private final DossierRepository dossierRepository;
+
+    private final CompanyAiService companyAiService;
+
     @Autowired
     private CabinetRepository cabinetRepository;
 
     @Autowired
     private ExerciceRepository exerciseRepository;
+
     @Autowired
     private EcritureRepository ecritureRepository;
+
     @Autowired
     private JournalRepository journalRepository;
 
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
-    public DossierServiceImpl(DossierRepository dossierRepository) {
+    public DossierServiceImpl(DossierRepository dossierRepository, CompanyAiService companyAiService) {
         this.dossierRepository = dossierRepository;
+        this.companyAiService = companyAiService;
     }
-
 
     @Override
     @Transactional
     public Dossier createDossier(Dossier dossier, List<Exercise> exercicesData) {
-        // Check if a dossier with the same name already exists
-        Dossier existingDossier = dossierRepository.findByName(dossier.getName()).orElse(null);
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Creating dossier: {} for cabinet: {}", requestId, dossier.getName(), dossier.getCabinet().getId());
+
+        // ✅ FIX: Check if a dossier with the same name exists IN THE SAME CABINET
+        Dossier existingDossier = dossierRepository.findByNameAndCabinetId(
+                dossier.getName(),
+                dossier.getCabinet().getId()
+        ).orElse(null);
+
+        // Store whether this is a new dossier or an update
+        boolean isNewDossier = existingDossier == null;
 
         if (existingDossier != null) {
-            // If a Dossier with the same name exists, update its details (except the name)
-            existingDossier.setICE(dossier.getICE());
-            existingDossier.setAddress(dossier.getAddress());
-            existingDossier.setCity(dossier.getCity());
-            existingDossier.setPhone(dossier.getPhone());
-            existingDossier.setEmail(dossier.getEmail());
-            dossier = existingDossier;
-        } else {
-            // If no Dossier with the same name exists, check the Cabinet
-            Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
-                    .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
-            dossier.setCabinet(cabinet);
+            log.error("[{}] Dossier with name '{}' already exists in cabinet {} with ID: {}",
+                    requestId, dossier.getName(), dossier.getCabinet().getId(), existingDossier.getId());
+            throw new IllegalArgumentException("Un dossier avec le nom '" + dossier.getName() + "' existe déjà dans ce cabinet.");
         }
 
-        // Save or update the Dossier
-        Dossier savedDossier = dossierRepository.save(dossier);
+        // If no Dossier with the same name exists in this cabinet, check the Cabinet exists
+        Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
+                .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
+        dossier.setCabinet(cabinet);
 
-        // **Create the list of default journals**
+        // Set default decimal precision if not provided for new dossiers
+        if (dossier.getDecimalPrecision() == null) {
+            dossier.setDecimalPrecision(2);
+            log.info("[{}] Set default decimal precision to: 2", requestId);
+        }
+
+        // Save the new Dossier
+        Dossier savedDossier = dossierRepository.save(dossier);
+        log.info("[{}] New dossier created with ID: {} and decimal precision: {}",
+                requestId, savedDossier.getId(), savedDossier.getDecimalPrecision());
+
+        // Create the list of default journals for new dossiers
         createDefaultJournals(savedDossier);
 
         // Handle Exercise data if provided
@@ -81,29 +107,33 @@ public class DossierServiceImpl implements DossierService {
             }
         }
 
+        // Call the AI Company API - use POST for new companies
+        String countryCode = savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : "NOT_FOUND";
+
+        Company company = new Company();
+        company.setId(savedDossier.getId());
+        company.setName(savedDossier.getName());
+        company.setCountry(countryCode);
+        company.setActivity(savedDossier.getActivity());
+
+        try {
+            // For new dossiers, use POST
+            log.info("[{}] Calling Company AI API to create company for dossier ID: {}", requestId, savedDossier.getId());
+            Company createdCompany = companyAiService.createCompany(company);
+            log.info("[{}] Company created successfully in AI service with ID: {}", requestId, createdCompany.getId());
+
+        } catch (Exception e) {
+            // Log the error and trigger a transaction rollback
+            log.error("[{}] Error creating company in AI service for dossier ID {}: {}",
+                    requestId, savedDossier.getId(), e.getMessage(), e);
+
+            // The @Transactional annotation will ensure rollback on RuntimeException
+            throw new CompanyAiException("Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
+        }
+
         return savedDossier;
     }
 
-    private void createDefaultJournals(Dossier dossier) {
-        List<Journal> defaultJournals = List.of(
-                new Journal("HA", "Achats", dossier.getCabinet(), dossier),
-                new Journal("VE", "Ventes", dossier.getCabinet(), dossier),
-                new Journal("BQ", "Banque", dossier.getCabinet(), dossier),
-                new Journal("CA", "Caisse", dossier.getCabinet(), dossier),
-                new Journal("PA", "Paie", dossier.getCabinet(), dossier),
-                new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier)
-        );
-
-        // **Filter out journals that already exist for this dossier**
-        List<Journal> journalsToCreate = defaultJournals.stream()
-                .filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId()))
-                .toList();
-
-        // **Save only new journals**
-        if (!journalsToCreate.isEmpty()) {
-            journalRepository.saveAll(journalsToCreate);
-        }
-    }
 
     @Override
     @Transactional
@@ -135,6 +165,7 @@ public class DossierServiceImpl implements DossierService {
         return dossier;
     }
 
+
     private void validateExerciseDateRange(Dossier dossier, Exercise updatedExercise, Exercise existingExercise) {
         // Check for overlap with existing exercises
         boolean overlapExists = exerciseRepository.existsByDossierAndStartDateAndEndDateOverlap(
@@ -144,7 +175,7 @@ public class DossierServiceImpl implements DossierService {
             throw new IllegalArgumentException("Les dates de l'exercice se chevauchent avec celles d'exercices existants");
         }
 
-        // Fetch all "écritures" for the dossier
+        // Fetch all "écritures" for the dossier and exercise
         List<Ecriture> ecritures = ecritureRepository.findByDossierAndExerciseId(dossier.getId(), updatedExercise.getId());
 
         // Check if any "écriture" falls outside the new date range
@@ -161,15 +192,11 @@ public class DossierServiceImpl implements DossierService {
         return dossierRepository.findById(dossierId)
                 .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
     }
+
     @Override
     public DossierDTO getTheDossierById(Long dossierId) {
         return dossierRepository.findDossierById(dossierId)
                 .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
-    }
-
-    @Override
-    public Page<Dossier> getDossiers(Pageable pageable) {
-        return dossierRepository.findAll(pageable);
     }
 
     @Override
@@ -180,7 +207,9 @@ public class DossierServiceImpl implements DossierService {
     @Override
     @Transactional
     public void deleteExercises(Long dossierId, List<Long> exerciseIds) {
-        log.info("Suppression des exercices pour le dossier ID: {}, Identifiants des exercices: {}", dossierId, exerciseIds);
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Suppression des exercices pour le dossier ID: {}, Identifiants des exercices: {}",
+                requestId, dossierId, exerciseIds);
 
         // Vérifier que le dossier existe
         Dossier dossier = dossierRepository.findById(dossierId)
@@ -207,18 +236,25 @@ public class DossierServiceImpl implements DossierService {
         }
 
         // Supprimer les exercices
-        log.info("Suppression des exercices: {}", exercisesToDelete);
+        log.info("[{}] Suppression des exercices: {}", requestId, exercisesToDelete);
         exerciseRepository.deleteAll(exercisesToDelete);
-        log.info("Exercices supprimés avec succès.");
+        log.info("[{}] Exercices supprimés avec succès.", requestId);
     }
-
 
     @Override
     @Transactional
     public DossierDTO updateDossier(Long id, Dossier dossierDetails) {
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Updating dossier with ID: {}", requestId, id);
+
         Dossier existingDossier = dossierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + id));
 
+        // Store original values for comparison
+        String originalName = existingDossier.getName();
+        Country originalCountry = existingDossier.getCountry();
+
+        // Update dossier fields
         if (dossierDetails.getName() != null) {
             existingDossier.setName(dossierDetails.getName());
         }
@@ -237,9 +273,184 @@ public class DossierServiceImpl implements DossierService {
         if (dossierDetails.getEmail() != null) {
             existingDossier.setEmail(dossierDetails.getEmail());
         }
+        if (dossierDetails.getCountry() != null) {
+            existingDossier.setCountry(dossierDetails.getCountry());
+        }
+        // Update decimal precision if provided
+        if (dossierDetails.getDecimalPrecision() != null) {
+            existingDossier.setDecimalPrecision(dossierDetails.getDecimalPrecision());
+            log.info("[{}] Updated decimal precision to: {}", requestId, dossierDetails.getDecimalPrecision());
+        }
 
         Dossier savedDossier = dossierRepository.save(existingDossier);
+        log.info("[{}] Dossier updated successfully with ID: {}", requestId, savedDossier.getId());
 
+        // Call Company AI API only if the name or country changed
+        boolean nameChanged = dossierDetails.getName() != null && !dossierDetails.getName().equals(originalName);
+        boolean countryChanged = dossierDetails.getCountry() != null &&
+                (originalCountry == null || !dossierDetails.getCountry().getCode().equals(originalCountry.getCode()));
+
+        if (nameChanged || countryChanged) {
+            try {
+                log.info("[{}] Calling Company AI API to update company for dossier ID: {}", requestId, savedDossier.getId());
+
+                String countryCode = savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : "MAR";
+
+                Company company = new Company();
+                company.setId(savedDossier.getId());
+                company.setName(savedDossier.getName());
+                company.setCountry(countryCode);
+
+                // Use PUT method for updating existing companies
+                Company updatedCompany = companyAiService.updateCompany(savedDossier.getId(), company);
+                log.info("[{}] Company updated successfully in AI service with ID: {}", requestId, updatedCompany.getId());
+            } catch (Exception e) {
+                // Log the error but don't fail the transaction
+                log.error("[{}] Error updating company in AI service for dossier ID {}: {}",
+                        requestId, savedDossier.getId(), e.getMessage(), e);
+            }
+        } else {
+            log.info("[{}] No need to update company in AI service (no name or country change)", requestId);
+        }
+
+        return convertToDTO(savedDossier);
+    }
+
+    @Override
+    @Transactional
+    public void deleteDossier(Long dossierId) {
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Deleting dossier with ID: {}", requestId, dossierId);
+
+        // Verify that the dossier exists
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + dossierId));
+
+        // Additional business logic for dossier deletion could go here
+        // For example, checking if it's safe to delete the dossier
+
+        try {
+            // Call Company AI API to delete the company
+            log.info("[{}] Calling Company AI API to delete company for dossier ID: {}", requestId, dossierId);
+            boolean deleted = companyAiService.deleteCompany(dossierId);
+
+            if (deleted) {
+                log.info("[{}] Company deleted successfully from AI service for dossier ID: {}", requestId, dossierId);
+            } else {
+                log.warn("[{}] Company deletion from AI service returned false for dossier ID: {}", requestId, dossierId);
+            }
+        } catch (Exception e) {
+            // Log the error but continue with the deletion
+            log.error("[{}] Error deleting company from AI service for dossier ID {}: {}",
+                    requestId, dossierId, e.getMessage(), e);
+        }
+
+        // Now delete the dossier from our system
+        dossierRepository.deleteById(dossierId);
+        log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
+    }
+
+    // Add this method to DossierServiceImpl
+    @Override
+    @Transactional
+    public DossierDTO updateActivity(Long dossierId, String activity) {
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] Updating activity for dossier ID: {} to: {}", requestId, dossierId, activity);
+
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + dossierId));
+
+        dossier.setActivity(activity);
+        Dossier savedDossier = dossierRepository.save(dossier);
+        log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
+
+        // === NEW: Update AI with the modified company data ===
+        try {
+            Company company = new Company();
+            company.setId(savedDossier.getId());
+            company.setName(savedDossier.getName());
+            company.setCountry(savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : null);
+            company.setActivity(savedDossier.getActivity());
+
+            Company updatedCompany = companyAiService.updateCompany(savedDossier.getId(), company);
+            log.info("[{}] Company AI updated successfully for dossier ID: {}, company data {}", requestId, dossierId, company);
+        } catch (Exception ex) {
+            log.warn("[{}] Failed to update AI service for dossier ID: {}: {}", requestId, dossierId, ex.getMessage());
+            // Continue gracefully – do not block DB update due to AI service failure
+        }
+
+        // Return the updated DTO
+        return getTheDossierById(dossierId);
+    }
+
+    /**
+     * Secure version - gets dossier only if user has access
+     */
+    public DossierDTO getDossierForUser(Long dossierId, UUID userId) {
+        log.info("User {} accessing dossier {}", userId, dossierId);
+
+        Dossier dossier = dossierRepository.findByIdAndCabinetUsersId(dossierId, userId)
+                .orElseThrow(() -> new SecurityException("Dossier not found or access denied"));
+
+        return convertToDTO(dossier); // Reuse your existing conversion logic
+    }
+
+
+    /**
+     * Secure version - gets all dossiers user has access to
+     */
+    public Page<Dossier> getDossiersForUser(UUID userId, Pageable pageable) {
+        log.info("User {} fetching accessible dossiers", userId);
+        return dossierRepository.findByCabinetUsersId(userId, pageable);
+    }
+
+    /**
+     * Secure create - validates user can create in this cabinet
+     */
+    public Dossier createDossierSecure(Dossier dossier, List<Exercise> exercicesData, UUID userId) {
+        // ✅ SECURITY CHECK
+        if (!userHasAccessToCabinet(userId, dossier.getCabinet().getId())) {
+            throw new SecurityException("User cannot create dossier in this cabinet");
+        }
+
+        // Reuse your existing create logic
+        return createDossier(dossier, exercicesData);
+    }
+
+
+    /**
+     * Security check for cabinet access
+     */
+    public boolean userHasAccessToCabinet(UUID userId, Long cabinetId) {
+        return userRepository.existsByIdAndCabinetId(userId, cabinetId);
+    }
+
+    /**
+     * Security check method - reusable across service
+     */
+    public boolean userHasAccessToDossier(UUID userId, Long dossierId) {
+        return dossierRepository.existsByIdAndCabinetUsersId(dossierId, userId);
+    }
+
+
+    public DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId) {
+        if (!userHasAccessToDossier(userId, id)) {
+            throw new SecurityException("User cannot update this dossier");
+        }
+        return updateDossier(id, dossierDetails); // Reuse existing logic
+    }
+
+    /**
+     * Secure version of deleteDossier
+     */
+    public void deleteDossierSecure(Long dossierId, UUID userId) {
+        if (!userHasAccessToDossier(userId, dossierId)) {
+            throw new SecurityException("User cannot delete this dossier");
+        }
+        deleteDossier(dossierId); // Reuse existing logic
+    }
+
+    private static DossierDTO convertToDTO(Dossier savedDossier) {
         // Convert Dossier to DossierDTO
         DossierDTO dto = new DossierDTO();
         dto.setId(savedDossier.getId());
@@ -249,6 +460,52 @@ public class DossierServiceImpl implements DossierService {
         dto.setCity(savedDossier.getCity());
         dto.setPhone(savedDossier.getPhone());
         dto.setEmail(savedDossier.getEmail());
+        dto.setDecimalPrecision(savedDossier.getDecimalPrecision());
+
+        // Set pays object from country relationship including currency
+        if (savedDossier.getCountry() != null) {
+            PaysDTO paysDTO = new PaysDTO();
+            paysDTO.setCountry(savedDossier.getCountry().getName());
+            paysDTO.setCode(savedDossier.getCountry().getCode());
+
+            // Add currency information if available
+            if (savedDossier.getCountry().getCurrency() != null) {
+                PaysDTO.CurrencyDTO currencyDTO = new PaysDTO.CurrencyDTO();
+                currencyDTO.setCode(savedDossier.getCountry().getCurrency().getCode());
+                currencyDTO.setName(savedDossier.getCountry().getCurrency().getName());
+                paysDTO.setCurrency(currencyDTO);
+            }
+
+            dto.setPays(paysDTO);
+        }
+
+        // Set cabinet DTO
+        DossierDTO.CabinetDTO cabinetDTO = new DossierDTO.CabinetDTO();
+        cabinetDTO.setId(savedDossier.getCabinet().getId());
+        dto.setCabinet(cabinetDTO);
+
         return dto;
     }
+
+    private void createDefaultJournals(Dossier dossier) {
+        List<Journal> defaultJournals = List.of(
+                new Journal("HA", "Achats", dossier.getCabinet(), dossier),
+                new Journal("VE", "Ventes", dossier.getCabinet(), dossier),
+                new Journal("BQ", "Banque", dossier.getCabinet(), dossier),
+                new Journal("CA", "Caisse", dossier.getCabinet(), dossier),
+                new Journal("PA", "Paie", dossier.getCabinet(), dossier),
+                new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier)
+        );
+
+        // Filter out journals that already exist for this dossier
+        List<Journal> journalsToCreate = defaultJournals.stream()
+                .filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId()))
+                .toList();
+
+        // Save only new journals
+        if (!journalsToCreate.isEmpty()) {
+            journalRepository.saveAll(journalsToCreate);
+        }
+    }
+
 }

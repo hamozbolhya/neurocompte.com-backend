@@ -1,213 +1,249 @@
 package com.pacioli.core.services.serviceImp;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pacioli.core.DTO.PieceDTO;
+import com.pacioli.core.DTO.PieceStatsDTO;
 import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.PieceService;
-import jakarta.persistence.EntityManager;
+import com.pacioli.core.services.serviceImp.mappers.PieceDTOMapper;
+import com.pacioli.core.services.serviceImp.pieces.AIService;
+import com.pacioli.core.services.serviceImp.pieces.FileProcessingResult;
+import com.pacioli.core.services.serviceImp.pieces.FileService;
+import com.pacioli.core.services.serviceImp.pieces.PieceProcessingService;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.math.BigDecimal;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.DoubleStream;
 
 @Slf4j
 @Service
 public class PieceServiceImpl implements PieceService {
-    @Autowired
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int DEFAULT_PAGE = 0;
+
     private final PieceRepository pieceRepository;
+    private final PieceDTOMapper pieceDTOMapper;
+    private final DossierRepository dossierRepository;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final FileService fileService;
+    private final AIService aiService;
+    private final PieceProcessingService pieceProcessingService;
+    private final ObjectMapper objectMapper;
     private final FactureDataRepository factureDataRepository;
     private final EcritureRepository ecritureRepository;
     private final LineRepository lineRepository;
-    private final JournalRepository journalRepository;
-    private final AccountRepository accountRepository;
-    private final DossierRepository dossierRepository;
+    private final DuplicateDetectionService duplicateDetectionService;
 
-    private final ObjectMapper objectMapper;
-
-    @Value("${file.upload.dir:Files/}")
-    private String uploadDir;
-
-    public PieceServiceImpl(
-            PieceRepository pieceRepository,
-            FactureDataRepository factureDataRepository,
-            EcritureRepository ecritureRepository, LineRepository lineRepository, JournalRepository journalRepository,
-            AccountRepository accountRepository, ObjectMapper objectMapper, DossierRepository dossierRepository) {
+    public PieceServiceImpl(PieceRepository pieceRepository,
+                            PieceDTOMapper pieceDTOMapper,
+                            DossierRepository dossierRepository,
+                            SimpMessagingTemplate messagingTemplate,
+                            FileService fileService,
+                            AIService aiService,
+                            PieceProcessingService pieceProcessingService,
+                            ObjectMapper objectMapper,
+                            FactureDataRepository factureDataRepository,
+                            EcritureRepository ecritureRepository,
+                            LineRepository lineRepository,
+                            DuplicateDetectionService duplicateDetectionService) {
         this.pieceRepository = pieceRepository;
+        this.pieceDTOMapper = pieceDTOMapper;
+        this.dossierRepository = dossierRepository;
+        this.messagingTemplate = messagingTemplate;
+        this.fileService = fileService;
+        this.aiService = aiService;
+        this.pieceProcessingService = pieceProcessingService;
+        this.objectMapper = objectMapper;
         this.factureDataRepository = factureDataRepository;
         this.ecritureRepository = ecritureRepository;
         this.lineRepository = lineRepository;
-        this.journalRepository = journalRepository;
-        this.accountRepository = accountRepository;
-        this.objectMapper = objectMapper;
-        this.dossierRepository = dossierRepository;
+        this.duplicateDetectionService = duplicateDetectionService;
     }
 
     @Override
     @Transactional
-    public Piece savePiece(String pieceData, MultipartFile file, Long dossierId) throws IOException {
-        // **Step 1: Deserialize the Piece**
-        Piece piece = deserializePiece(pieceData, dossierId);
+    public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) {
+        try {
+            log.info("saving piece {}", pieceData);
+            Piece piece = deserializePiece(pieceData, dossierId);
 
-        // **Step 2: Fetch Dossier from the database**
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+            // Validate and save file - returns both filename and the file to process
+            FileProcessingResult fileResult = fileService.validateAndSaveFile(file, piece.getType());
+            String formattedFilename = fileResult.getFilename();
+            MultipartFile fileToProcess = fileResult.getFileToProcess();
 
-        // **Step 3: Link Dossier to Piece**
-        piece.setDossier(dossier); // Attach the dossier to the piece
-        piece.setOriginalFileName(piece.getOriginalFileName());
-        // **Step 4: Use the formatted file name from the request (DO NOT CHANGE IT)**
-        String formattedFilename = piece.getFilename(); // Use the filename sent from the frontend
-        saveFileToDisk(file, formattedFilename); // Save file with the formatted filename
-        piece.setFilename(formattedFilename); // Store the exact formatted filename in the Piece entity
+            Dossier dossier = dossierRepository.findById(dossierId)
+                    .orElseThrow(() -> new IllegalArgumentException("Dossier introuvable pour l'ID: " + dossierId));
 
-        // **Step 5: Set status to PROCESSING**
-        piece.setStatus(PieceStatus.PROCESSING);
+            // Initialize piece with the actual saved filename
+            initializePiece(piece, dossier, formattedFilename);
 
-        // **Step 6: Save the Piece in the database**
-        return pieceRepository.save(piece);
+            // Process with AI - send the converted PNG file if PDF was converted
+            aiService.processFileBasedOnType(fileToProcess, formattedFilename, dossierId, country, piece.getType());
+
+            // Save and return
+            Piece savedPiece = pieceRepository.save(piece);
+            log.info("✅ Piece saved with ID: {}", savedPiece.getId());
+
+            return savedPiece;
+
+        } catch (IOException e) {
+            log.error("Validation/processing error: {}", e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected internal error:", e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Erreur interne lors de l'enregistrement de la pièce.", e);
+        }
     }
 
     @Override
     @Transactional
-    public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
-        // ** Step 1: Fetch the Piece by ID **
+    public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         Dossier dossier = dossierRepository.findById(dossierId)
                 .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         Piece piece = pieceRepository.findById(pieceId)
                 .orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
 
-        // ** Step 2: Update the amount and status of the Piece **
-        piece.setStatus(PieceStatus.PROCESSED);
-        piece.setAmount(calculateAmountFromEcritures(pieceData, dossier)); // Calculate amount from Ecritures
-        piece = pieceRepository.save(piece); // Save changes to the Piece
+        try {
+            // ** Step 1: Save FactureData first **
+            saveFactureDataForPiece(piece, pieceData, originalAiResponse);
 
-        // ** Step 3: Save Ecritures and FactureData for the Piece **
-        saveFactureDataForPiece(piece, pieceData);
-        saveEcrituresForPiece(piece, dossierId, pieceData);
+            // ** Step 2: Save Ecritures temporarily **
+            saveEcrituresForPiece(piece, dossierId, pieceData, originalAiResponse);
+
+            // ** Step 3: ENSURE AMOUNT IS SET - CRITICAL FIX **
+            ensurePieceAmountIsSet(piece, pieceData, dossier, originalAiResponse);
+
+            // ** Step 4: Perform comprehensive duplicate check **
+            if (duplicateDetectionService != null) {
+                Optional<Piece> comprehensiveDuplicate = duplicateDetectionService.performComprehensiveDuplicateCheck(piece);
+
+                if (comprehensiveDuplicate.isPresent()) {
+                    log.warn("🚫 Comprehensive duplicate detected, marking piece {} as duplicate of piece {}",
+                            piece.getId(), comprehensiveDuplicate.get().getId());
+
+                    if (piece.getEcritures() != null) {
+                        piece.getEcritures().clear();
+                        pieceRepository.save(piece);
+                    }
+
+                    // ✅ CRITICAL FIX: Set status to DUPLICATE before marking
+                    piece.setStatus(PieceStatus.DUPLICATE);
+                    piece.setIsDuplicate(true);
+                    piece.setOriginalPiece(comprehensiveDuplicate.get());
+
+                    // Save the piece with duplicate status
+                    piece = pieceRepository.save(piece);
+
+                    duplicateDetectionService.markAsDuplicate(piece, comprehensiveDuplicate.get());
+
+                    log.info("⏭️ Marked piece {} as DUPLICATE of piece {}", piece.getId(), comprehensiveDuplicate.get().getId());
+                    notifyPiecesUpdate(dossierId);
+                    return piece;
+                }
+            }
+
+            // ** Step 5: Update the status of the Piece **
+            piece.setStatus(PieceStatus.PROCESSED);
+            piece.setIsDuplicate(false); // Ensure it's not marked as duplicate
+            piece = pieceRepository.save(piece);
+
+            log.info("✅ Piece {} successfully processed with amount: {}", piece.getId(), piece.getAmount());
+
+        } catch (Exception e) {
+            log.error("💥 Error in saveEcrituresAndFacture for piece {}: {}", piece.getId(), e.getMessage(), e);
+            piece.setStatus(PieceStatus.REJECTED);
+            pieceRepository.save(piece);
+        } finally {
+            notifyPiecesUpdate(dossierId);
+        }
 
         return piece;
     }
 
-    private void saveFactureDataForPiece(Piece piece, String pieceData) {
-        FactureData factureData = deserializeFactureData(pieceData);
-
-        if (factureData != null) {
-            factureData.setPiece(piece); // Attach FactureData to the existing Piece
-            factureDataRepository.save(factureData); // Save FactureData
+    private void ensurePieceAmountIsSet(Piece piece, String pieceData, Dossier dossier, JsonNode originalAiResponse) {
+        // If amount is already set, keep it
+        if (piece.getAmount() != null) {
+            log.info("💰 Piece {} already has amount: {}", piece.getId(), piece.getAmount());
+            return;
         }
-    }
 
-    private FactureData deserializeFactureData(String pieceData) {
+        Double calculatedAmount = null;
+
+        // Priority 1: Try to get amount from original AI response first (most accurate)
         try {
-            // Parse the entire pieceData JSON to get the factureData part only
-            JsonNode rootNode = objectMapper.readTree(pieceData);
-            JsonNode factureDataNode = rootNode.get("factureData"); // Extract only "factureData"
+            JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
+            if (originalEcritures != null && originalEcritures.isArray()) {
+                BigDecimal maxAmount = BigDecimal.ZERO;
+                for (JsonNode entry : originalEcritures) {
+                    String debitStr = entry.has("DebitAmt") ? entry.get("DebitAmt").asText("0") : "0";
+                    String creditStr = entry.has("CreditAmt") ? entry.get("CreditAmt").asText("0") : "0";
 
-            if (factureDataNode != null && !factureDataNode.isNull()) {
-                return objectMapper.treeToValue(factureDataNode, FactureData.class); // Convert JSON node to FactureData
-            } else {
-                return null; // If factureData is not present, return null
-            }
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse 'factureData' JSON: " + e.getMessage());
-        }
-    }
+                    BigDecimal debit = new BigDecimal(debitStr);
+                    BigDecimal credit = new BigDecimal(creditStr);
 
-    private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData) {
-        log.info("Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
-
-        // Fetch the Dossier explicitly
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
-        log.info("Fetched Dossier ID: {}", dossier.getId());
-
-        // Fetch existing Accounts and Journals for the Dossier
-        Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
-                .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-        List<Journal> journals = journalRepository.findByDossierId(dossierId);
-
-        for (Ecriture ecriture : deserializeEcritures(pieceData, dossier)) {
-            ecriture.setPiece(piece);
-
-            // Find or create Journal
-            Journal journal = journals.stream()
-                    .filter(j -> j.getName().equalsIgnoreCase(ecriture.getJournal().getName()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        log.info("Creating new Journal: {}", ecriture.getJournal().getName());
-                        Journal newJournal = new Journal(
-                                ecriture.getJournal().getName(),
-                                ecriture.getJournal().getType(),
-                                dossier.getCabinet(),
-                                dossier
-                        );
-                        Journal savedJournal = journalRepository.save(newJournal);
-                        journals.add(savedJournal); // Add to the list to prevent redundant creations
-                        return savedJournal;
-                    });
-            ecriture.setJournal(journal);
-
-            log.info("Ecriture before saving: {}", ecriture);
-
-            try {
-                log.info("Attempting to save Ecriture: {}", ecriture);
-                Ecriture savedEcriture = ecritureRepository.save(ecriture);
-                log.info("Saved Ecriture: {}", savedEcriture);
-
-                for (Line line : ecriture.getLines()) {
-                    line.setEcriture(savedEcriture);
-
-                    // Fetch or create Account
-                    Account account = accountMap.computeIfAbsent(line.getAccount().getAccount(), accountNumber -> {
-                        log.info("Checking Account for account number: {}", accountNumber);
-
-                        // Fetch from the database
-                        Account existingAccount = accountRepository.findByAccountAndDossierId(accountNumber, dossier.getId());
-                        if (existingAccount != null) {
-                            log.info("Matched existing Account: {}", existingAccount);
-                            return existingAccount;
-                        }
-
-                        // Create new Account
-                        Account newAccount = new Account();
-                        newAccount.setAccount(accountNumber);
-                        newAccount.setLabel(line.getAccount().getLabel());
-                        newAccount.setDossier(dossier); // Explicitly set the Dossier
-                        log.info("New Account Details before saving: {}", newAccount);
-                        return accountRepository.save(newAccount);
-                    });
-
-                    // Set the matched or newly created account to the line
-                    line.setAccount(account);
+                    maxAmount = maxAmount.max(debit.max(credit));
                 }
-
-                // Save Lines associated with the Ecriture
-                lineRepository.saveAll(ecriture.getLines());
-            } catch (Exception e) {
-                log.error("Error saving Ecriture: {}", e.getMessage(), e);
-                throw e; // Rethrow to propagate the exception
+                calculatedAmount = maxAmount.doubleValue();
+                log.info("💰 Calculated amount from original AI: {}", calculatedAmount);
             }
+        } catch (Exception e) {
+            log.warn("Error getting amount from original AI response: {}", e.getMessage());
+        }
+
+        // Priority 2: Use AI amount from piece
+        if (calculatedAmount == null && piece.getAiAmount() != null) {
+            calculatedAmount = piece.getAiAmount();
+            log.info("💰 Using AI amount from piece: {}", calculatedAmount);
+        }
+
+        // Priority 3: Fallback to calculating from ecritures
+        if (calculatedAmount == null) {
+            calculatedAmount = calculateAmountFromEcritures(pieceData, dossier, originalAiResponse);
+            log.info("💰 Calculated amount from ecritures: {}", calculatedAmount);
+        }
+
+        // Apply conversion if needed
+        if (calculatedAmount != null) {
+            if (piece.getExchangeRate() != null && piece.getExchangeRate() > 0) {
+                // Use converted amount - convert AI amount if available, otherwise use calculated amount
+                Double amountToConvert = piece.getAiAmount() != null ? piece.getAiAmount() : calculatedAmount;
+                Double convertedAmount = amountToConvert * piece.getExchangeRate();
+                piece.setAmount(convertedAmount);
+                log.info("💰 Set converted amount: {} (Original: {} × Rate: {})",
+                        convertedAmount, amountToConvert, piece.getExchangeRate());
+            } else {
+                // No conversion, use calculated amount directly
+                piece.setAmount(calculatedAmount);
+                log.info("💰 Set direct amount: {}", calculatedAmount);
+            }
+
+            // Save the amount immediately
+            pieceRepository.save(piece);
+        } else {
+            log.warn("⚠️ Could not determine amount for piece {}", piece.getId());
         }
     }
 
-
+    /**
+     * ✅ Deserialize ecritures for amount calculation
+     */
     private List<Ecriture> deserializeEcritures(String pieceData, Dossier dossier) {
         try {
             JsonNode rootNode = objectMapper.readTree(pieceData);
@@ -218,46 +254,9 @@ public class PieceServiceImpl implements PieceService {
                 return Collections.emptyList();
             }
 
-            log.info("Raw Ecritures JSON Node: {}", ecrituresNode);
-
-            Map<String, Account> accountMap = accountRepository.findByDossierId(dossier.getId()).stream()
-                    .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-            log.info("Initial Account Map: {}", accountMap);
-
             List<Ecriture> ecritures = new ArrayList<>();
             for (JsonNode ecritureNode : ecrituresNode) {
                 Ecriture ecriture = objectMapper.treeToValue(ecritureNode, Ecriture.class);
-
-                if (ecriture.getLines() != null) {
-                    for (Line line : ecriture.getLines()) {
-                        Account account = line.getAccount();
-
-                        if (account != null) {
-                            Account existingAccount = accountMap.get(account.getAccount());
-                            if (existingAccount == null) {
-                                existingAccount = accountRepository.findByAccountAndDossierId(account.getAccount(), dossier.getId());
-                                if (existingAccount != null) {
-                                    accountMap.put(existingAccount.getAccount(), existingAccount);
-                                }
-                            }
-
-                            if (existingAccount != null) {
-                                log.info("Matched existing Account: {}", existingAccount);
-                                line.setAccount(existingAccount);
-                            } else {
-                                account.setDossier(dossier);
-                                log.info("Prepared new Account with Dossier: {}", account);
-                                accountMap.put(account.getAccount(), account); // Add to map
-                            }
-                        } else {
-                            log.warn("Line does not have an account: {}", line.getLabel());
-                        }
-                    }
-                } else {
-                    log.warn("Ecriture has no lines: {}", ecriture.getUniqueEntryNumber());
-                }
-
-                log.info("Deserialized Ecriture: {}", ecriture);
                 ecritures.add(ecriture);
             }
             return ecritures;
@@ -267,84 +266,72 @@ public class PieceServiceImpl implements PieceService {
         }
     }
 
-
-
-    private Double calculateAmountFromEcritures(String pieceData, Dossier dossier) {
-        List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
-
-        return ecritures.stream()
-                .flatMap(e -> e.getLines().stream())
-                .flatMapToDouble(line -> DoubleStream.of(line.getDebit(), line.getCredit())) // Include both Debit and Credit
-                .max()
-                .orElse(0.0);
-    }
-
-
-
-
     /**
-     * Deserializes the Piece from the provided data.
+     * ✅ Parse original AI response for amount extraction
      */
-    private Piece deserializePiece(String pieceData, Long dossierId) {
-        Piece piece;
+    private JsonNode parseOriginalAiResponse(JsonNode originalAiResponse) {
+        if (originalAiResponse == null) {
+            log.debug("Original AI response is null");
+            return null;
+        }
+
         try {
-            piece = objectMapper.readValue(pieceData, Piece.class);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse 'piece' JSON data: " + e.getMessage());
+            String responseText = originalAiResponse.asText();
+            JsonNode parsedOriginal = objectMapper.readTree(responseText);
+            JsonNode originalEcritures = parsedOriginal.get("ecritures");
+            return originalEcritures != null ? originalEcritures : parsedOriginal.get("Ecritures");
+        } catch (Exception e) {
+            log.error("Error parsing original AI response: {}", e.getMessage());
+            return null;
         }
-
-        // Attach the dossier to the Piece object
-        Dossier dossier = new Dossier();
-        dossier.setId(dossierId); // Set the dossier ID properly
-        piece.setDossier(dossier); // Attach the Dossier to the Piece object
-
-        return piece;
     }
 
     /**
-     * Saves a file to the disk and returns the unique filename.
+     * ✅ Calculate amount from ecritures (fallback method)
      */
-    private void saveFileToDisk(MultipartFile file, String formattedFilename) throws IOException {
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath); // Create directory if it doesn't exist
+    private Double calculateAmountFromEcritures(String pieceData, Dossier dossier, JsonNode originalAiResponse) {
+        try {
+            List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
+            return ecritures.stream()
+                    .flatMap(e -> e.getLines().stream())
+                    .mapToDouble(line -> Math.max(line.getDebit() != null ? line.getDebit() : 0.0,
+                            line.getCredit() != null ? line.getCredit() : 0.0))
+                    .max()
+                    .orElse(0.0);
+        } catch (Exception e) {
+            log.warn("Error calculating amount from ecritures: {}", e.getMessage());
+            return null;
         }
-
-        // **DO NOT MODIFY THE FILE NAME - SAVE AS-IS**
-        Path filePath = uploadPath.resolve(formattedFilename);
-        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING); // Copy the file to disk
-    }
-
-    /**
-     * Generates a unique filename to avoid collisions.
-     */
-    private String generateUniqueFilename(String filename, Path uploadPath) {
-        String baseName = FilenameUtils.getBaseName(filename);
-        String extension = FilenameUtils.getExtension(filename);
-        String uniqueFilename = filename;
-
-        int count = 1;
-        while (Files.exists(uploadPath.resolve(uniqueFilename))) {
-            uniqueFilename = baseName + "_pacioli_" + count + "." + extension;
-            count++;
-        }
-        return uniqueFilename;
-    }
-
-    @Override
-    public List<Piece> getPiecesByDossier(Long dossierId) {
-        return pieceRepository.findByDossierId(dossierId);
-    }
-
-    @Override
-    public List<Piece> getAllPieces() {
-        return pieceRepository.findAll();
     }
 
     @Override
     @Transactional
-    public void deletePiece(Long id) {
-        pieceRepository.deleteById(id);
+    public Page<PieceDTO> getPiecesForUser(UUID userId, Pageable pageable) {
+        // ✅ REMOVED SECURITY CHECK - Now handled in controller
+        Page<Piece> piecesPage = pieceRepository.findByDossierCabinetUsersId(userId, pageable);
+        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream()
+                .map(pieceDTOMapper::toBasicDTO)
+                .collect(Collectors.toList());
+        return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
+    }
+
+
+    // Core CRUD operations
+    @Override
+    @Transactional
+    public Page<PieceDTO> getPiecesByDossier(Long dossierId, Pageable pageable) {
+        Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
+        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream()
+                .map(pieceDTOMapper::toBasicDTO)
+                .collect(Collectors.toList());
+        return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
+    }
+
+    @Override
+    @Transactional
+    public List<Piece> getPiecesByDossierIdSortedByDate(Long dossierId) {
+        // ✅ REMOVED SECURITY CHECK - Now handled in controller
+        return pieceRepository.findByDossierIdWithDetailsOrderByUploadDateDesc(dossierId);
     }
 
     @Override
@@ -353,35 +340,157 @@ public class PieceServiceImpl implements PieceService {
                 .orElseThrow(() -> new IllegalArgumentException("Piece with id " + id + " not found"));
     }
 
+    @Override
+    @Transactional
+    public PieceDTO getPieceDetails(Long pieceId) {
+        Piece piece = getPieceById(pieceId);
+        PieceDTO dto = pieceDTOMapper.toBasicDTO(piece);
+        pieceDTOMapper.addFactureDataIfExists(piece, dto);
+        pieceDTOMapper.addEcrituresIfExists(piece, dto);
+        return dto;
+    }
+
+    @Override
+    @Transactional
+    public void deletePiece(Long id) {
+        pieceRepository.deleteById(id);
+    }
+
+    // Status operations
+    @Override
     @Transactional
     public Piece updatePieceStatus(Long pieceId, String newStatus) {
-        Optional<Piece> optionalPiece = pieceRepository.findById(pieceId);
-        if (optionalPiece.isEmpty()) {
-            log.warn("Piece with id {} not found", pieceId);
-            return null;
+        Piece piece = getPieceById(pieceId);
+        PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
+        piece.setStatus(status);
+        return pieceRepository.save(piece);
+    }
+
+    @Override
+    @Transactional
+    public Piece forcePieceNotDuplicate(Long pieceId) {
+        Piece piece = getPieceById(pieceId);
+
+        // ✅ FIXED CONDITION: Allow if isDuplicate = true OR status = DUPLICATE
+        if (!Boolean.TRUE.equals(piece.getIsDuplicate()) && piece.getStatus() != PieceStatus.DUPLICATE) {
+            throw new IllegalStateException("Seules les pièces dupliquées peuvent être forcées à être considérées comme non dupliquées.");
         }
 
-        Piece piece = optionalPiece.get();
+        return pieceProcessingService.forcePieceAsNotDuplicate(piece);
+    }
+
+    // Statistics operations
+    @Override
+    @Transactional
+    public PieceStatsDTO getPieceStatsByDossier(Long dossierId) {
+        PieceStatsDTO stats = pieceRepository.getPieceStatsByDossierId(dossierId);
+        return (stats != null) ? stats : createEmptyStats(dossierId);
+    }
+
+    @Override
+    @Transactional
+    public List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId) {
+        return pieceRepository.getPieceStatsByCabinetId(cabinetId);
+    }
+
+    // File operations
+    @Override
+    public byte[] getPieceFilesAsZip(Long pieceId) {
+        return pieceProcessingService.createPieceFilesZip(pieceId);
+    }
+
+    // Notification operations
+    @Override
+    @Transactional
+    public void notifyPiecesUpdate(Long dossierId) {
+        if (messagingTemplate == null) {
+            log.error("❌ messagingTemplate is null! Cannot notify WebSocket for dossier {}", dossierId);
+            return;
+        }
 
         try {
-            // Convert string to Enum
-            PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
+            Pageable pageable = org.springframework.data.domain.PageRequest.of(DEFAULT_PAGE, DEFAULT_PAGE_SIZE);
+            Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
 
-            // Update the status
-            piece.setStatus(status);
+            List<PieceDTO> basicDTOs = piecesPage.getContent().stream()
+                    .map(pieceDTOMapper::toBasicDTO)
+                    .collect(Collectors.toList());
 
-            // Save the piece
-            Piece updatedPiece = pieceRepository.save(piece);
+            messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, basicDTOs);
+            log.info("✅ Successfully notified WebSocket for dossier {} with {} basic pieces",
+                    dossierId, basicDTOs.size());
 
-            log.info("Successfully updated status for piece with id {} to {}", pieceId, status);
-
-            return updatedPiece;
-
-        } catch (IllegalArgumentException e) {
-            log.error("Invalid status value: {}", newStatus);
-            throw new IllegalArgumentException("Invalid status value: " + newStatus);
+        } catch (Exception e) {
+            log.error("💥 Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage(), e);
+            sendWebSocketError(dossierId, e);
         }
     }
 
-}
+    // Private helper methods
+    private Piece deserializePiece(String pieceData, Long dossierId) {
+        try {
+            Piece piece = objectMapper.readValue(pieceData, Piece.class);
+            Dossier dossier = new Dossier();
+            dossier.setId(dossierId);
+            piece.setDossier(dossier);
+            return piece;
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to parse 'piece' JSON data: " + e.getMessage());
+        }
+    }
 
+    private void initializePiece(Piece piece, Dossier dossier, String filename) {
+        piece.setDossier(dossier);
+        piece.setUploadDate(new Date());
+        piece.setIsDuplicate(false);
+        piece.setFilename(filename);
+        piece.setStatus(PieceStatus.UPLOADED);
+    }
+
+    private PieceStatsDTO createEmptyStats(Long dossierId) {
+        return dossierRepository.findById(dossierId)
+                .map(dossier -> {
+                    PieceStatsDTO stats = new PieceStatsDTO();
+                    stats.setDossierId(dossier.getId());
+                    stats.setDossierName(dossier.getName());
+                    stats.setTotalCount(0L);
+                    stats.setUploadedCount(0L);
+                    stats.setProcessedCount(0L);
+                    stats.setRejectedCount(0L);
+                    stats.setProcessingCount(0L);
+
+                    if (dossier.getCountry() != null) {
+                        stats.setCountryCode(dossier.getCountry().getCode());
+                        if (dossier.getCountry().getCurrency() != null) {
+                            stats.setDossierCurrency(dossier.getCountry().getCurrency().getCode());
+                        }
+                    }
+                    return stats;
+                })
+                .orElse(new PieceStatsDTO());
+    }
+
+    private void sendWebSocketError(Long dossierId, Exception e) {
+        try {
+            Map<String, Object> errorMessage = new HashMap<>();
+            errorMessage.put("error", true);
+            errorMessage.put("message", "Failed to load pieces: " + e.getMessage());
+            errorMessage.put("dossierId", dossierId);
+            errorMessage.put("timestamp", new Date());
+
+            messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, errorMessage);
+        } catch (Exception notifyError) {
+            log.error("Failed to send error notification to WebSocket: {}", notifyError.getMessage());
+        }
+    }
+
+    private void saveFactureDataForPiece(Piece piece, String pieceData, JsonNode originalAiResponse) {
+        // Implement or delegate to pieceProcessingService
+        pieceProcessingService.saveFactureDataForPiece(piece, pieceData, originalAiResponse);
+    }
+
+    private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
+        // Implement or delegate to pieceProcessingService
+        pieceProcessingService.saveEcrituresForPiece(piece, dossierId, pieceData, originalAiResponse);
+    }
+}

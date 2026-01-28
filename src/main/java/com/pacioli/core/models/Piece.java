@@ -6,12 +6,17 @@ import com.pacioli.core.enums.PieceStatus;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.time.LocalDate;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 @Entity
 @Data
+@JsonIgnoreProperties(value = { "uploadDate" }, allowGetters = true)
 public class Piece {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -27,11 +32,50 @@ public class Piece {
     @Column(name = "original_file_name", nullable = true)
     private String originalFileName;
     private String type;
+    @Temporal(TemporalType.TIMESTAMP)
+    @Column(name = "upload_date")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "UTC")
     private Date uploadDate;
     private Double amount;
     @Enumerated(EnumType.STRING)
     private PieceStatus status; // New Status field
 
+    // Duplicate detection field
+    @Column(name = "is_duplicate", nullable = false)
+    private Boolean isDuplicate = false;
+    // Force as a not duplication
+    @Column(name = "is_forced", nullable = false)
+    private Boolean isForced = false;
+
+    // Reference to original piece if this is a duplicate
+    @ManyToOne
+    @JoinColumn(name = "original_piece_id", nullable = true)
+    @JsonBackReference("original-piece-duplicates")
+    private Piece originalPiece;
+
+    // List of duplicate pieces referencing this piece as original
+    @OneToMany(mappedBy = "originalPiece", cascade = CascadeType.ALL)
+    @JsonManagedReference("original-piece-duplicates")
+    @ToString.Exclude
+    private List<Piece> duplicatePieces;
+
+    // AI currency and amount fields
+    @Column(name = "ai_currency", nullable = true)
+    private String aiCurrency;
+
+    @Column(name = "ai_amount", nullable = true)
+    private Double aiAmount;
+
+    @Column(name = "exchange_rate", nullable = true)
+    private Double exchangeRate;
+
+    @Column(name = "converted_currency", nullable = true)
+    private String convertedCurrency;
+
+    @Column(name = "exchange_rate_date", nullable = true)
+    private LocalDate exchangeRateDate;
+    @Column(name = "exchange_rate_updated", nullable = true)
+    private Boolean exchangeRateUpdated = false;
     @Transient
     private String filePath;
 
@@ -43,6 +87,24 @@ public class Piece {
     @OneToMany(mappedBy = "piece", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference("piece-ecritures") // Unique reference for Ecritures
     @ToString.Exclude  // Prevent circular reference in toString
-
     private List<Ecriture> ecritures;
+
+    private String fileHash;
+
+
+    // Add these custom hashCode() and equals() methods to your model classes to prevent circular references
+
+    // In Piece.java
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Piece piece = (Piece) o;
+        return Objects.equals(id, piece.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

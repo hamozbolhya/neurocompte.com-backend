@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -28,9 +29,14 @@ public class UserController {
     }
 
     @PostMapping("/create")
-    public ResponseEntity<UserInfo> createUser(@RequestBody UserInfo userInfo) {
-        UserInfo createdUserInfo = userService.createUser(userInfo);
-        return ResponseEntity.ok(createdUserInfo);
+    public ResponseEntity<?> createUser(@RequestBody UserInfo userInfo) {
+        try {
+            UserInfo createdUserInfo = userService.createUser(userInfo);
+            return ResponseEntity.ok(createdUserInfo);
+        } catch (IllegalArgumentException e) {
+            // Return error response with French message
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PostMapping("/{userId}/roles")

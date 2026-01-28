@@ -3,19 +3,16 @@ package com.pacioli.core.services;
 import com.pacioli.core.DTO.EcritureDTO;
 import com.pacioli.core.DTO.EcritureExportDTO;
 import com.pacioli.core.models.Ecriture;
+import org.springframework.data.domain.Page;
 
 import java.time.LocalDate;
 import java.util.List;
 
 public interface EcritureService {
-    // Fetch all ecritures
-    List<Ecriture> getAllEcritures();
-
     // Fetch ecritures by Piece ID
     List<Ecriture> getEcrituresByPieceId(Long pieceId);
 
-    List<Ecriture> getEcrituresByExercise(Long exerciseId);
-    List<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId);
+    Page<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId, int page, int size);
 
     Ecriture updateEcriture(Ecriture ecriture);
     Ecriture getEcritureById(Long id);

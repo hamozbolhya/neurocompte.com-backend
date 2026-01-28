@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Import Spring properties into logback -->
+    <springProperty scope="context" name="logsDir" source="logs.dir" defaultValue="./LOGS"/>
+
+    <!-- Console Appender for Development (same as what you see when running) -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Daily Rolling File Appender - Captures ALL logs by date -->
+    <appender name="DAILY_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <!-- Current log file -->
+        <file>${logsDir}/app.log</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- Daily rollover with date format you want -->
+            <fileNamePattern>${logsDir}/%d{dd-MM-yyyy}.log</fileNamePattern>
+
+            <!-- Keep 90 days of history -->
+            <maxHistory>90</maxHistory>
+
+            <!-- Total size cap for all archived files -->
+            <totalSizeCap>5GB</totalSizeCap>
+
+            <!-- Delete files when they exceed the cap -->
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+
+        <!-- Same pattern as console so logs look identical -->
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root logger - captures EVERYTHING (Spring Boot, Hibernate, your app, etc.) -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="DAILY_FILE"/>
+    </root>
+
+    <!-- Environment specific profiles -->
+    <springProfile name="dev">
+        <!-- In development, show DEBUG level and keep console -->
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="DAILY_FILE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <!-- In production, only file logging (no console) and INFO level -->
+        <root level="INFO">
+            <appender-ref ref="DAILY_FILE"/>
+        </root>
+    </springProfile>
+
+</configuration>

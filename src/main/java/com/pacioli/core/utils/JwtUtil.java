@@ -2,6 +2,7 @@ package com.pacioli.core.utils;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Date;
@@ -10,9 +11,11 @@ import java.util.List;
 import java.util.Map;
 @Component
 public class JwtUtil {
+    @Value("${jwt.secret}")
+    private String SECRET_KEY;
 
-    private String SECRET_KEY = "c1194df3f35adf875f7dc30d89f366492f184a4c0e84c32ce2c98eeb5574a5dd"; // Change this to a strong secret key
-    private long EXPIRATION_TIME = 1000000; // 10 minutes
+    @Value("${jwt.expiration}")
+    private long EXPIRATION_TIME;
 
     public String generateToken(String username, String email, Long cabinetId, String cabinetName, List<String> roles, Boolean active) {
         Map<String, Object> claims = new HashMap<>();
@@ -50,8 +53,24 @@ public class JwtUtil {
         return extractClaims(token).getExpiration().before(new Date());
     }
 
-    public boolean validateToken(String token, String username) {
-        String extractedUsername = extractUsername(token);
-        return (extractedUsername.equals(username) && !isTokenExpired(token));
+    @SuppressWarnings("unchecked")
+    public List<String> extractRoles(String token) {
+        return (List<String>) extractClaims(token).get("roles");
+    }
+
+    public Long extractCabinetId(String token) {
+        Object cabinetId = extractClaims(token).get("cabinetId");
+        if (cabinetId instanceof Number) {
+            return ((Number) cabinetId).longValue();
+        }
+        return null;
+    }
+
+    public String extractCabinetName(String token) {
+        return (String) extractClaims(token).get("cabinetName");
+    }
+
+    public Boolean extractActive(String token) {
+        return (Boolean) extractClaims(token).get("active");
     }
 }

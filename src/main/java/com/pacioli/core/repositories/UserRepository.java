@@ -21,4 +21,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     List<User> findAll(Sort sort);
 
     List<User> findByCabinetId(Long cabinetId);
+
+    Long countByCabinetId(Long cabinetId);
+
+    boolean existsByIdAndCabinetId(UUID userId, Long cabinetId);
 }

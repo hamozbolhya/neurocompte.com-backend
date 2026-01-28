@@ -1,25 +1,24 @@
 package com.pacioli.core.controllers;
 
-import com.fasterxml.jackson.databind.InjectableValues;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.deser.DefaultDeserializationContext;
-import com.pacioli.core.DTO.UpdatePieceStatusRequest;
-import com.pacioli.core.models.Dossier;
+import com.pacioli.core.DTO.*;
 import com.pacioli.core.models.Piece;
+import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.PieceService;
-//import org.springframework.core.io.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FilenameUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,8 +28,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestController
@@ -39,67 +41,165 @@ public class PieceController {
 
     @Value("${file.upload.dir:Files/}")
     private String uploadDir;
-    private final PieceService pieceService;
-
-    private final DossierService dossierService;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private PieceService pieceService;
+    @Autowired
+    private DossierService dossierService;
+    @Autowired
+    private UserRepository userRepository;
 
-    public PieceController(PieceService pieceService, DossierService dossierService) {
-        this.pieceService = pieceService;
-        this.dossierService = dossierService;
+
+    @GetMapping("/dossier/{dossierId}")
+    public List<Piece> getPiecesByDossierId(
+            @PathVariable Long dossierId,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching pieces for dossier: {}", principal.getUsername(), dossierId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this dossier
+        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+            log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
+            throw new SecurityException("User cannot access this dossier");
+        }
+
+        return pieceService.getPiecesByDossierIdSortedByDate(dossierId);
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Piece> getPieceById(@PathVariable Long id) {
-        Piece piece = pieceService.getPieceById(id);
-        return ResponseEntity.ok(piece);
-    }
 
     @PostMapping
     public ResponseEntity<Piece> savePiece(
             @RequestPart("piece") String pieceData,
             @RequestPart("file") MultipartFile file,
-            @RequestParam("dossier_id") Long dossierId) throws IOException {
-        log.info("peiceData: {}, dossier_id:{}" , pieceData, dossierId);
-        Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId);
+            @RequestParam("dossier_id") Long dossierId,
+            @RequestParam("country") String country,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) throws IOException {
+
+        log.info("User {} uploading piece for dossier: {}", principal.getUsername(), dossierId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this dossier
+        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+            log.error("User {} attempted to upload to unauthorized dossier {}", principal.getUsername(), dossierId);
+            throw new SecurityException("User cannot access this dossier");
+        }
+
+        Piece savedPiece = pieceService.savePiece(pieceData, file, dossierId, country);
         return ResponseEntity.ok(savedPiece);
     }
 
-    /**
-     * Endpoint to save Ecritures and Facture Data for a given Piece.
-     */
     @PostMapping("/save-ecritures-and-facture")
     public ResponseEntity<Piece> saveEcrituresAndFacture(
             @RequestBody String pieceData,
             @RequestParam(name = "piece_id", required = true) Long pieceId,
-            @RequestParam(name = "dossier_id", required = true) Long dossierId) {
+            @RequestParam(name = "dossier_id", required = true) Long dossierId,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this dossier
+        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+            log.error("User {} attempted to save ecritures in unauthorized dossier {}",
+                    principal.getUsername(), dossierId);
+            throw new SecurityException("User cannot access this dossier");
+        }
+
+        // ✅ ADDITIONAL SECURITY CHECK: Verify the piece belongs to the dossier
+        Piece piece = pieceService.getPieceById(pieceId);
+        if (!piece.getDossier().getId().equals(dossierId)) {
+            log.error("User {} attempted to access piece {} not belonging to dossier {}",
+                    principal.getUsername(), pieceId, dossierId);
+            throw new SecurityException("Piece does not belong to the specified dossier");
+        }
+
         Piece savedPiece = pieceService.saveEcrituresAndFacture(pieceId, dossierId, pieceData);
         return ResponseEntity.ok(savedPiece);
     }
 
     @GetMapping
-    public ResponseEntity<List<Piece>> getPieces(@RequestParam(required = false) Long dossierId) {
-        if(dossierId != null) {
-            List<Piece> pieces =
-                pieceService.getPiecesByDossier(dossierId);
-        return ResponseEntity.ok(pieces);
+    public ResponseEntity<Page<PieceDTO>> getPieces(
+            @RequestParam(required = false) Long dossierId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        if (dossierId != null) {
+            log.info("User {} fetching pieces for dossier: {}", principal.getUsername(), dossierId);
+
+            // ✅ SECURITY CHECK: Verify user has access to this dossier
+            if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+                log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
+                throw new SecurityException("User cannot access this dossier");
+            }
+
+            Pageable pageable = PageRequest.of(page, size);
+            Page<PieceDTO> pieceDTOs = pieceService.getPiecesByDossier(dossierId, pageable);
+            return ResponseEntity.ok(pieceDTOs);
+        } else {
+            // Get all pieces across user's accessible dossiers
+            log.info("User {} fetching all accessible pieces", principal.getUsername());
+            Pageable pageable = PageRequest.of(page, size);
+            Page<PieceDTO> pieceDTOs = pieceService.getPiecesForUser(userId, pageable);
+            return ResponseEntity.ok(pieceDTOs);
         }
-        return ResponseEntity.ok(new ArrayList<>());
+    }
+
+    @GetMapping("/{id}/details")
+    public ResponseEntity<PieceDTO> getPieceDetails(@PathVariable Long id, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        log.info("User {} fetching details for piece: {}", principal.getUsername(), id);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+        // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+        Piece piece = pieceService.getPieceById(id);
+        if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+            log.error("User {} attempted to access piece from unauthorized dossier {}",
+                    principal.getUsername(), piece.getDossier().getId());
+            throw new SecurityException("User cannot access this piece");
+        }
+
+        PieceDTO pieceDetails = pieceService.getPieceDetails(id);
+        return ResponseEntity.ok(pieceDetails);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deletePiece(@PathVariable Long id) {
+    public ResponseEntity<Void> deletePiece(@PathVariable Long id,  @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} deleting piece: {}", principal.getUsername(), id);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+        Piece piece = pieceService.getPieceById(id);
+        if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+            log.error("User {} attempted to delete piece from unauthorized dossier {}",
+                    principal.getUsername(), piece.getDossier().getId());
+            throw new SecurityException("User cannot access this piece");
+        }
+
         pieceService.deletePiece(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}/download")
-    public ResponseEntity<org.springframework.core.io.Resource> downloadFileById(@PathVariable("id") Long pieceId) {
+    public ResponseEntity<org.springframework.core.io.Resource> downloadFileById(@PathVariable("id") Long pieceId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        log.info("User {} downloading file for piece: {}", principal.getUsername(), pieceId);
         try {
-            // Fetch the Piece
+            UUID userId = extractUserIdFromPrincipal(principal);
+
+            // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
             Piece piece = pieceService.getPieceById(pieceId);
+            if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+                log.error("User {} attempted to download file from unauthorized piece {}",
+                        principal.getUsername(), pieceId);
+                throw new SecurityException("User cannot access this piece");
+            }
+
+            // Fetch the Piece
             String filename = piece.getFilename();
 
             // Locate the file
@@ -111,7 +211,7 @@ public class PieceController {
             }
 
             // Create a resource
-            org.springframework.core.io.Resource resource = new UrlResource(filePath.toUri());
+            Resource resource = new UrlResource(filePath.toUri());
 
             // Return the file as a response
             return ResponseEntity.ok()
@@ -127,10 +227,19 @@ public class PieceController {
     }
 
     @GetMapping("/{pieceId}/file")
-    public ResponseEntity<Resource> getFile(@PathVariable Long pieceId) throws IOException {
-        // Fetch the piece by ID
-        Piece piece = pieceService.getPieceById(pieceId);
+    public ResponseEntity<Resource> getFile(@PathVariable Long pieceId,  @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) throws IOException {
 
+        log.info("User {} accessing file for piece: {}", principal.getUsername(), pieceId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+        Piece piece = pieceService.getPieceById(pieceId);
+        if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+            log.error("User {} attempted to access file from unauthorized piece {}",
+                    principal.getUsername(), pieceId);
+            throw new SecurityException("User cannot access this piece");
+        }
         // Construct the file path
         Path filePath = Paths.get(uploadDir).resolve(piece.getFilename());
         File file = filePath.toFile();
@@ -156,9 +265,19 @@ public class PieceController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updatePieceStatus(
             @PathVariable Long id,
-            @RequestBody UpdatePieceStatusRequest requestBody) {
+            @RequestBody UpdatePieceStatusRequest requestBody, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
-        log.info("Updating status for piece with id {} to {}", id, requestBody.getStatus());
+        log.info("User {} updating status for piece {} to {}", principal.getUsername(), id, requestBody.getStatus());
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+        Piece piece = pieceService.getPieceById(id);
+        if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+            log.error("User {} attempted to update status of unauthorized piece {}",
+                    principal.getUsername(), id);
+            throw new SecurityException("User cannot access this piece");
+        }
 
         Piece updatedPiece = pieceService.updatePieceStatus(id, requestBody.getStatus());
 
@@ -169,4 +288,121 @@ public class PieceController {
         }
     }
 
+
+    @GetMapping("/stats/dossier/{dossierId}")
+    public ResponseEntity<PieceStatsDTO> getPieceStatsByDossier(@PathVariable Long dossierId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        log.info("User {} fetching stats for dossier: {}", principal.getUsername(), dossierId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this dossier
+        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
+            log.error("User {} attempted to access stats from unauthorized dossier {}", principal.getUsername(), dossierId);
+            throw new SecurityException("User cannot access this dossier");
+        }
+
+        PieceStatsDTO stats = pieceService.getPieceStatsByDossier(dossierId);
+        return ResponseEntity.ok(stats);
+    }
+
+    @GetMapping("/stats/cabinet/{cabinetId}")
+    public ResponseEntity<List<PieceStatsDTO>> getPieceStatsByCabinet(@PathVariable Long cabinetId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching stats for cabinet: {}", principal.getUsername(), cabinetId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this cabinet
+        if (!dossierService.userHasAccessToCabinet(userId, cabinetId)) {
+            log.error("User {} attempted to access stats from unauthorized cabinet {}", principal.getUsername(), cabinetId);
+            throw new SecurityException("User cannot access this cabinet");
+        }
+
+        List<PieceStatsDTO> stats = pieceService.getPieceStatsByCabinet(cabinetId);
+        return ResponseEntity.ok(stats);
+    }
+
+    @GetMapping("/{pieceId}/files")
+    public ResponseEntity<byte[]> getPieceFiles(@PathVariable Long pieceId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        log.info("User {} downloading files for piece: {}", principal.getUsername(), pieceId);
+
+        try {
+            UUID userId = extractUserIdFromPrincipal(principal);
+
+            // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+            Piece piece = pieceService.getPieceById(pieceId);
+            if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+                log.error("User {} attempted to download files from unauthorized piece {}",
+                        principal.getUsername(), pieceId);
+                throw new SecurityException("User cannot access this piece");
+            }
+            byte[] zipContent = pieceService.getPieceFilesAsZip(pieceId);
+
+            if (zipContent == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_TYPE, "application/zip")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"piece_" + pieceId + "_files.zip\"")
+                    .body(zipContent);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @PatchMapping("/{id}/force-not-duplicate")
+    public ResponseEntity<Piece> forceNotDuplicate(@PathVariable Long id, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} forcing piece {} as not duplicate", principal.getUsername(), id);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify user has access to this piece's dossier
+        Piece piece = pieceService.getPieceById(id);
+        if (!dossierService.userHasAccessToDossier(userId, piece.getDossier().getId())) {
+            log.error("User {} attempted to force piece {} as not duplicate without access",
+                    principal.getUsername(), id);
+            throw new SecurityException("User cannot access this piece");
+        }
+
+        Piece updated = pieceService.forcePieceNotDuplicate(id);
+        return ResponseEntity.ok(updated);
+    }
+
+
+    private UUID extractUserIdFromPrincipal(org.springframework.security.core.userdetails.User principal) {
+        if (principal == null) {
+            log.error("Principal is null - user not authenticated");
+            throw new SecurityException("User not authenticated");
+        }
+
+        String username = principal.getUsername();
+        log.debug("Extracting user ID for username: {}", username);
+
+        try {
+            // Look up the user by username to get the UUID
+            com.pacioli.core.models.User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> {
+                        log.error("User not found for username: {}", username);
+                        return new SecurityException("User not found");
+                    });
+
+            if (user.getId() == null) {
+                log.error("User ID is null for user: {}", username);
+                throw new SecurityException("User ID not found");
+            }
+
+            log.debug("Successfully extracted user ID: {} for user: {}", user.getId(), username);
+            return user.getId();
+
+        } catch (SecurityException e) {
+            // Re-throw security exceptions
+            throw e;
+        } catch (Exception e) {
+            log.error("Error extracting user ID for username {}: {}", username, e.getMessage(), e);
+            throw new SecurityException("Error extracting user information: " + e.getMessage());
+        }
+    }
 }

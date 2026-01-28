@@ -1,7 +1,9 @@
 package com.pacioli.core.enums;
 
 public enum PieceStatus {
-    PROCESSING,  // When the piece is created and waiting for AI processing
+    UPLOADED,  // When the piece is created and waiting To Send TO AI for processing
+    PROCESSING,  // When the piece is Sended to AI and waiting for AI processing
     PROCESSED,  // When the ecritures and facture are processed and linked to the piece
-    REJECTED    // When the Piece file rejected
+    REJECTED,    // When the Piece file rejected
+    DUPLICATE   // for duplicate pieces
 }

@@ -460,6 +460,7 @@ public class DossierServiceImpl implements DossierService {
         dto.setCity(savedDossier.getCity());
         dto.setPhone(savedDossier.getPhone());
         dto.setEmail(savedDossier.getEmail());
+        dto.setActivity(savedDossier.getActivity());
         dto.setDecimalPrecision(savedDossier.getDecimalPrecision());
 
         // Set pays object from country relationship including currency

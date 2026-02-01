@@ -40,4 +40,5 @@ public interface DossierService {
     Dossier createDossierSecure(Dossier dossier, List<Exercise> exercicesData, UUID userId);
     DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId);
     void deleteDossierSecure(Long dossierId, UUID userId);
+    DossierDTO getDossierForPacioli(Long dossierId);
 }

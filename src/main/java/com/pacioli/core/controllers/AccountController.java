@@ -5,6 +5,7 @@ import com.pacioli.core.models.Account;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.AccountService;
 import com.pacioli.core.services.DossierService;
+import com.pacioli.core.utils.SecurityHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,9 @@ public class AccountController {
     @Autowired
     private DossierService dossierService;
 
+    @Autowired
+    private SecurityHelper securityHelper;
+
     // Get All Accounts
     @GetMapping
     public ResponseEntity<List<Account>> getAllAccounts() {
@@ -34,12 +38,21 @@ public class AccountController {
     }
 
     @GetMapping("/by-dossier/{dossierId}")
-    public ResponseEntity<List<Account>> getAccountsByDossierId(@PathVariable Long dossierId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+    public ResponseEntity<List<Account>> getAccountsByDossierId(
+            @PathVariable Long dossierId,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching accounts for dossier: {}", principal.getUsername(), dossierId);
+
         UUID userId = extractUserIdFromPrincipal(principal);
 
-        // ✅ SECURITY CHECK: Verify user has access to this dossier
-        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
-            log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
+        // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
+        boolean hasAccess = securityHelper.isPacioli(principal)
+                || dossierService.userHasAccessToDossier(userId, dossierId);
+
+        if (!hasAccess) {
+            log.error("User {} attempted to access accounts from unauthorized dossier {}",
+                    principal.getUsername(), dossierId);
             throw new SecurityException("User cannot access this dossier");
         }
 

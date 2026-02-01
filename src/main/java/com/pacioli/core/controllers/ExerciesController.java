@@ -5,6 +5,7 @@ import com.pacioli.core.models.Exercise;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.ExerciseService;
+import com.pacioli.core.utils.SecurityHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,8 @@ public class ExerciesController {
     private UserRepository userRepository;
     @Autowired
     private DossierService dossierService;
+    @Autowired
+    private SecurityHelper securityHelper;
 
     @Autowired
     public ExerciesController(ExerciseService exerciseService) {
@@ -36,19 +39,26 @@ public class ExerciesController {
         return ResponseEntity.ok(exercises);
     }
 
+
     @GetMapping("/exercice-by-dossier/{dossierId}")
     public ResponseEntity<List<Exercise>> getExercisesByDossier(@PathVariable Long dossierId,
-        @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+                                                                @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} fetching exercises for dossier: {}", principal.getUsername(), dossierId);
 
         UUID userId = extractUserIdFromPrincipal(principal);
         if(userId == null) {
             throw new SecurityException("Anonymous user attempting to fetch exercises");
         }
 
-        // ✅ SECURITY CHECK: Verify user has access to this dossier
-        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
-            log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
-            throw new SecurityException("This dossier " + dossierId + " not exist in your cabinet");
+        // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
+        boolean hasAccess = securityHelper.isPacioli(principal)
+                || dossierService.userHasAccessToDossier(userId, dossierId);
+
+        if (!hasAccess) {
+            log.error("User {} attempted to access exercises from unauthorized dossier {}",
+                    principal.getUsername(), dossierId);
+            throw new SecurityException("This dossier " + dossierId + " does not exist in your cabinet");
         }
 
         List<Exercise> exercises = exerciseService.getExercisesByDossier(dossierId);

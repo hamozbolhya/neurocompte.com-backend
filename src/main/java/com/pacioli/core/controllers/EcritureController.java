@@ -10,6 +10,7 @@ import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.EcritureService;
 import com.pacioli.core.services.ExerciseService;
 import com.pacioli.core.services.JournalService;
+import com.pacioli.core.utils.SecurityHelper;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,17 +31,17 @@ import java.util.UUID;
 @RequestMapping("/api/ecritures")
 public class EcritureController {
     @Autowired
-    private  EcritureService ecritureService;
+    private EcritureService ecritureService;
     @Autowired
-    private  ExerciseService exerciseService;
+    private ExerciseService exerciseService;
     @Autowired
-    private  JournalService journalService;
+    private JournalService journalService;
     @Autowired
     private UserRepository userRepository;
     @Autowired
     private DossierService dossierService;
-
-
+    @Autowired
+    private SecurityHelper securityHelper;
 
 
     @GetMapping("/filter")
@@ -52,25 +53,33 @@ public class EcritureController {
             @RequestParam(value = "size", defaultValue = "20") int size,
             @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
+        log.info("User {} filtering ecritures for dossier: {}, cabinet: {}",
+                principal.getUsername(), dossierId, cabinetId);
+
+        UUID userId = extractUserIdFromPrincipal(principal);
+
+        // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
+        boolean hasAccess = securityHelper.isPacioli(principal)
+                || dossierService.userHasAccessToDossier(userId, dossierId);
+
+        if (!hasAccess) {
+            log.error("User {} attempted to access ecritures from unauthorized dossier {}",
+                    principal.getUsername(), dossierId);
+            throw new SecurityException("User cannot access this dossier");
+        }
+
         if (exerciseId != null) {
-            UUID userId = extractUserIdFromPrincipal(principal);
-
-            if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
-                log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
-                throw new SecurityException("User cannot access this dossier");
-            }
-
             boolean isValid = exerciseService.validateExerciseAndCabinet(exerciseId, cabinetId);
             if (!isValid) {
                 return ResponseEntity.badRequest().body(null);
             }
         }
 
-        Page<EcritureDTO> ecritures = ecritureService.getEcrituresByExerciseAndCabinet(exerciseId, cabinetId, page, size);
+        Page<EcritureDTO> ecritures;
+        ecritures = ecritureService.getEcrituresByExerciseAndCabinet(
+                exerciseId, cabinetId, page, size);
         return ResponseEntity.ok(ecritures);
     }
-
-
 
 
     // Fetch Ecritures by Piece ID
@@ -190,24 +199,35 @@ public class EcritureController {
             @RequestParam(value = "journalId", required = false) Long journalId,
             @RequestParam(value = "startDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(value = "endDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal
-    ) {
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        log.info("User {} exporting ecritures for dossier: {}", principal.getUsername(), dossierId);
+
         UUID userId = extractUserIdFromPrincipal(principal);
-        if(userId == null) {
+
+        if (userId == null) {
             throw new SecurityException("Anonymous user attempting to export ecritures");
         }
 
-        // ✅ SECURITY CHECK: Verify user has access to this dossier
-        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
-            log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
-            throw new SecurityException("This dossier " + dossierId + " not exist in your cabinet");
+        // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
+        boolean hasAccess = securityHelper.isPacioli(principal)
+                || dossierService.userHasAccessToDossier(userId, dossierId);
+
+        if (!hasAccess) {
+            log.error("User {} attempted to export ecritures from unauthorized dossier {}",
+                    principal.getUsername(), dossierId);
+            throw new SecurityException("This dossier " + dossierId + " does not exist in your cabinet");
         }
 
         // Default `endDate` to `LocalDate.now()` if missing
         endDate = (endDate != null) ? endDate : LocalDate.now();
-        return ecritureService.exportEcritures(dossierId, exerciseId, journalId, startDate, endDate);
-    }
 
+        List<EcritureExportDTO> exportData;
+        exportData = ecritureService.exportEcritures(
+                dossierId, exerciseId, journalId, startDate, endDate);
+
+        return exportData;
+    }
 
 
     private UUID extractUserIdFromPrincipal(org.springframework.security.core.userdetails.User principal) {

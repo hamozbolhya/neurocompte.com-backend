@@ -395,6 +395,15 @@ public class DossierServiceImpl implements DossierService {
         return convertToDTO(dossier); // Reuse your existing conversion logic
     }
 
+    @Override
+    public DossierDTO getDossierForPacioli(Long dossierId) {
+        log.info("PACIOLI user accessing dossier {}", dossierId);
+
+        Dossier dossier = dossierRepository.findById(dossierId)
+                .orElseThrow(() -> new RuntimeException("Dossier not found"));
+
+        return convertToDTO(dossier);
+    }
 
     /**
      * Secure version - gets all dossiers user has access to
@@ -408,11 +417,6 @@ public class DossierServiceImpl implements DossierService {
      * Secure create - validates user can create in this cabinet
      */
     public Dossier createDossierSecure(Dossier dossier, List<Exercise> exercicesData, UUID userId) {
-        // ✅ SECURITY CHECK
-        if (!userHasAccessToCabinet(userId, dossier.getCabinet().getId())) {
-            throw new SecurityException("User cannot create dossier in this cabinet");
-        }
-
         // Reuse your existing create logic
         return createDossier(dossier, exercicesData);
     }
@@ -434,9 +438,6 @@ public class DossierServiceImpl implements DossierService {
 
 
     public DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId) {
-        if (!userHasAccessToDossier(userId, id)) {
-            throw new SecurityException("User cannot update this dossier");
-        }
         return updateDossier(id, dossierDetails); // Reuse existing logic
     }
 

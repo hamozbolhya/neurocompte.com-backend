@@ -41,4 +41,5 @@ public interface DossierService {
     DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId);
     void deleteDossierSecure(Long dossierId, UUID userId);
     DossierDTO getDossierForPacioli(Long dossierId);
+    int updateAllCompaniesInAi();
 }

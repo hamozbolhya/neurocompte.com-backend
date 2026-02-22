@@ -16,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -508,6 +509,86 @@ public class DossierServiceImpl implements DossierService {
         if (!journalsToCreate.isEmpty()) {
             journalRepository.saveAll(journalsToCreate);
         }
+    }
+
+    @Transactional
+    public int updateAllCompaniesInAi() {
+        log.info("Starting batch update of all companies in AI service");
+
+        // Récupérer tous les dossiers
+        List<Dossier> allDossiers = dossierRepository.findAll();
+        log.info("Found {} dossiers to update", allDossiers.size());
+
+        int successCount = 0;
+        int failedCount = 0;
+        List<Long> failedIds = new ArrayList<>();
+
+        for (Dossier dossier : allDossiers) {
+            try {
+                updateSingleCompanyInAi(dossier);
+                successCount++;
+
+                if (successCount % 10 == 0) {
+                    log.info("Progress: {} companies updated successfully", successCount);
+                }
+
+            } catch (Exception e) {
+                failedCount++;
+                failedIds.add(dossier.getId());
+                log.error("Failed to update company for dossier ID {}: {}", dossier.getId(), e.getMessage());
+
+                // Ajouter un délai entre les erreurs pour éviter la surcharge
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            // Petit délai entre les appais pour ne pas surcharger l'API AI
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        log.info("Batch update completed: {} successful, {} failed", successCount, failedCount);
+        if (!failedIds.isEmpty()) {
+            log.warn("Failed dossier IDs: {}", failedIds);
+        }
+
+        return successCount;
+    }
+
+    /**
+     * Mettre à jour une seule entreprise dans le service AI
+     */
+    private void updateSingleCompanyInAi(Dossier dossier) {
+        // Convertir Dossier en Company pour l'API AI
+        Company company = convertDossierToCompany(dossier);
+
+        // Appeler le service AI pour mettre à jour
+        companyAiService.updateCompany(dossier.getId(), company);
+
+        log.debug("Successfully updated company in AI for dossier ID: {}", dossier.getId());
+    }
+
+    /**
+     * Convertir un Dossier en objet Company pour l'API AI
+     */
+    private Company convertDossierToCompany(Dossier dossier) {
+        Company company = new Company();
+        company.setId(dossier.getId());
+        company.setName(dossier.getName());
+        company.setActivity(dossier.getActivity());
+
+        // Si votre objet Company a d'autres champs, ajoutez-les ici
+        if (dossier.getCountry() != null) {
+            company.setCountry(dossier.getCountry().getCode());
+        }
+
+        return company;
     }
 
 }

@@ -23,6 +23,8 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -407,6 +409,61 @@ public class DossierController {
         } catch (Exception e) {
             log.error("Error extracting user ID for username {}: {}", username, e.getMessage(), e);
             throw new SecurityException("Error extracting user information: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/batch/update-ai-companies")
+    public ResponseEntity<Map<String, Object>> batchUpdateAiCompanies(
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+
+        String requestId = UUID.randomUUID().toString();
+        log.info("[{}] User {} requesting batch update of all companies in AI",
+                requestId, principal.getUsername());
+
+        try {
+            // ✅ SECURITY CHECK: Uniquement pour PACIOLI
+            if (!securityHelper.isPacioli(principal)) {
+                log.error("[{}] Access denied for user {} - batch update requires PACIOLI role",
+                        requestId, principal.getUsername());
+                throw new SecurityException("Batch update requires PACIOLI privileges");
+            }
+
+            // Vérifier si une opération similaire est déjà en cours (optionnel)
+            // Vous pouvez implémenter un système de verrouillage si nécessaire
+
+            log.info("[{}] Starting batch update of all companies in AI service", requestId);
+
+            // Démarrer la mise à jour
+            int updatedCount = dossierService.updateAllCompaniesInAi();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("requestId", requestId);
+            response.put("message", "Batch update completed successfully");
+            response.put("updatedCompaniesCount", updatedCount);
+            response.put("timestamp", LocalDateTime.now().toString());
+
+            log.info("[{}] Batch update completed. Updated {} companies",
+                    requestId, updatedCount);
+
+            return ResponseEntity.ok(response);
+
+        } catch (SecurityException e) {
+            log.error("[{}] Security error: {}", requestId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Accès refusé: " + e.getMessage(), e);
+
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error during batch update: {}",
+                    requestId, e.getMessage(), e);
+
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("requestId", requestId);
+            errorResponse.put("error", "Failed to complete batch update");
+            errorResponse.put("message", e.getMessage());
+            errorResponse.put("timestamp", LocalDateTime.now().toString());
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse);
         }
     }
 

@@ -39,8 +39,8 @@ public class ExchangeRateService {
 
     // Currencies to track
     private static final Set<String> CURRENCIES = Set.of(
-            "EUR", "MAD", "CAD", "GBP", "JPY", "CHF", "AUD", "CNY", "TND", "USD"
-    );
+            "EUR", "MAD", "CAD", "GBP", "JPY", "CHF", "AUD", "CNY", "TND", "USD");
+
     /**
      * Fetch latest exchange rates and save them with today's date
      */
@@ -101,7 +101,8 @@ public class ExchangeRateService {
 
     /**
      * Initialize historical data using approximate values
-     * Since we don't have access to historical API, we'll populate with today's rates
+     * Since we don't have access to historical API, we'll populate with today's
+     * rates
      */
     @Transactional
     public void initializeHistoricalData() {

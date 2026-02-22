@@ -21,7 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -42,7 +42,6 @@ public class EcritureController {
     private DossierService dossierService;
     @Autowired
     private SecurityHelper securityHelper;
-
 
     @GetMapping("/filter")
     public ResponseEntity<Page<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
@@ -81,14 +80,12 @@ public class EcritureController {
         return ResponseEntity.ok(ecritures);
     }
 
-
     // Fetch Ecritures by Piece ID
     @GetMapping("/piece/{pieceId}")
     public ResponseEntity<List<Ecriture>> getEcrituresByPieceId(@PathVariable("pieceId") Long pieceId) {
         List<Ecriture> ecritures = ecritureService.getEcrituresByPieceId(pieceId);
         return ResponseEntity.ok(ecritures);
     }
-
 
     @PutMapping("/{id}")
     public ResponseEntity<?> updateEcriture(@PathVariable Long id, @RequestBody Map<String, Object> updates) {
@@ -103,7 +100,8 @@ public class EcritureController {
             updates.forEach((key, value) -> {
                 switch (key) {
                     case "journal":
-                        Journal journal = journalService.findByName((String) value, existingEcriture.getPiece().getDossier().getId());
+                        Journal journal = journalService.findByName((String) value,
+                                existingEcriture.getPiece().getDossier().getId());
                         if (journal == null) {
                             throw new RuntimeException("Journal non trouvé avec le nom: " + value);
                         }
@@ -139,15 +137,15 @@ public class EcritureController {
         } catch (EntityNotFoundException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Ecriture non trouvée avec ID: " + ecritureIds);
         } catch (Exception ex) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Une erreur s'est produite: " + ex.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Une erreur s'est produite: " + ex.getMessage());
         }
     }
 
     @PutMapping("/update-compte")
     public ResponseEntity<String> updateCompte(
             @RequestParam("account") String account,
-            @RequestBody List<Long> ecritureIds
-    ) {
+            @RequestBody List<Long> ecritureIds) {
         ecritureService.updateCompte(account, ecritureIds);
         return ResponseEntity.ok("Compte updated successfully");
     }
@@ -161,11 +159,10 @@ public class EcritureController {
     @PutMapping("/lines/{ecritureId}")
     public ResponseEntity<String> updateEcriture(
             @PathVariable Long ecritureId,
-            @RequestBody Ecriture ecritureRequest
-    ) {
+            @RequestBody Ecriture ecritureRequest) {
         try {
-//            log.debug("Received exchange rate update request for ecriture {}: {}",
-//                    ecritureId, ecritureRequest);
+            // log.debug("Received exchange rate update request for ecriture {}: {}",
+            // ecritureId, ecritureRequest);
 
             // Log exchange rate information if present
             if (ecritureRequest.getExchangeRate() != null) {
@@ -190,7 +187,6 @@ public class EcritureController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erreur interne du serveur.");
         }
     }
-
 
     @GetMapping("/export")
     public List<EcritureExportDTO> exportEcritures(
@@ -229,7 +225,6 @@ public class EcritureController {
         return exportData;
     }
 
-
     private UUID extractUserIdFromPrincipal(org.springframework.security.core.userdetails.User principal) {
         if (principal == null) {
             log.error("Principal is null - user not authenticated");
@@ -264,4 +259,3 @@ public class EcritureController {
         }
     }
 }
-

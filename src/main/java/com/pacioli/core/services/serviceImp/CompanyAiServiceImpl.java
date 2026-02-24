@@ -2,7 +2,9 @@ package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.DTO.Company;
 import com.pacioli.core.config.AiServiceProperties;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.CompanyAiService;
+import com.pacioli.core.services.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -13,6 +15,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -22,11 +26,21 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
     private final RestTemplate restTemplate;
     private final AiServiceProperties properties;
+    private final AuditService auditService;
+    private final UserService userService;
 
     @Override
     public Company createCompany(Company company) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Creating company: {}", requestId, company);
+
+        Map<String, Object> auditDetails = new HashMap<>();
+        auditDetails.put("companyId", company.getId());
+        auditDetails.put("companyName", company.getName());
+        auditDetails.put("country", company.getCountry());
+        auditDetails.put("activity", company.getActivity());
+        auditDetails.put("requestId", requestId);
+        auditDetails.put("apiUrl", properties.getBaseUrl());
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-api-key", properties.getApiKey());
@@ -39,12 +53,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Company> responseEntity = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    requestEntity,
-                    Company.class
-            );
+            ResponseEntity<Company> responseEntity = restTemplate.exchange(url, HttpMethod.POST, requestEntity, Company.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
@@ -56,29 +65,67 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             log.debug("API Response [{}] - Body: {}", requestId, responseBody);
 
             if (statusCode.is2xxSuccessful()) {
-                log.info("API Request [{}] - Company created successfully with ID: {}", requestId,
-                        responseBody != null ? responseBody.getId() : "unknown");
+                log.info("API Request [{}] - Company created successfully with ID: {}", requestId, responseBody != null ? responseBody.getId() : "unknown");
+
+                // Audit succès
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("duration", duration);
+                auditDetails.put("responseCompanyId", responseBody != null ? responseBody.getId() : null);
+
+                auditService.logSuccess(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), null, auditDetails);
+
                 return responseBody;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
+
+                // Audit échec
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
+
+                auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Failed to create company: " + statusCode);
+
                 throw new RuntimeException("Failed to create company: " + statusCode);
             }
         } catch (HttpStatusCodeException e) {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
-            throw new RuntimeException("API Error - Failed to create company: " + e.getStatusCode() +
-                    ", Response: " + e.getResponseBodyAsString(), e);
+
+            // Audit échec HTTP
+            auditDetails.put("responseCode", e.getStatusCode().value());
+            auditDetails.put("errorMessage", e.getResponseBodyAsString());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+
+            throw new RuntimeException("API Error - Failed to create company: " + e.getStatusCode() + ", Response: " + e.getResponseBodyAsString(), e);
         } catch (ResourceAccessException e) {
             // For connectivity issues
             log.error("API Request [{}] - Connection error: {}", requestId, e.getMessage(), e);
+
+            // Audit échec connexion
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Connection error: " + e.getMessage());
+
             throw new RuntimeException("API Connectivity Error - Failed to create company: " + e.getMessage(), e);
         } catch (RestClientException e) {
             // Other REST client errors
             log.error("API Request [{}] - REST client error: {}", requestId, e.getMessage(), e);
+
+            // Audit échec client
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "REST client error: " + e.getMessage());
+
             throw new RuntimeException("API Client Error - Failed to create company: " + e.getMessage(), e);
         } catch (Exception e) {
             // Unexpected errors
             log.error("API Request [{}] - Unexpected error: {}", requestId, e.getMessage(), e);
+
+            // Audit erreur inattendue
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Unexpected error: " + e.getMessage());
+
             throw new RuntimeException("Unexpected error creating company: " + e.getMessage(), e);
         }
     }
@@ -87,6 +134,14 @@ public class CompanyAiServiceImpl implements CompanyAiService {
     public Company updateCompany(Long companyId, Company company) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Updating company with ID: {}, Company data: {}", requestId, companyId, company);
+
+        Map<String, Object> auditDetails = new HashMap<>();
+        auditDetails.put("companyId", companyId);
+        auditDetails.put("companyName", company.getName());
+        auditDetails.put("country", company.getCountry());
+        auditDetails.put("activity", company.getActivity());
+        auditDetails.put("requestId", requestId);
+        auditDetails.put("apiUrl", properties.getBaseUrl() + "/" + companyId);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-api-key", properties.getApiKey());
@@ -99,12 +154,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Company> responseEntity = restTemplate.exchange(
-                    url,
-                    HttpMethod.PUT,
-                    requestEntity,
-                    Company.class
-            );
+            ResponseEntity<Company> responseEntity = restTemplate.exchange(url, HttpMethod.PUT, requestEntity, Company.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
@@ -116,29 +166,67 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             log.debug("API Response [{}] - Body: {}", requestId, responseBody);
 
             if (statusCode.is2xxSuccessful()) {
-                log.info("API Request [{}] - Company updated successfully with ID: {}", requestId,
-                        responseBody != null ? responseBody.getId() : "unknown");
+                log.info("API Request [{}] - Company updated successfully with ID: {}", requestId, responseBody != null ? responseBody.getId() : "unknown");
+
+                // Audit succès
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("duration", duration);
+                auditDetails.put("responseCompanyId", responseBody != null ? responseBody.getId() : null);
+
+                auditService.logSuccess(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), null, auditDetails);
+
                 return responseBody;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
+
+                // Audit échec
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
+
+                auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Failed to update company: " + statusCode);
+
                 throw new RuntimeException("Failed to update company: " + statusCode);
             }
         } catch (HttpStatusCodeException e) {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
-            throw new RuntimeException("API Error - Failed to update company: " + e.getStatusCode() +
-                    ", Response: " + e.getResponseBodyAsString(), e);
+
+            // Audit échec HTTP
+            auditDetails.put("responseCode", e.getStatusCode().value());
+            auditDetails.put("errorMessage", e.getResponseBodyAsString());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+
+            throw new RuntimeException("API Error - Failed to update company: " + e.getStatusCode() + ", Response: " + e.getResponseBodyAsString(), e);
         } catch (ResourceAccessException e) {
             // For connectivity issues
             log.error("API Request [{}] - Connection error: {}", requestId, e.getMessage(), e);
+
+            // Audit échec connexion
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Connection error: " + e.getMessage());
+
             throw new RuntimeException("API Connectivity Error - Failed to update company: " + e.getMessage(), e);
         } catch (RestClientException e) {
             // Other REST client errors
             log.error("API Request [{}] - REST client error: {}", requestId, e.getMessage(), e);
+
+            // Audit échec client
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "REST client error: " + e.getMessage());
+
             throw new RuntimeException("API Client Error - Failed to update company: " + e.getMessage(), e);
         } catch (Exception e) {
             // Unexpected errors
             log.error("API Request [{}] - Unexpected error: {}", requestId, e.getMessage(), e);
+
+            // Audit erreur inattendue
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Unexpected error: " + e.getMessage());
+
             throw new RuntimeException("Unexpected error updating company: " + e.getMessage(), e);
         }
     }
@@ -147,6 +235,11 @@ public class CompanyAiServiceImpl implements CompanyAiService {
     public boolean deleteCompany(Long companyId) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Deleting company with ID: {}", requestId, companyId);
+
+        Map<String, Object> auditDetails = new HashMap<>();
+        auditDetails.put("companyId", companyId);
+        auditDetails.put("requestId", requestId);
+        auditDetails.put("apiUrl", properties.getBaseUrl() + "/" + companyId);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("x-api-key", properties.getApiKey());
@@ -158,12 +251,7 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Void> responseEntity = restTemplate.exchange(
-                    url,
-                    HttpMethod.DELETE,
-                    requestEntity,
-                    Void.class
-            );
+            ResponseEntity<Void> responseEntity = restTemplate.exchange(url, HttpMethod.DELETE, requestEntity, Void.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
@@ -174,30 +262,72 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
             if (statusCode.is2xxSuccessful()) {
                 log.info("API Request [{}] - Company with ID {} deleted successfully", requestId, companyId);
+
+                // Audit succès
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("duration", duration);
+                auditDetails.put("deleted", true);
+
+                auditService.logSuccess(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, null, auditDetails);
+
                 return true;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
+
+                // Audit échec
+                auditDetails.put("responseCode", statusCode.value());
+                auditDetails.put("deleted", false);
+                auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
+
+                auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Failed to delete company: " + statusCode);
+
                 return false;
             }
         } catch (HttpStatusCodeException e) {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
+
+            // Audit échec HTTP
+            auditDetails.put("responseCode", e.getStatusCode().value());
+            auditDetails.put("deleted", false);
+            auditDetails.put("errorMessage", e.getResponseBodyAsString());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+
             log.error("API Request [{}] - Failed to delete company with ID: {}", requestId, companyId);
             return false;
         } catch (ResourceAccessException e) {
             // For connectivity issues
-            log.error("API Request [{}] - Connection error while deleting company with ID {}: {}",
-                    requestId, companyId, e.getMessage(), e);
+            log.error("API Request [{}] - Connection error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
+
+            // Audit échec connexion
+            auditDetails.put("deleted", false);
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Connection error: " + e.getMessage());
+
             return false;
         } catch (RestClientException e) {
             // Other REST client errors
-            log.error("API Request [{}] - REST client error while deleting company with ID {}: {}",
-                    requestId, companyId, e.getMessage(), e);
+            log.error("API Request [{}] - REST client error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
+
+            // Audit échec client
+            auditDetails.put("deleted", false);
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "REST client error: " + e.getMessage());
+
             return false;
         } catch (Exception e) {
             // Unexpected errors
-            log.error("API Request [{}] - Unexpected error while deleting company with ID {}: {}",
-                    requestId, companyId, e.getMessage(), e);
+            log.error("API Request [{}] - Unexpected error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
+
+            // Audit erreur inattendue
+            auditDetails.put("deleted", false);
+            auditDetails.put("errorMessage", e.getMessage());
+
+            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Unexpected error: " + e.getMessage());
+
             return false;
         }
     }

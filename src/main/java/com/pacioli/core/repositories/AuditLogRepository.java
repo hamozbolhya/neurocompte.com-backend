@@ -21,31 +21,29 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     // Recherche par cabinet
     Page<AuditLog> findByCabinetIdOrderByCreatedAtDesc(Long cabinetId, Pageable pageable);
 
-    // Recherche par dossier
-    Page<AuditLog> findByDossierIdOrderByCreatedAtDesc(Long dossierId, Pageable pageable);
-
     // Recherche par entité
     Page<AuditLog> findByEntityTypeAndEntityIdOrderByCreatedAtDesc(
             String entityType, String entityId, Pageable pageable);
 
-    // Recherche par type d'action
-    Page<AuditLog> findByActionOrderByCreatedAtDesc(String action, Pageable pageable);
-
-    // Recherche par période
-    Page<AuditLog> findByCreatedAtBetweenOrderByCreatedAtDesc(
-            LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
-
-    // Recherche combinée
-    @Query("SELECT a FROM AuditLog a WHERE " +
-            "(:userId IS NULL OR a.userId = :userId) AND " +
-            "(:cabinetId IS NULL OR a.cabinetId = :cabinetId) AND " +
-            "(:dossierId IS NULL OR a.dossierId = :dossierId) AND " +
-            "(:entityType IS NULL OR a.entityType = :entityType) AND " +
-            "(:action IS NULL OR a.action = :action) AND " +
-            "(:startDate IS NULL OR a.createdAt >= :startDate) AND " +
-            "(:endDate IS NULL OR a.createdAt <= :endDate) " +
-            "ORDER BY a.createdAt DESC")
-    Page<AuditLog> searchAuditLogs(
+    @Query(value = "SELECT * FROM audit_logs a WHERE " +
+            "(cast(:userId as uuid) IS NULL OR a.user_id = cast(:userId as uuid)) AND " +
+            "(cast(:cabinetId as bigint) IS NULL OR a.cabinet_id = cast(:cabinetId as bigint)) AND " +
+            "(cast(:dossierId as bigint) IS NULL OR a.dossier_id = cast(:dossierId as bigint)) AND " +
+            "(cast(:entityType as text) IS NULL OR a.entity_type = cast(:entityType as text)) AND " +
+            "(cast(:action as text) IS NULL OR a.action = cast(:action as text)) AND " +
+            "(cast(:startDate as timestamp) IS NULL OR a.created_at >= cast(:startDate as timestamp)) AND " +
+            "(cast(:endDate as timestamp) IS NULL OR a.created_at <= cast(:endDate as timestamp)) " +
+            "ORDER BY a.created_at DESC", // ← Supprimer le deuxième tri
+            countQuery = "SELECT count(*) FROM audit_logs a WHERE " +
+                    "(cast(:userId as uuid) IS NULL OR a.user_id = cast(:userId as uuid)) AND " +
+                    "(cast(:cabinetId as bigint) IS NULL OR a.cabinet_id = cast(:cabinetId as bigint)) AND " +
+                    "(cast(:dossierId as bigint) IS NULL OR a.dossier_id = cast(:dossierId as bigint)) AND " +
+                    "(cast(:entityType as text) IS NULL OR a.entity_type = cast(:entityType as text)) AND " +
+                    "(cast(:action as text) IS NULL OR a.action = cast(:action as text)) AND " +
+                    "(cast(:startDate as timestamp) IS NULL OR a.created_at >= cast(:startDate as timestamp)) AND " +
+                    "(cast(:endDate as timestamp) IS NULL OR a.created_at <= cast(:endDate as timestamp))",
+            nativeQuery = true)
+    Page<AuditLog> searchAuditLogsNative(
             @Param("userId") UUID userId,
             @Param("cabinetId") Long cabinetId,
             @Param("dossierId") Long dossierId,
@@ -55,19 +53,4 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
             @Param("endDate") LocalDateTime endDate,
             Pageable pageable);
 
-    // Statistiques par utilisateur
-    @Query("SELECT a.username, COUNT(a) as actionCount FROM AuditLog a " +
-            "WHERE a.createdAt BETWEEN :startDate AND :endDate " +
-            "GROUP BY a.username ORDER BY actionCount DESC")
-    List<Object[]> getUserActivityStats(
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate);
-
-    // Statistiques par type d'action
-    @Query("SELECT a.action, COUNT(a) FROM AuditLog a " +
-            "WHERE a.createdAt BETWEEN :startDate AND :endDate " +
-            "GROUP BY a.action ORDER BY COUNT(a) DESC")
-    List<Object[]> getActionTypeStats(
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate);
 }

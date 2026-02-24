@@ -13,6 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.UUID;
 
 @RestController
@@ -24,7 +25,7 @@ public class AuditController {
     private AuditLogRepository auditLogRepository;
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('PACIOLI')")
     public ResponseEntity<Page<AuditLog>> getAuditLogs(
             @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) Long cabinetId,
@@ -36,16 +37,25 @@ public class AuditController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        // Créer un Pageable SANS tri par défaut
+        Pageable pageable = PageRequest.of(page, size);
 
-        Page<AuditLog> logs = auditLogRepository.searchAuditLogs(
+        // Ajuster les dates
+        if (startDate != null) {
+            startDate = startDate.with(LocalTime.MIN);
+        }
+        if (endDate != null) {
+            endDate = endDate.with(LocalTime.MAX);
+        }
+
+        Page<AuditLog> logs = auditLogRepository.searchAuditLogsNative(
                 userId, cabinetId, dossierId, entityType, action, startDate, endDate, pageable);
 
         return ResponseEntity.ok(logs);
     }
 
     @GetMapping("/user/{userId}")
-    @PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.id")
+    @PreAuthorize("hasRole('PACIOLI')")
     public ResponseEntity<Page<AuditLog>> getUserLogs(
             @PathVariable UUID userId,
             @RequestParam(defaultValue = "0") int page,
@@ -56,7 +66,7 @@ public class AuditController {
     }
 
     @GetMapping("/cabinet/{cabinetId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('PACIOLI')")
     public ResponseEntity<Page<AuditLog>> getCabinetLogs(
             @PathVariable Long cabinetId,
             @RequestParam(defaultValue = "0") int page,
@@ -67,7 +77,7 @@ public class AuditController {
     }
 
     @GetMapping("/entity/{entityType}/{entityId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('PACIOLI')")
     public ResponseEntity<Page<AuditLog>> getEntityLogs(
             @PathVariable String entityType,
             @PathVariable String entityId,

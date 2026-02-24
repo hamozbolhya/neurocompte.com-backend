@@ -7,8 +7,10 @@ import com.pacioli.core.Exceptions.CompanyAiException;
 import com.pacioli.core.Exceptions.ExerciseDateConflictException;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.CompanyAiService;
 import com.pacioli.core.services.DossierService;
+import com.pacioli.core.services.UserService;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,10 +47,15 @@ public class DossierServiceImpl implements DossierService {
     @Autowired
     private UserRepository userRepository;
 
+    private final AuditService auditService;
+    private final UserService userService;
+
     @Autowired
-    public DossierServiceImpl(DossierRepository dossierRepository, CompanyAiService companyAiService) {
+    public DossierServiceImpl(DossierRepository dossierRepository, CompanyAiService companyAiService, AuditService auditService, UserService userService) {
         this.dossierRepository = dossierRepository;
         this.companyAiService = companyAiService;
+        this.auditService = auditService;
+        this.userService = userService;
     }
 
     @Override
@@ -57,23 +65,25 @@ public class DossierServiceImpl implements DossierService {
         log.info("[{}] Creating dossier: {} for cabinet: {}", requestId, dossier.getName(), dossier.getCabinet().getId());
 
         // ✅ FIX: Check if a dossier with the same name exists IN THE SAME CABINET
-        Dossier existingDossier = dossierRepository.findByNameAndCabinetId(
-                dossier.getName(),
-                dossier.getCabinet().getId()
-        ).orElse(null);
+        Dossier existingDossier = dossierRepository.findByNameAndCabinetId(dossier.getName(), dossier.getCabinet().getId()).orElse(null);
 
         // Store whether this is a new dossier or an update
         boolean isNewDossier = existingDossier == null;
 
         if (existingDossier != null) {
-            log.error("[{}] Dossier with name '{}' already exists in cabinet {} with ID: {}",
-                    requestId, dossier.getName(), dossier.getCabinet().getId(), existingDossier.getId());
+            log.error("[{}] Dossier with name '{}' already exists in cabinet {} with ID: {}", requestId, dossier.getName(), dossier.getCabinet().getId(), existingDossier.getId());
+
+            // Audit échec création
+            auditService.logFailure(userService.getCurrentUser(), "CREATE", "Dossier", null, dossier.getName(), "Un dossier avec le nom '" + dossier.getName() + "' existe déjà dans ce cabinet.");
+
             throw new IllegalArgumentException("Un dossier avec le nom '" + dossier.getName() + "' existe déjà dans ce cabinet.");
         }
 
         // If no Dossier with the same name exists in this cabinet, check the Cabinet exists
-        Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId())
-                .orElseThrow(() -> new RuntimeException("Cabinet non trouvé"));
+        Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId()).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "CREATE", "Dossier", null, dossier.getName(), "Cabinet non trouvé");
+            return new RuntimeException("Cabinet non trouvé");
+        });
         dossier.setCabinet(cabinet);
 
         // Set default decimal precision if not provided for new dossiers
@@ -84,8 +94,7 @@ public class DossierServiceImpl implements DossierService {
 
         // Save the new Dossier
         Dossier savedDossier = dossierRepository.save(dossier);
-        log.info("[{}] New dossier created with ID: {} and decimal precision: {}",
-                requestId, savedDossier.getId(), savedDossier.getDecimalPrecision());
+        log.info("[{}] New dossier created with ID: {} and decimal precision: {}", requestId, savedDossier.getId(), savedDossier.getDecimalPrecision());
 
         // Create the list of default journals for new dossiers
         createDefaultJournals(savedDossier);
@@ -94,11 +103,11 @@ public class DossierServiceImpl implements DossierService {
         if (exercicesData != null && !exercicesData.isEmpty()) {
             for (Exercise exercise : exercicesData) {
                 // Check if an Exercise with the same dates already exists for the Dossier
-                boolean exists = exerciseRepository.existsByDossierAndStartDateAndEndDate(
-                        savedDossier, exercise.getStartDate(), exercise.getEndDate()
-                );
+                boolean exists = exerciseRepository.existsByDossierAndStartDateAndEndDate(savedDossier, exercise.getStartDate(), exercise.getEndDate());
 
                 if (exists) {
+                    // Audit échec création exercice
+                    auditService.logFailure(userService.getCurrentUser(), "CREATE", "Exercise", savedDossier.getId(), savedDossier.getName(), "Le dossier a déjà des exercices à ces dates");
                     throw new ExerciseDateConflictException("Le dossier a déjà des exercices à ces dates");
                 }
 
@@ -125,12 +134,17 @@ public class DossierServiceImpl implements DossierService {
 
         } catch (Exception e) {
             // Log the error and trigger a transaction rollback
-            log.error("[{}] Error creating company in AI service for dossier ID {}: {}",
-                    requestId, savedDossier.getId(), e.getMessage(), e);
+            log.error("[{}] Error creating company in AI service for dossier ID {}: {}", requestId, savedDossier.getId(), e.getMessage(), e);
+
+            // Audit échec AI
+            auditService.logFailure(userService.getCurrentUser(), "CREATE", "Dossier", savedDossier.getId(), savedDossier.getName(), "Erreur lors de la création de la société dans le service AI: " + e.getMessage());
 
             // The @Transactional annotation will ensure rollback on RuntimeException
             throw new CompanyAiException("Erreur lors de la création de la société dans le service AI: " + e.getMessage(), e);
         }
+
+        // Audit succès création
+        auditService.logSuccess(userService.getCurrentUser(), "CREATE", "Dossier", savedDossier.getId(), savedDossier.getName(), null, Map.of("dossierName", savedDossier.getName(), "cabinetId", savedDossier.getCabinet().getId(), "country", countryCode, "activity", savedDossier.getActivity(), "exercisesCount", exercicesData != null ? exercicesData.size() : 0));
 
         return savedDossier;
     }
@@ -140,8 +154,12 @@ public class DossierServiceImpl implements DossierService {
     @Transactional
     public Dossier updateExercises(Long dossierId, List<Exercise> updatedExercises) {
         // Fetch the dossier by ID
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier non trouvé"));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Exercise", dossierId, "Dossier-" + dossierId, "Dossier non trouvé");
+            return new RuntimeException("Dossier non trouvé");
+        });
+
+        List<Exercise> savedExercises = new ArrayList<>();
 
         // Validate and update the exercises
         for (Exercise updatedExercise : updatedExercises) {
@@ -152,14 +170,29 @@ public class DossierServiceImpl implements DossierService {
             validateExerciseDateRange(dossier, updatedExercise, existingExercise);
 
             if (existingExercise != null) {
+                // Sauvegarder l'ancien état
+                Exercise oldExercise = new Exercise();
+                oldExercise.setId(existingExercise.getId());
+                oldExercise.setStartDate(existingExercise.getStartDate());
+                oldExercise.setEndDate(existingExercise.getEndDate());
+                oldExercise.setActive(existingExercise.isActive());
+
                 // Update existing exercise
                 existingExercise.setStartDate(updatedExercise.getStartDate());
                 existingExercise.setEndDate(updatedExercise.getEndDate());
-                exerciseRepository.save(existingExercise);
+                Exercise saved = exerciseRepository.save(existingExercise);
+                savedExercises.add(saved);
+
+                // Audit mise à jour exercice
+                auditService.logSuccess(userService.getCurrentUser(), "UPDATE", "Exercise", saved.getId(), "Exercise-" + saved.getId(), oldExercise, saved);
             } else {
                 // Create a new exercise
                 updatedExercise.setDossier(dossier);
-                exerciseRepository.save(updatedExercise);
+                Exercise saved = exerciseRepository.save(updatedExercise);
+                savedExercises.add(saved);
+
+                // Audit création exercice
+                auditService.logSuccess(userService.getCurrentUser(), "CREATE", "Exercise", saved.getId(), "Exercise-" + saved.getId(), null, saved);
             }
         }
 
@@ -169,8 +202,7 @@ public class DossierServiceImpl implements DossierService {
 
     private void validateExerciseDateRange(Dossier dossier, Exercise updatedExercise, Exercise existingExercise) {
         // Check for overlap with existing exercises
-        boolean overlapExists = exerciseRepository.existsByDossierAndStartDateAndEndDateOverlap(
-                dossier, updatedExercise.getStartDate(), updatedExercise.getEndDate(), updatedExercise.getId());
+        boolean overlapExists = exerciseRepository.existsByDossierAndStartDateAndEndDateOverlap(dossier, updatedExercise.getStartDate(), updatedExercise.getEndDate(), updatedExercise.getId());
 
         if (overlapExists) {
             throw new IllegalArgumentException("Les dates de l'exercice se chevauchent avec celles d'exercices existants");
@@ -181,8 +213,7 @@ public class DossierServiceImpl implements DossierService {
 
         // Check if any "écriture" falls outside the new date range
         for (Ecriture ecriture : ecritures) {
-            if (ecriture.getEntryDate().isBefore(updatedExercise.getStartDate()) ||
-                    ecriture.getEntryDate().isAfter(updatedExercise.getEndDate())) {
+            if (ecriture.getEntryDate().isBefore(updatedExercise.getStartDate()) || ecriture.getEntryDate().isAfter(updatedExercise.getEndDate())) {
                 throw new IllegalArgumentException("Impossible de modifier l'exercice car des écritures comptables existent en dehors des nouvelles dates proposées");
             }
         }
@@ -190,14 +221,12 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     public Dossier getDossierById(Long dossierId) {
-        return dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
+        return dossierRepository.findById(dossierId).orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
     }
 
     @Override
     public DossierDTO getTheDossierById(Long dossierId) {
-        return dossierRepository.findDossierById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
+        return dossierRepository.findDossierById(dossierId).orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
     }
 
     @Override
@@ -209,31 +238,42 @@ public class DossierServiceImpl implements DossierService {
     @Transactional
     public void deleteExercises(Long dossierId, List<Long> exerciseIds) {
         String requestId = UUID.randomUUID().toString();
-        log.info("[{}] Suppression des exercices pour le dossier ID: {}, Identifiants des exercices: {}",
-                requestId, dossierId, exerciseIds);
+        log.info("[{}] Suppression des exercices pour le dossier ID: {}, Identifiants des exercices: {}", requestId, dossierId, exerciseIds);
 
         // Vérifier que le dossier existe
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier non trouvé avec ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "DELETE", "Exercise", dossierId, "Dossier-" + dossierId, "Dossier non trouvé avec ID: " + dossierId);
+            return new RuntimeException("Dossier non trouvé avec ID: " + dossierId);
+        });
 
         // Récupérer les exercices à supprimer
         List<Exercise> exercisesToDelete = exerciseRepository.findAllById(exerciseIds);
         if (exercisesToDelete.isEmpty()) {
-            throw new IllegalArgumentException("Aucun exercice trouvé avec les identifiants fournis : " + exerciseIds);
+            String errorMessage = "Aucun exercice trouvé avec les identifiants fournis : " + exerciseIds;
+            auditService.logFailure(userService.getCurrentUser(), "DELETE", "Exercise", dossierId, dossier.getName(), errorMessage);
+            throw new IllegalArgumentException(errorMessage);
         }
 
         // Valider que tous les exercices appartiennent au dossier
         for (Exercise exercise : exercisesToDelete) {
             if (!exercise.getDossier().getId().equals(dossierId)) {
-                throw new IllegalArgumentException("L'exercice avec l'ID " + exercise.getId() + " n'appartient pas au dossier spécifié.");
+                String errorMessage = "L'exercice avec l'ID " + exercise.getId() + " n'appartient pas au dossier spécifié.";
+                auditService.logFailure(userService.getCurrentUser(), "DELETE", "Exercise", exercise.getId(), exercise.getStartDate() + " - " + exercise.getEndDate(), errorMessage);
+                throw new IllegalArgumentException(errorMessage);
             }
 
             // Récupérer les écritures pour l'exercice
             List<Ecriture> ecritures = ecritureRepository.findByDossierAndExerciseId(dossierId, exercise.getId());
             if (!ecritures.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Impossible de supprimer l'exercice avec l'ID " + exercise.getId() + " car des écritures comptables y sont associées.");
+                String errorMessage = "Impossible de supprimer l'exercice avec l'ID " + exercise.getId() + " car des écritures comptables y sont associées.";
+                auditService.logFailure(userService.getCurrentUser(), "DELETE", "Exercise", exercise.getId(), exercise.getStartDate() + " - " + exercise.getEndDate(), errorMessage);
+                throw new IllegalArgumentException(errorMessage);
             }
+        }
+
+        // Audit avant suppression
+        for (Exercise exercise : exercisesToDelete) {
+            auditService.logSuccess(userService.getCurrentUser(), "DELETE", "Exercise", exercise.getId(), exercise.getStartDate() + " - " + exercise.getEndDate(), exercise, null);
         }
 
         // Supprimer les exercices
@@ -248,12 +288,28 @@ public class DossierServiceImpl implements DossierService {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Updating dossier with ID: {}", requestId, id);
 
-        Dossier existingDossier = dossierRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + id));
+        Dossier existingDossier = dossierRepository.findById(id).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Dossier", id, "Dossier-" + id, "Dossier not found for ID: " + id);
+            return new RuntimeException("Dossier not found for ID: " + id);
+        });
 
         // Store original values for comparison
         String originalName = existingDossier.getName();
         Country originalCountry = existingDossier.getCountry();
+        Integer originalPrecision = existingDossier.getDecimalPrecision();
+
+        // Sauvegarder l'ancien état
+        Dossier oldDossier = new Dossier();
+        oldDossier.setId(existingDossier.getId());
+        oldDossier.setName(existingDossier.getName());
+        oldDossier.setICE(existingDossier.getICE());
+        oldDossier.setAddress(existingDossier.getAddress());
+        oldDossier.setCity(existingDossier.getCity());
+        oldDossier.setPhone(existingDossier.getPhone());
+        oldDossier.setEmail(existingDossier.getEmail());
+        oldDossier.setCountry(existingDossier.getCountry());
+        oldDossier.setActivity(existingDossier.getActivity());
+        oldDossier.setDecimalPrecision(existingDossier.getDecimalPrecision());
 
         // Update dossier fields
         if (dossierDetails.getName() != null) {
@@ -288,8 +344,7 @@ public class DossierServiceImpl implements DossierService {
 
         // Call Company AI API only if the name or country changed
         boolean nameChanged = dossierDetails.getName() != null && !dossierDetails.getName().equals(originalName);
-        boolean countryChanged = dossierDetails.getCountry() != null &&
-                (originalCountry == null || !dossierDetails.getCountry().getCode().equals(originalCountry.getCode()));
+        boolean countryChanged = dossierDetails.getCountry() != null && (originalCountry == null || !dossierDetails.getCountry().getCode().equals(originalCountry.getCode()));
 
         if (nameChanged || countryChanged) {
             try {
@@ -307,12 +362,17 @@ public class DossierServiceImpl implements DossierService {
                 log.info("[{}] Company updated successfully in AI service with ID: {}", requestId, updatedCompany.getId());
             } catch (Exception e) {
                 // Log the error but don't fail the transaction
-                log.error("[{}] Error updating company in AI service for dossier ID {}: {}",
-                        requestId, savedDossier.getId(), e.getMessage(), e);
+                log.error("[{}] Error updating company in AI service for dossier ID {}: {}", requestId, savedDossier.getId(), e.getMessage(), e);
+
+                // Audit échec AI mais on continue
+                auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Dossier", savedDossier.getId(), savedDossier.getName(), "AI update failed: " + e.getMessage());
             }
         } else {
             log.info("[{}] No need to update company in AI service (no name or country change)", requestId);
         }
+
+        // Audit succès mise à jour
+        auditService.logSuccess(userService.getCurrentUser(), "UPDATE", "Dossier", savedDossier.getId(), savedDossier.getName(), oldDossier, savedDossier);
 
         return convertToDTO(savedDossier);
     }
@@ -324,8 +384,13 @@ public class DossierServiceImpl implements DossierService {
         log.info("[{}] Deleting dossier with ID: {}", requestId, dossierId);
 
         // Verify that the dossier exists
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "DELETE", "Dossier", dossierId, "Dossier-" + dossierId, "Dossier not found for ID: " + dossierId);
+            return new RuntimeException("Dossier not found for ID: " + dossierId);
+        });
+
+        // Audit avant suppression
+        auditService.logSuccess(userService.getCurrentUser(), "DELETE", "Dossier", dossierId, dossier.getName(), dossier, null);
 
         // Additional business logic for dossier deletion could go here
         // For example, checking if it's safe to delete the dossier
@@ -342,8 +407,10 @@ public class DossierServiceImpl implements DossierService {
             }
         } catch (Exception e) {
             // Log the error but continue with the deletion
-            log.error("[{}] Error deleting company from AI service for dossier ID {}: {}",
-                    requestId, dossierId, e.getMessage(), e);
+            log.error("[{}] Error deleting company from AI service for dossier ID {}: {}", requestId, dossierId, e.getMessage(), e);
+
+            // Audit échec AI
+            auditService.logFailure(userService.getCurrentUser(), "DELETE", "Dossier", dossierId, dossier.getName(), "AI deletion failed: " + e.getMessage());
         }
 
         // Now delete the dossier from our system
@@ -358,9 +425,12 @@ public class DossierServiceImpl implements DossierService {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Updating activity for dossier ID: {} to: {}", requestId, dossierId, activity);
 
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier not found for ID: " + dossierId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
+            auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Dossier", dossierId, "Dossier-" + dossierId, "Dossier not found for ID: " + dossierId);
+            return new RuntimeException("Dossier not found for ID: " + dossierId);
+        });
 
+        String oldActivity = dossier.getActivity();
         dossier.setActivity(activity);
         Dossier savedDossier = dossierRepository.save(dossier);
         log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
@@ -378,7 +448,13 @@ public class DossierServiceImpl implements DossierService {
         } catch (Exception ex) {
             log.warn("[{}] Failed to update AI service for dossier ID: {}: {}", requestId, dossierId, ex.getMessage());
             // Continue gracefully – do not block DB update due to AI service failure
+
+            // Audit échec AI
+            auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Dossier", dossierId, dossier.getName(), "AI update failed: " + ex.getMessage());
         }
+
+        // Audit mise à jour activité
+        auditService.logSuccess(userService.getCurrentUser(), "UPDATE", "Dossier", dossierId, dossier.getName(), Map.of("oldActivity", oldActivity), Map.of("newActivity", activity));
 
         // Return the updated DTO
         return getTheDossierById(dossierId);
@@ -390,8 +466,7 @@ public class DossierServiceImpl implements DossierService {
     public DossierDTO getDossierForUser(Long dossierId, UUID userId) {
         log.info("User {} accessing dossier {}", userId, dossierId);
 
-        Dossier dossier = dossierRepository.findByIdAndCabinetUsersId(dossierId, userId)
-                .orElseThrow(() -> new SecurityException("Dossier not found or access denied"));
+        Dossier dossier = dossierRepository.findByIdAndCabinetUsersId(dossierId, userId).orElseThrow(() -> new SecurityException("Dossier not found or access denied"));
 
         return convertToDTO(dossier); // Reuse your existing conversion logic
     }
@@ -400,8 +475,7 @@ public class DossierServiceImpl implements DossierService {
     public DossierDTO getDossierForPacioli(Long dossierId) {
         log.info("PACIOLI user accessing dossier {}", dossierId);
 
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new RuntimeException("Dossier not found"));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new RuntimeException("Dossier not found"));
 
         return convertToDTO(dossier);
     }
@@ -491,19 +565,10 @@ public class DossierServiceImpl implements DossierService {
     }
 
     private void createDefaultJournals(Dossier dossier) {
-        List<Journal> defaultJournals = List.of(
-                new Journal("HA", "Achats", dossier.getCabinet(), dossier),
-                new Journal("VE", "Ventes", dossier.getCabinet(), dossier),
-                new Journal("BQ", "Banque", dossier.getCabinet(), dossier),
-                new Journal("CA", "Caisse", dossier.getCabinet(), dossier),
-                new Journal("PA", "Paie", dossier.getCabinet(), dossier),
-                new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier)
-        );
+        List<Journal> defaultJournals = List.of(new Journal("HA", "Achats", dossier.getCabinet(), dossier), new Journal("VE", "Ventes", dossier.getCabinet(), dossier), new Journal("BQ", "Banque", dossier.getCabinet(), dossier), new Journal("CA", "Caisse", dossier.getCabinet(), dossier), new Journal("PA", "Paie", dossier.getCabinet(), dossier), new Journal("OD", "Opérations Diverses", dossier.getCabinet(), dossier));
 
         // Filter out journals that already exist for this dossier
-        List<Journal> journalsToCreate = defaultJournals.stream()
-                .filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId()))
-                .toList();
+        List<Journal> journalsToCreate = defaultJournals.stream().filter(journal -> !journalRepository.existsByNameAndDossierId(journal.getName(), dossier.getId())).toList();
 
         // Save only new journals
         if (!journalsToCreate.isEmpty()) {
@@ -528,6 +593,9 @@ public class DossierServiceImpl implements DossierService {
                 updateSingleCompanyInAi(dossier);
                 successCount++;
 
+                // Audit succès batch update
+                auditService.logSuccess(userService.getCurrentUser(), "BATCH_UPDATE", "Dossier", dossier.getId(), dossier.getName(), null, Map.of("status", "AI update success"));
+
                 if (successCount % 10 == 0) {
                     log.info("Progress: {} companies updated successfully", successCount);
                 }
@@ -537,6 +605,9 @@ public class DossierServiceImpl implements DossierService {
                 failedIds.add(dossier.getId());
                 log.error("Failed to update company for dossier ID {}: {}", dossier.getId(), e.getMessage());
 
+                // Audit échec batch update
+                auditService.logFailure(userService.getCurrentUser(), "BATCH_UPDATE", "Dossier", dossier.getId(), dossier.getName(), "AI update failed: " + e.getMessage());
+
                 // Ajouter un délai entre les erreurs pour éviter la surcharge
                 try {
                     Thread.sleep(100);
@@ -545,7 +616,7 @@ public class DossierServiceImpl implements DossierService {
                 }
             }
 
-            // Petit délai entre les appais pour ne pas surcharger l'API AI
+            // Petit délai entre les appels pour ne pas surcharger l'API AI
             try {
                 Thread.sleep(50);
             } catch (InterruptedException e) {
@@ -557,6 +628,9 @@ public class DossierServiceImpl implements DossierService {
         if (!failedIds.isEmpty()) {
             log.warn("Failed dossier IDs: {}", failedIds);
         }
+
+        // Audit final du batch
+        auditService.logSuccess(userService.getCurrentUser(), "BATCH_UPDATE", "Dossier", null, "Batch AI Update", null, Map.of("total", allDossiers.size(), "success", successCount, "failed", failedCount, "failedIds", failedIds));
 
         return successCount;
     }

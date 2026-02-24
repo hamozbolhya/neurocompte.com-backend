@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.UUID;
 
 public interface UserService {
+    User getCurrentUser();
+
     UserInfo createUser(UserInfo userInfo);
 
     UserInfo assignRolesToUser(String userId, List<String> roleIds);

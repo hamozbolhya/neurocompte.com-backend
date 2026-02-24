@@ -1,7 +1,9 @@
 package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.config.HistoireAiProperties;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.HistoireService;
+import com.pacioli.core.services.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -19,7 +21,9 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -29,6 +33,8 @@ public class HistoireServiceImpl implements HistoireService {
 
     private final RestTemplate restTemplate;
     private final HistoireAiProperties histoireAiProperties;
+    private final AuditService auditService;
+    private final UserService userService;
 
     private static final List<String> VALID_EXTENSIONS = Arrays.asList(".xlsx", ".csv");
     private static final List<String> VALID_MIME_TYPES = Arrays.asList(
@@ -47,6 +53,12 @@ public class HistoireServiceImpl implements HistoireService {
     public String uploadHistoriqueFile(String dossierId, MultipartFile file, String fileType) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Starting AI file upload for dossier: {} with file type: {}", requestId, dossierId, fileType);
+
+        Map<String, Object> fileDetails = new HashMap<>();
+        fileDetails.put("dossierId", dossierId);
+        fileDetails.put("fileType", fileType);
+        fileDetails.put("fileName", file.getOriginalFilename());
+        fileDetails.put("fileSize", file.getSize());
 
         try {
             validateFile(file);
@@ -73,6 +85,9 @@ public class HistoireServiceImpl implements HistoireService {
             String finalUrl = baseUrl + "/" + dossierId + "%2F" + fileName;
             log.info("[{}] Final AI URL: {}, filename: {}", requestId, finalUrl, fileName);
 
+            fileDetails.put("aiUrl", finalUrl);
+            fileDetails.put("aiFilename", fileName);
+
             // Setup connection
             URL url = new URL(finalUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -89,6 +104,8 @@ public class HistoireServiceImpl implements HistoireService {
             int responseCode = conn.getResponseCode();
             log.info("[{}] AI response code: {}", requestId, responseCode);
 
+            fileDetails.put("responseCode", responseCode);
+
             StringBuilder response = new StringBuilder();
             try (BufferedReader br = new BufferedReader(new InputStreamReader(
                     responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()))) {
@@ -98,16 +115,67 @@ public class HistoireServiceImpl implements HistoireService {
                 }
             }
 
+            fileDetails.put("responseMessage", response.toString());
+
             if (responseCode == 200) {
                 log.info("[{}] Upload success: {}", requestId, response);
+
+                // Audit: Succès envoi à l'IA
+                auditService.logSuccess(
+                        userService.getCurrentUser(),
+                        "AI_UPLOAD",
+                        "Histoire",
+                        dossierId,
+                        "Dossier-" + dossierId,
+                        null,
+                        fileDetails
+                );
+
                 return "Le fichier a été transféré à l'IA avec succès !";
             } else {
                 log.error("[{}] AI error: {} - {}", requestId, responseCode, response);
+
+                // Audit: Échec envoi à l'IA
+                auditService.logFailure(
+                        userService.getCurrentUser(),
+                        "AI_UPLOAD",
+                        "Histoire",
+                        dossierId,
+                        "Dossier-" + dossierId,
+                        "AI error: " + responseCode + " - " + response.toString()
+                );
+
                 throw new RuntimeException("Erreur lors de l'envoi à l'IA: " + response.toString());
             }
 
+        } catch (IllegalArgumentException e) {
+            log.error("[{}] Validation failure: {}", requestId, e.getMessage());
+
+            // Audit: Échec validation
+            auditService.logFailure(
+                    userService.getCurrentUser(),
+                    "AI_UPLOAD",
+                    "Histoire",
+                    dossierId,
+                    "Dossier-" + dossierId,
+                    "Validation error: " + e.getMessage()
+            );
+
+            throw e;
+
         } catch (Exception e) {
             log.error("[{}] Upload failure: {}", requestId, e.getMessage(), e);
+
+            // Audit: Échec inattendu
+            auditService.logFailure(
+                    userService.getCurrentUser(),
+                    "AI_UPLOAD",
+                    "Histoire",
+                    dossierId,
+                    "Dossier-" + dossierId,
+                    "Unexpected error: " + e.getMessage()
+            );
+
             throw new RuntimeException("Erreur inattendue pendant l'envoi: " + e.getMessage());
         }
     }

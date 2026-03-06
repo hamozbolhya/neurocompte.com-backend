@@ -569,10 +569,6 @@ public class EcritureServiceImpl implements EcritureService {
     @Override
     public List<EcritureExportDTO> exportEcritures(Long dossierId, Long exerciseId, Long journalId, LocalDate startDate, LocalDate endDate) {
         List<EcritureExportDTO> exports = ecritureRepository.findEcrituresByFilters(dossierId, exerciseId, journalId, startDate, endDate);
-
-        // Audit
-        auditService.logSuccess(userService.getCurrentUser(), "EXPORT", "Ecriture", dossierId, "Dossier-" + dossierId, Map.of("exerciseId", exerciseId, "journalId", journalId, "startDate", startDate, "endDate", endDate, "exportCount", exports.size()), null);
-
         return exports;
     }
 }

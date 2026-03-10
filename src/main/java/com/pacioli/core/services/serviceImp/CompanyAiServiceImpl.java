@@ -29,10 +29,28 @@ public class CompanyAiServiceImpl implements CompanyAiService {
     private final AuditService auditService;
     private final UserService userService;
 
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible
+    // Note: Pour CompanyAiService, le cabinet cible n'est pas directement accessible
+    // On pourrait l'ajouter comme paramètre si nécessaire, ou le récupérer via le companyId
+    private Long getTargetCabinetId(Long companyId) {
+        // Si vous avez un moyen de récupérer le cabinet à partir du companyId
+        // Par exemple via un repository, vous pouvez l'implémenter ici
+        // Pour l'instant, on retourne null
+        return null;
+    }
+
+    private String getTargetCabinetName(Long companyId) {
+        return null;
+    }
+
     @Override
     public Company createCompany(Company company) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Creating company: {}", requestId, company);
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(company.getId());
+        String targetCabinetName = getTargetCabinetName(company.getId());
 
         Map<String, Object> auditDetails = new HashMap<>();
         auditDetails.put("companyId", company.getId());
@@ -67,22 +85,41 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             if (statusCode.is2xxSuccessful()) {
                 log.info("API Request [{}] - Company created successfully with ID: {}", requestId, responseBody != null ? responseBody.getId() : "unknown");
 
-                // Audit succès
+                // Audit succès avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("duration", duration);
                 auditDetails.put("responseCompanyId", responseBody != null ? responseBody.getId() : null);
 
-                auditService.logSuccess(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), null, auditDetails);
+                auditService.logSuccessWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_CREATE",
+                        "Company",
+                        company.getId(),
+                        company.getName(),
+                        null,
+                        auditDetails,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 return responseBody;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
 
-                // Audit échec
+                // Audit échec avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
 
-                auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Failed to create company: " + statusCode);
+                auditService.logFailureWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_CREATE",
+                        "Company",
+                        company.getId(),
+                        company.getName(),
+                        "Failed to create company: " + statusCode,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 throw new RuntimeException("Failed to create company: " + statusCode);
             }
@@ -90,41 +127,77 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
 
-            // Audit échec HTTP
+            // Audit échec HTTP avec cabinet cible
             auditDetails.put("responseCode", e.getStatusCode().value());
             auditDetails.put("errorMessage", e.getResponseBodyAsString());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_CREATE",
+                    "Company",
+                    company.getId(),
+                    company.getName(),
+                    "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Error - Failed to create company: " + e.getStatusCode() + ", Response: " + e.getResponseBodyAsString(), e);
         } catch (ResourceAccessException e) {
             // For connectivity issues
             log.error("API Request [{}] - Connection error: {}", requestId, e.getMessage(), e);
 
-            // Audit échec connexion
+            // Audit échec connexion avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Connection error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_CREATE",
+                    "Company",
+                    company.getId(),
+                    company.getName(),
+                    "Connection error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Connectivity Error - Failed to create company: " + e.getMessage(), e);
         } catch (RestClientException e) {
             // Other REST client errors
             log.error("API Request [{}] - REST client error: {}", requestId, e.getMessage(), e);
 
-            // Audit échec client
+            // Audit échec client avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "REST client error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_CREATE",
+                    "Company",
+                    company.getId(),
+                    company.getName(),
+                    "REST client error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Client Error - Failed to create company: " + e.getMessage(), e);
         } catch (Exception e) {
             // Unexpected errors
             log.error("API Request [{}] - Unexpected error: {}", requestId, e.getMessage(), e);
 
-            // Audit erreur inattendue
+            // Audit erreur inattendue avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_CREATE", "Company", company.getId(), company.getName(), "Unexpected error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_CREATE",
+                    "Company",
+                    company.getId(),
+                    company.getName(),
+                    "Unexpected error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("Unexpected error creating company: " + e.getMessage(), e);
         }
@@ -134,6 +207,10 @@ public class CompanyAiServiceImpl implements CompanyAiService {
     public Company updateCompany(Long companyId, Company company) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Updating company with ID: {}, Company data: {}", requestId, companyId, company);
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(companyId);
+        String targetCabinetName = getTargetCabinetName(companyId);
 
         Map<String, Object> auditDetails = new HashMap<>();
         auditDetails.put("companyId", companyId);
@@ -168,22 +245,41 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             if (statusCode.is2xxSuccessful()) {
                 log.info("API Request [{}] - Company updated successfully with ID: {}", requestId, responseBody != null ? responseBody.getId() : "unknown");
 
-                // Audit succès
+                // Audit succès avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("duration", duration);
                 auditDetails.put("responseCompanyId", responseBody != null ? responseBody.getId() : null);
 
-                auditService.logSuccess(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), null, auditDetails);
+                auditService.logSuccessWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_UPDATE",
+                        "Company",
+                        companyId,
+                        company.getName(),
+                        null,
+                        auditDetails,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 return responseBody;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
 
-                // Audit échec
+                // Audit échec avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
 
-                auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Failed to update company: " + statusCode);
+                auditService.logFailureWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_UPDATE",
+                        "Company",
+                        companyId,
+                        company.getName(),
+                        "Failed to update company: " + statusCode,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 throw new RuntimeException("Failed to update company: " + statusCode);
             }
@@ -191,41 +287,77 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
 
-            // Audit échec HTTP
+            // Audit échec HTTP avec cabinet cible
             auditDetails.put("responseCode", e.getStatusCode().value());
             auditDetails.put("errorMessage", e.getResponseBodyAsString());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPDATE",
+                    "Company",
+                    companyId,
+                    company.getName(),
+                    "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Error - Failed to update company: " + e.getStatusCode() + ", Response: " + e.getResponseBodyAsString(), e);
         } catch (ResourceAccessException e) {
             // For connectivity issues
             log.error("API Request [{}] - Connection error: {}", requestId, e.getMessage(), e);
 
-            // Audit échec connexion
+            // Audit échec connexion avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Connection error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPDATE",
+                    "Company",
+                    companyId,
+                    company.getName(),
+                    "Connection error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Connectivity Error - Failed to update company: " + e.getMessage(), e);
         } catch (RestClientException e) {
             // Other REST client errors
             log.error("API Request [{}] - REST client error: {}", requestId, e.getMessage(), e);
 
-            // Audit échec client
+            // Audit échec client avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "REST client error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPDATE",
+                    "Company",
+                    companyId,
+                    company.getName(),
+                    "REST client error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("API Client Error - Failed to update company: " + e.getMessage(), e);
         } catch (Exception e) {
             // Unexpected errors
             log.error("API Request [{}] - Unexpected error: {}", requestId, e.getMessage(), e);
 
-            // Audit erreur inattendue
+            // Audit erreur inattendue avec cabinet cible
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_UPDATE", "Company", companyId, company.getName(), "Unexpected error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPDATE",
+                    "Company",
+                    companyId,
+                    company.getName(),
+                    "Unexpected error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             throw new RuntimeException("Unexpected error updating company: " + e.getMessage(), e);
         }
@@ -235,6 +367,10 @@ public class CompanyAiServiceImpl implements CompanyAiService {
     public boolean deleteCompany(Long companyId) {
         String requestId = UUID.randomUUID().toString();
         log.info("API Request [{}] - Deleting company with ID: {}", requestId, companyId);
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(companyId);
+        String targetCabinetName = getTargetCabinetName(companyId);
 
         Map<String, Object> auditDetails = new HashMap<>();
         auditDetails.put("companyId", companyId);
@@ -263,23 +399,42 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             if (statusCode.is2xxSuccessful()) {
                 log.info("API Request [{}] - Company with ID {} deleted successfully", requestId, companyId);
 
-                // Audit succès
+                // Audit succès avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("duration", duration);
                 auditDetails.put("deleted", true);
 
-                auditService.logSuccess(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, null, auditDetails);
+                auditService.logSuccessWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_DELETE",
+                        "Company",
+                        companyId,
+                        "Company-" + companyId,
+                        null,
+                        auditDetails,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 return true;
             } else {
                 log.error("API Request [{}] - Non-success status code: {}", requestId, statusCode);
 
-                // Audit échec
+                // Audit échec avec cabinet cible
                 auditDetails.put("responseCode", statusCode.value());
                 auditDetails.put("deleted", false);
                 auditDetails.put("errorMessage", "Non-success status code: " + statusCode);
 
-                auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Failed to delete company: " + statusCode);
+                auditService.logFailureWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_DELETE",
+                        "Company",
+                        companyId,
+                        "Company-" + companyId,
+                        "Failed to delete company: " + statusCode,
+                        targetCabinetId,
+                        targetCabinetName
+                );
 
                 return false;
             }
@@ -287,12 +442,21 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             // For HTTP error status codes (4xx, 5xx)
             logHttpError(requestId, e);
 
-            // Audit échec HTTP
+            // Audit échec HTTP avec cabinet cible
             auditDetails.put("responseCode", e.getStatusCode().value());
             auditDetails.put("deleted", false);
             auditDetails.put("errorMessage", e.getResponseBodyAsString());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_DELETE",
+                    "Company",
+                    companyId,
+                    "Company-" + companyId,
+                    "API Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             log.error("API Request [{}] - Failed to delete company with ID: {}", requestId, companyId);
             return false;
@@ -300,33 +464,60 @@ public class CompanyAiServiceImpl implements CompanyAiService {
             // For connectivity issues
             log.error("API Request [{}] - Connection error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
 
-            // Audit échec connexion
+            // Audit échec connexion avec cabinet cible
             auditDetails.put("deleted", false);
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Connection error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_DELETE",
+                    "Company",
+                    companyId,
+                    "Company-" + companyId,
+                    "Connection error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             return false;
         } catch (RestClientException e) {
             // Other REST client errors
             log.error("API Request [{}] - REST client error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
 
-            // Audit échec client
+            // Audit échec client avec cabinet cible
             auditDetails.put("deleted", false);
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "REST client error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_DELETE",
+                    "Company",
+                    companyId,
+                    "Company-" + companyId,
+                    "REST client error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             return false;
         } catch (Exception e) {
             // Unexpected errors
             log.error("API Request [{}] - Unexpected error while deleting company with ID {}: {}", requestId, companyId, e.getMessage(), e);
 
-            // Audit erreur inattendue
+            // Audit erreur inattendue avec cabinet cible
             auditDetails.put("deleted", false);
             auditDetails.put("errorMessage", e.getMessage());
 
-            auditService.logFailure(userService.getCurrentUser(), "AI_DELETE", "Company", companyId, "Company-" + companyId, "Unexpected error: " + e.getMessage());
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_DELETE",
+                    "Company",
+                    companyId,
+                    "Company-" + companyId,
+                    "Unexpected error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             return false;
         }

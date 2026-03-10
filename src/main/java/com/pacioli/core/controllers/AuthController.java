@@ -9,6 +9,7 @@ import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.AuditService;
 import com.pacioli.core.utils.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
@@ -33,6 +34,7 @@ public class AuthController {
     private JwtUtil jwtUtil;
 
     @Autowired
+    @Lazy
     private AuditService auditService;
 
     @PostMapping("/login")

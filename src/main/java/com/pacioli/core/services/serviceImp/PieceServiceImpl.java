@@ -51,19 +51,7 @@ public class PieceServiceImpl implements PieceService {
     private final UserService userService;
 
 
-    public PieceServiceImpl(PieceRepository pieceRepository,
-                            PieceDTOMapper pieceDTOMapper,
-                            DossierRepository dossierRepository,
-                            SimpMessagingTemplate messagingTemplate,
-                            FileService fileService,
-                            AIService aiService,
-                            PieceProcessingService pieceProcessingService,
-                            ObjectMapper objectMapper,
-                            EcritureRepository ecritureRepository,
-                            LineRepository lineRepository,
-                            DuplicateDetectionService duplicateDetectionService,
-                            AuditService auditService,
-                            UserService userService) {
+    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService) {
         this.pieceRepository = pieceRepository;
         this.pieceDTOMapper = pieceDTOMapper;
         this.dossierRepository = dossierRepository;
@@ -91,8 +79,11 @@ public class PieceServiceImpl implements PieceService {
             String formattedFilename = fileResult.getFilename();
             MultipartFile fileToProcess = fileResult.getFileToProcess();
 
-            Dossier dossier = dossierRepository.findById(dossierId)
-                    .orElseThrow(() -> new IllegalArgumentException("Dossier introuvable pour l'ID: " + dossierId));
+            Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier introuvable pour l'ID: " + dossierId));
+
+            // Récupérer le cabinet cible (celui du dossier)
+            Long targetCabinetId = dossier.getCabinet() != null ? dossier.getCabinet().getId() : null;
+            String targetCabinetName = dossier.getCabinet() != null ? dossier.getCabinet().getName() : null;
 
             // Initialize piece with the actual saved filename
             initializePiece(piece, dossier, formattedFilename);
@@ -103,16 +94,8 @@ public class PieceServiceImpl implements PieceService {
             // Save and return
             Piece savedPiece = pieceRepository.save(piece);
 
-            // Audit: Création de pièce
-            auditService.logSuccess(
-                    currentUser,
-                    "CREATE",
-                    "Piece",
-                    savedPiece.getId(),
-                    savedPiece.getOriginalFileName() != null ? savedPiece.getOriginalFileName() : savedPiece.getFilename(),
-                    null,
-                    savedPiece
-            );
+            // Audit: Création de pièce avec cabinet cible
+            auditService.logSuccessWithTargetCabinet(currentUser, "CREATE", "Piece", savedPiece.getId(), savedPiece.getOriginalFileName() != null ? savedPiece.getOriginalFileName() : savedPiece.getFilename(), null, savedPiece, targetCabinetId, targetCabinetName);
 
             log.info("✅ Piece saved with ID: {}", savedPiece.getId());
 
@@ -120,32 +103,16 @@ public class PieceServiceImpl implements PieceService {
 
         } catch (IOException e) {
             // Audit: Échec création - erreur IO
-            auditService.logFailure(
-                    currentUser,
-                    "CREATE",
-                    "Piece",
-                    null,
-                    file != null ? file.getOriginalFilename() : "unknown",
-                    "IO Error: " + e.getMessage()
-            );
+            auditService.logFailure(currentUser, "CREATE", "Piece", null, file != null ? file.getOriginalFilename() : "unknown", "IO Error: " + e.getMessage());
             log.error("Validation/processing error: {}", e.getMessage());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         } catch (Exception e) {
             // Audit: Échec création - erreur interne
-            auditService.logFailure(
-                    currentUser,
-                    "CREATE",
-                    "Piece",
-                    null,
-                    file != null ? file.getOriginalFilename() : "unknown",
-                    "Internal Error: " + e.getMessage()
-            );
+            auditService.logFailure(currentUser, "CREATE", "Piece", null, file != null ? file.getOriginalFilename() : "unknown", "Internal Error: " + e.getMessage());
             log.error("Unexpected internal error:", e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Erreur interne lors de l'enregistrement de la pièce.", e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne lors de l'enregistrement de la pièce.", e);
         }
     }
-
 
 
     @Override
@@ -153,10 +120,12 @@ public class PieceServiceImpl implements PieceService {
     public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData, JsonNode originalAiResponse) {
         User currentUser = userService.getCurrentUser();
 
-        Dossier dossier = dossierRepository.findById(dossierId)
-                .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
-        Piece piece = pieceRepository.findById(pieceId)
-                .orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
+        Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
+        Piece piece = pieceRepository.findById(pieceId).orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
+
+        // Récupérer le cabinet cible (celui du dossier)
+        Long targetCabinetId = dossier.getCabinet() != null ? dossier.getCabinet().getId() : null;
+        String targetCabinetName = dossier.getCabinet() != null ? dossier.getCabinet().getName() : null;
 
         try {
             // ** Step 1: Save FactureData first **
@@ -173,8 +142,7 @@ public class PieceServiceImpl implements PieceService {
                 Optional<Piece> comprehensiveDuplicate = duplicateDetectionService.performComprehensiveDuplicateCheck(piece);
 
                 if (comprehensiveDuplicate.isPresent()) {
-                    log.warn("🚫 Comprehensive duplicate detected, marking piece {} as duplicate of piece {}",
-                            piece.getId(), comprehensiveDuplicate.get().getId());
+                    log.warn("🚫 Comprehensive duplicate detected, marking piece {} as duplicate of piece {}", piece.getId(), comprehensiveDuplicate.get().getId());
 
                     if (piece.getEcritures() != null) {
                         piece.getEcritures().clear();
@@ -191,19 +159,8 @@ public class PieceServiceImpl implements PieceService {
 
                     duplicateDetectionService.markAsDuplicate(piece, comprehensiveDuplicate.get());
 
-                    // Audit: Détection de doublon
-                    auditService.logSuccess(
-                            currentUser,
-                            "DUPLICATE_DETECTED",
-                            "Piece",
-                            piece.getId(),
-                            piece.getOriginalFileName(),
-                            null,
-                            Map.of(
-                                    "originalPieceId", comprehensiveDuplicate.get().getId(),
-                                    "originalPieceName", comprehensiveDuplicate.get().getOriginalFileName()
-                            )
-                    );
+                    // Audit: Détection de doublon avec cabinet cible
+                    auditService.logSuccessWithTargetCabinet(currentUser, "DUPLICATE_DETECTED", "Piece", piece.getId(), piece.getOriginalFileName(), null, Map.of("originalPieceId", comprehensiveDuplicate.get().getId(), "originalPieceName", comprehensiveDuplicate.get().getOriginalFileName()), targetCabinetId, targetCabinetName);
 
                     log.info("⏭️ Marked piece {} as DUPLICATE of piece {}", piece.getId(), comprehensiveDuplicate.get().getId());
                     notifyPiecesUpdate(dossierId);
@@ -215,19 +172,25 @@ public class PieceServiceImpl implements PieceService {
             piece.setStatus(PieceStatus.PROCESSED);
             piece.setIsDuplicate(false); // Ensure it's not marked as duplicate
             piece = pieceRepository.save(piece);
+
+            // Audit: Traitement réussi avec cabinet cible
+            auditService.logSuccessWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(), null, Map.of("status", piece.getStatus(), "amount", piece.getAmount()), targetCabinetId, targetCabinetName);
+
             log.info("✅ Piece {} successfully processed with amount: {}", piece.getId(), piece.getAmount());
 
         } catch (Exception e) {
             log.error("💥 Error in saveEcrituresAndFacture for piece {}: {}", piece.getId(), e.getMessage(), e);
             piece.setStatus(PieceStatus.REJECTED);
             pieceRepository.save(piece);
+
+            // Audit: Échec traitement avec cabinet cible
+            auditService.logFailureWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(), "Processing Error: " + e.getMessage(), targetCabinetId, targetCabinetName);
         } finally {
             notifyPiecesUpdate(dossierId);
         }
 
         return piece;
     }
-
 
     private void ensurePieceAmountIsSet(Piece piece, String pieceData, Dossier dossier, JsonNode originalAiResponse) {
         // If amount is already set, keep it
@@ -278,8 +241,7 @@ public class PieceServiceImpl implements PieceService {
                 Double amountToConvert = piece.getAiAmount() != null ? piece.getAiAmount() : calculatedAmount;
                 Double convertedAmount = amountToConvert * piece.getExchangeRate();
                 piece.setAmount(convertedAmount);
-                log.info("💰 Set converted amount: {} (Original: {} × Rate: {})",
-                        convertedAmount, amountToConvert, piece.getExchangeRate());
+                log.info("💰 Set converted amount: {} (Original: {} × Rate: {})", convertedAmount, amountToConvert, piece.getExchangeRate());
             } else {
                 // No conversion, use calculated amount directly
                 piece.setAmount(calculatedAmount);
@@ -344,12 +306,7 @@ public class PieceServiceImpl implements PieceService {
     private Double calculateAmountFromEcritures(String pieceData, Dossier dossier, JsonNode originalAiResponse) {
         try {
             List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
-            return ecritures.stream()
-                    .flatMap(e -> e.getLines().stream())
-                    .mapToDouble(line -> Math.max(line.getDebit() != null ? line.getDebit() : 0.0,
-                            line.getCredit() != null ? line.getCredit() : 0.0))
-                    .max()
-                    .orElse(0.0);
+            return ecritures.stream().flatMap(e -> e.getLines().stream()).mapToDouble(line -> Math.max(line.getDebit() != null ? line.getDebit() : 0.0, line.getCredit() != null ? line.getCredit() : 0.0)).max().orElse(0.0);
         } catch (Exception e) {
             log.warn("Error calculating amount from ecritures: {}", e.getMessage());
             return null;
@@ -360,9 +317,7 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Page<PieceDTO> getPiecesForUser(UUID userId, Pageable pageable) {
         Page<Piece> piecesPage = pieceRepository.findByDossierCabinetUsersId(userId, pageable);
-        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream()
-                .map(pieceDTOMapper::toBasicDTO)
-                .collect(Collectors.toList());
+        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
         return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
     }
 
@@ -372,9 +327,7 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Page<PieceDTO> getPiecesByDossier(Long dossierId, Pageable pageable) {
         Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
-        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream()
-                .map(pieceDTOMapper::toBasicDTO)
-                .collect(Collectors.toList());
+        List<PieceDTO> pieceDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
         return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
     }
 
@@ -388,10 +341,9 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     public Piece getPieceById(Long id) {
-        return pieceRepository.findById(id)
-                .orElseThrow(() -> {
-                    return new IllegalArgumentException("Piece with id " + id + " not found");
-                });
+        return pieceRepository.findById(id).orElseThrow(() -> {
+            return new IllegalArgumentException("Piece with id " + id + " not found");
+        });
     }
 
     @Override
@@ -413,16 +365,12 @@ public class PieceServiceImpl implements PieceService {
             Piece piece = getPieceById(id);
             String pieceName = piece.getOriginalFileName() != null ? piece.getOriginalFileName() : piece.getFilename();
 
-            // Audit: Suppression de pièce (avant suppression)
-            auditService.logSuccess(
-                    currentUser,
-                    "DELETE",
-                    "Piece",
-                    id,
-                    pieceName,
-                    piece,
-                    null
-            );
+            // Récupérer le cabinet cible (celui du dossier de la pièce)
+            Long targetCabinetId = piece.getDossier() != null && piece.getDossier().getCabinet() != null ? piece.getDossier().getCabinet().getId() : null;
+            String targetCabinetName = piece.getDossier() != null && piece.getDossier().getCabinet() != null ? piece.getDossier().getCabinet().getName() : null;
+
+            // Audit: Suppression de pièce avec cabinet cible (avant suppression)
+            auditService.logSuccessWithTargetCabinet(currentUser, "DELETE", "Piece", id, pieceName, piece, null, targetCabinetId, targetCabinetName);
 
             pieceRepository.deleteById(id);
 
@@ -430,14 +378,7 @@ public class PieceServiceImpl implements PieceService {
 
         } catch (Exception e) {
             // Audit: Échec suppression
-            auditService.logFailure(
-                    currentUser,
-                    "DELETE",
-                    "Piece",
-                    id,
-                    "Piece-" + id,
-                    e.getMessage()
-            );
+            auditService.logFailure(currentUser, "DELETE", "Piece", id, "Piece-" + id, e.getMessage());
             throw e;
         }
     }
@@ -461,38 +402,28 @@ public class PieceServiceImpl implements PieceService {
 
         Piece piece = getPieceById(pieceId);
 
+        // Récupérer le cabinet cible (celui du dossier de la pièce)
+        Long targetCabinetId = piece.getDossier() != null && piece.getDossier().getCabinet() != null ? piece.getDossier().getCabinet().getId() : null;
+        String targetCabinetName = piece.getDossier() != null && piece.getDossier().getCabinet() != null ? piece.getDossier().getCabinet().getName() : null;
+
         // ✅ FIXED CONDITION: Allow if isDuplicate = true OR status = DUPLICATE
         if (!Boolean.TRUE.equals(piece.getIsDuplicate()) && piece.getStatus() != PieceStatus.DUPLICATE) {
             String errorMessage = "Seules les pièces dupliquées peuvent être forcées à être considérées comme non dupliquées.";
 
-            // Audit: Échec force - condition non remplie
-            auditService.logFailure(
-                    currentUser,
-                    "FORCE_NOT_DUPLICATE",
-                    "Piece",
-                    pieceId,
-                    piece.getOriginalFileName(),
-                    errorMessage
-            );
+            // Audit: Échec force avec cabinet cible
+            auditService.logFailureWithTargetCabinet(currentUser, "FORCE_NOT_DUPLICATE", "Piece", pieceId, piece.getOriginalFileName(), errorMessage, targetCabinetId, targetCabinetName);
 
             throw new IllegalStateException(errorMessage);
         }
 
         Piece forcedPiece = pieceProcessingService.forcePieceAsNotDuplicate(piece);
 
-        // Audit: Force pièce non dupliquée
-        auditService.logSuccess(
-                currentUser,
-                "FORCE_NOT_DUPLICATE",
-                "Piece",
-                pieceId,
-                piece.getOriginalFileName(),
-                Map.of("wasDuplicate", true, "wasStatus", piece.getStatus()),
-                Map.of("isDuplicate", false, "newStatus", forcedPiece.getStatus())
-        );
+        // Audit: Force pièce non dupliquée avec cabinet cible
+        auditService.logSuccessWithTargetCabinet(currentUser, "FORCE_NOT_DUPLICATE", "Piece", pieceId, piece.getOriginalFileName(), Map.of("wasDuplicate", true, "wasStatus", piece.getStatus()), Map.of("isDuplicate", false, "newStatus", forcedPiece.getStatus()), targetCabinetId, targetCabinetName);
 
         return forcedPiece;
     }
+
 
     @Override
     @Transactional
@@ -530,20 +461,18 @@ public class PieceServiceImpl implements PieceService {
             Pageable pageable = org.springframework.data.domain.PageRequest.of(DEFAULT_PAGE, DEFAULT_PAGE_SIZE);
             Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
 
-            List<PieceDTO> basicDTOs = piecesPage.getContent().stream()
-                    .map(pieceDTOMapper::toBasicDTO)
-                    .collect(Collectors.toList());
+            List<PieceDTO> basicDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
 
             messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, basicDTOs);
 
-            log.info("✅ Successfully notified WebSocket for dossier {} with {} basic pieces",
-                    dossierId, basicDTOs.size());
+            log.info("✅ Successfully notified WebSocket for dossier {} with {} basic pieces", dossierId, basicDTOs.size());
 
         } catch (Exception e) {
             log.error("💥 Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage(), e);
             sendWebSocketError(dossierId, e);
         }
     }
+
     // Private helper methods
     private Piece deserializePiece(String pieceData, Long dossierId) {
         try {
@@ -566,26 +495,24 @@ public class PieceServiceImpl implements PieceService {
     }
 
     private PieceStatsDTO createEmptyStats(Long dossierId) {
-        return dossierRepository.findById(dossierId)
-                .map(dossier -> {
-                    PieceStatsDTO stats = new PieceStatsDTO();
-                    stats.setDossierId(dossier.getId());
-                    stats.setDossierName(dossier.getName());
-                    stats.setTotalCount(0L);
-                    stats.setUploadedCount(0L);
-                    stats.setProcessedCount(0L);
-                    stats.setRejectedCount(0L);
-                    stats.setProcessingCount(0L);
+        return dossierRepository.findById(dossierId).map(dossier -> {
+            PieceStatsDTO stats = new PieceStatsDTO();
+            stats.setDossierId(dossier.getId());
+            stats.setDossierName(dossier.getName());
+            stats.setTotalCount(0L);
+            stats.setUploadedCount(0L);
+            stats.setProcessedCount(0L);
+            stats.setRejectedCount(0L);
+            stats.setProcessingCount(0L);
 
-                    if (dossier.getCountry() != null) {
-                        stats.setCountryCode(dossier.getCountry().getCode());
-                        if (dossier.getCountry().getCurrency() != null) {
-                            stats.setDossierCurrency(dossier.getCountry().getCurrency().getCode());
-                        }
-                    }
-                    return stats;
-                })
-                .orElse(new PieceStatsDTO());
+            if (dossier.getCountry() != null) {
+                stats.setCountryCode(dossier.getCountry().getCode());
+                if (dossier.getCountry().getCurrency() != null) {
+                    stats.setDossierCurrency(dossier.getCountry().getCurrency().getCode());
+                }
+            }
+            return stats;
+        }).orElse(new PieceStatsDTO());
     }
 
     private void sendWebSocketError(Long dossierId, Exception e) {

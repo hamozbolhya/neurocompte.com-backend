@@ -25,6 +25,9 @@ public class AuditService {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
+    @Autowired
+    private UserService userService;
+
     private final ObjectMapper objectMapper;
 
     public AuditService() {
@@ -34,27 +37,153 @@ public class AuditService {
     }
 
     /**
-     * Enregistre une action dans les logs d'audit
+     * Enregistre une action dans les logs d'audit - Version simplifiée (utilise le cabinet de l'utilisateur)
      */
-    private void logAction(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, String status, String errorMessage) {
+    public void logSuccess(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue) {
+        logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, null);
+    }
+
+    /**
+     * Enregistre une action dans les logs d'audit - Version avec cabinet cible explicite
+     *
+     * @param targetCabinetId Le cabinet sur lequel l'action est effectuée (important pour le super admin en mode support)
+     */
+    public void logSuccessWithTargetCabinet(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, Long targetCabinetId, String targetCabinetName) {
+        logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
+    }
+
+    /**
+     * Méthode simplifiée pour les actions en échec
+     */
+    public void logFailure(User user, String action, String entityType, Object entityId, String entityName, String errorMessage) {
+        logAction(user, action, entityType, entityId, entityName, null, null, "FAILURE", errorMessage, null);
+    }
+
+
+    /**
+     * Version avec cabinet cible pour les actions en échec
+     */
+    /**
+     * Version simplifiée avec cabinet cible pour les actions en échec
+     */
+    public void logFailureWithTargetCabinet(User user, String action, String entityType, Object entityId, String entityName, String errorMessage, Long targetCabinetId, String targetCabinetName) {
         try {
             AuditLog auditLog = new AuditLog();
 
-            // IMPORTANT: Gérer le cas où l'utilisateur est null
+            // Informations de l'utilisateur
+            if (user != null) {
+                auditLog.setUserId(user.getId());
+                auditLog.setUsername(user.getUsername());
+                if (user.getCabinet() != null) {
+                    auditLog.setUserCabinetId(user.getCabinet().getId());
+                    auditLog.setUserCabinetName(user.getCabinet().getName());
+                }
+            } else {
+                auditLog.setUserId(UUID.fromString("00000000-0000-0000-0000-000000000000"));
+                auditLog.setUsername("anonymous");
+            }
+
+            // Cabinet cible
+            if (targetCabinetId != null) {
+                auditLog.setTargetCabinetId(targetCabinetId);
+                auditLog.setTargetCabinetName(targetCabinetName);
+            }
+
+            // Action et entité
+            auditLog.setAction(action);
+            auditLog.setEntityType(entityType);
+            auditLog.setEntityId(entityId != null ? entityId.toString() : null);
+            auditLog.setEntityName(entityName);
+
+            // Informations HTTP
+            HttpServletRequest request = getCurrentHttpRequest();
+            if (request != null) {
+                auditLog.setIpAddress(getClientIp(request));
+                auditLog.setUserAgent(request.getHeader("User-Agent"));
+                auditLog.setRequestUrl(request.getRequestURI());
+                auditLog.setHttpMethod(request.getMethod());
+            }
+
+            // Statut et erreur
+            auditLog.setStatus("FAILURE");
+            auditLog.setErrorMessage(errorMessage);
+            auditLog.setActionDate(LocalDateTime.now());
+
+            auditLogRepository.save(auditLog);
+
+        } catch (Exception e) {
+            log.error("Erreur lors de l'enregistrement du log d'audit", e);
+        }
+    }
+
+    /**
+     * Méthode pour les actions de consultation
+     */
+    public void logView(User user, String entityType, Object entityId, String entityName) {
+        logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, null);
+    }
+
+    /**
+     * Méthode pour les actions de consultation avec cabinet cible
+     */
+    public void logViewWithTargetCabinet(User user, String entityType, Object entityId, String entityName, Long targetCabinetId, String targetCabinetName) {
+        logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
+    }
+
+    /**
+     * Classe interne pour transporter les informations du cabinet cible
+     */
+    private static class TargetCabinet {
+        Long id;
+        String name;
+
+        TargetCabinet(Long id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+    }
+
+    /**
+     * Méthode principale enrichie avec le concept de cabinet cible
+     */
+    private void logAction(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, String status, String errorMessage, TargetCabinet targetCabinet) {
+        try {
+            AuditLog auditLog = new AuditLog();
+
+            // Informations de l'utilisateur qui exécute l'action
             if (user != null) {
                 auditLog.setUserId(user.getId());
                 auditLog.setUsername(user.getUsername());
 
+                // ✅ Toujours enregistrer le cabinet de l'utilisateur (son cabinet d'attache)
                 if (user.getCabinet() != null) {
-                    auditLog.setCabinetId(user.getCabinet().getId());
-                    auditLog.setCabinetName(user.getCabinet().getName());
+                    auditLog.setUserCabinetId(user.getCabinet().getId());
+                    auditLog.setUserCabinetName(user.getCabinet().getName());
                 }
             } else {
-                // Utilisateur anonyme ou non authentifié
-                // Utiliser un ID par défaut ou rendre le champ nullable
-                // Option 1: Utiliser un UUID spécial pour les utilisateurs anonymes
                 auditLog.setUserId(UUID.fromString("00000000-0000-0000-0000-000000000000"));
                 auditLog.setUsername("anonymous");
+            }
+
+            // ✅ Informations du cabinet cible de l'action (peut être différent du cabinet de l'utilisateur)
+            if (targetCabinet != null && targetCabinet.id != null) {
+                auditLog.setTargetCabinetId(targetCabinet.id);
+                auditLog.setTargetCabinetName(targetCabinet.name);
+            } else {
+                // Par défaut, si pas de cabinet cible spécifié, utiliser le cabinet de l'utilisateur
+                if (user != null && user.getCabinet() != null) {
+                    auditLog.setTargetCabinetId(user.getCabinet().getId());
+                    auditLog.setTargetCabinetName(user.getCabinet().getName());
+                }
+            }
+
+            // Informations sur le dossier si disponible (contexte supplémentaire)
+            if (entityType.equals("Dossier") && entityId != null) {
+                auditLog.setDossierId(Long.valueOf(entityId.toString()));
+                auditLog.setDossierName(entityName);
+            } else if (entityType.equals("Piece") || entityType.equals("Ecriture") || entityType.equals("Line") || entityType.equals("Journal") || entityType.equals("Exercise") || entityType.equals("Account")) {
+                // Pour les entités liées à un dossier, on pourrait essayer de récupérer le dossierId
+                // Mais cela nécessiterait des appels supplémentaires - à implémenter si nécessaire
             }
 
             // Action et entité
@@ -95,27 +224,6 @@ public class AuditService {
         } catch (Exception e) {
             log.error("Erreur lors de l'enregistrement du log d'audit", e);
         }
-    }
-
-    /**
-     * Méthode simplifiée pour les actions réussies
-     */
-    public void logSuccess(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue) {
-        logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null);
-    }
-
-    /**
-     * Méthode simplifiée pour les actions en échec
-     */
-    public void logFailure(User user, String action, String entityType, Object entityId, String entityName, String errorMessage) {
-        logAction(user, action, entityType, entityId, entityName, null, null, "FAILURE", errorMessage);
-    }
-
-    /**
-     * Méthode pour les actions de consultation
-     */
-    public void logView(User user, String entityType, Object entityId, String entityName) {
-        logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null);
     }
 
     /**

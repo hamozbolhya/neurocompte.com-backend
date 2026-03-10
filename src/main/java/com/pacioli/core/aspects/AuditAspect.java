@@ -8,6 +8,7 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;  // ← AJOUTER CET IMPORT
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +19,7 @@ import java.lang.reflect.Method;
 public class AuditAspect {
 
     @Autowired
+    @Lazy  // ← AJOUTER CETTE ANNOTATION
     private AuditService auditService;
 
     @Around("@annotation(com.pacioli.core.annotations.Auditable)")

@@ -17,70 +17,78 @@ public class AuditLog {
     private Long id;
 
     @Column(name = "user_id", nullable = false)
-    private UUID userId;  // L'utilisateur qui a effectué l'action
+    private UUID userId;
 
     @Column(name = "username", nullable = false)
-    private String username;  // Nom d'utilisateur pour faciliter la recherche
+    private String username;
 
-    @Column(name = "action", nullable = false, length = 50)
-    private String action;  // CREATE, UPDATE, DELETE, VIEW, LOGIN, LOGOUT, etc.
+    // ✅ Cabinet de l'utilisateur (son cabinet d'attache)
+    @Column(name = "user_cabinet_id")
+    private Long userCabinetId;
 
-    @Column(name = "entity_type", nullable = false, length = 100)
-    private String entityType;  // Dossier, Piece, Ecriture, User, Cabinet, etc.
+    @Column(name = "user_cabinet_name")
+    private String userCabinetName;
 
-    @Column(name = "entity_id", length = 255)
-    private String entityId;  // ID de l'entité (peut être Long, UUID, etc.)
+    // ✅ Cabinet cible de l'action (celui sur lequel on agit)
+    @Column(name = "target_cabinet_id")
+    private Long targetCabinetId;
 
-    @Column(name = "entity_name")
-    private String entityName;  // Nom/libellé de l'entité pour faciliter l'identification
+    @Column(name = "target_cabinet_name")
+    private String targetCabinetName;
 
-    @Column(name = "cabinet_id")
-    private Long cabinetId;  // Pour filtrer par cabinet
-
-    @Column(name = "cabinet_name")
-    private String cabinetName;  // Nom du cabinet
-
+    // Informations sur le dossier (contexte supplémentaire)
     @Column(name = "dossier_id")
-    private Long dossierId;  // Pour filtrer par dossier
+    private Long dossierId;
 
     @Column(name = "dossier_name")
-    private String dossierName;  // Nom du dossier
+    private String dossierName;
+
+    @Column(name = "action", nullable = false, length = 50)
+    private String action;
+
+    @Column(name = "entity_type", nullable = false, length = 100)
+    private String entityType;
+
+    @Column(name = "entity_id", length = 255)
+    private String entityId;
+
+    @Column(name = "entity_name")
+    private String entityName;
 
     @Column(name = "old_value", columnDefinition = "TEXT")
-    private String oldValue;  // Ancienne valeur (au format JSON)
+    private String oldValue;
 
     @Column(name = "new_value", columnDefinition = "TEXT")
-    private String newValue;  // Nouvelle valeur (au format JSON)
+    private String newValue;
 
     @Column(name = "changes", columnDefinition = "TEXT")
-    private String changes;  // Résumé des changements (format JSON)
+    private String changes;
 
     @Column(name = "ip_address", length = 45)
-    private String ipAddress;  // Adresse IP du client
+    private String ipAddress;
 
     @Column(name = "user_agent", length = 500)
-    private String userAgent;  // User-Agent du navigateur
+    private String userAgent;
 
     @Column(name = "request_url", length = 500)
-    private String requestUrl;  // URL de la requête
+    private String requestUrl;
 
     @Column(name = "http_method", length = 10)
-    private String httpMethod;  // GET, POST, PUT, DELETE, etc.
+    private String httpMethod;
 
     @Column(name = "execution_time_ms")
-    private Long executionTime;  // Temps d'exécution en millisecondes
+    private Long executionTime;
 
     @Column(name = "status", length = 20)
-    private String status;  // SUCCESS, FAILURE
+    private String status;
 
     @Column(name = "error_message", columnDefinition = "TEXT")
-    private String errorMessage;  // Message d'erreur en cas d'échec
+    private String errorMessage;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;  // Date de l'action
+    private LocalDateTime createdAt;
 
-    // Index pour améliorer les performances des recherches
     @Column(name = "action_date", nullable = false)
     private LocalDateTime actionDate;
 }

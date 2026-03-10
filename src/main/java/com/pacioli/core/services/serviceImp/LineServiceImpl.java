@@ -21,19 +21,46 @@ public class LineServiceImpl implements LineService {
         this.userService = userService;
     }
 
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible
+    private Long getTargetCabinetId(Line line) {
+        if (line != null && line.getEcriture() != null &&
+                line.getEcriture().getPiece() != null &&
+                line.getEcriture().getPiece().getDossier() != null &&
+                line.getEcriture().getPiece().getDossier().getCabinet() != null) {
+            return line.getEcriture().getPiece().getDossier().getCabinet().getId();
+        }
+        return null;
+    }
+
+    // ✅ Méthode utilitaire pour récupérer le nom du cabinet cible
+    private String getTargetCabinetName(Line line) {
+        if (line != null && line.getEcriture() != null &&
+                line.getEcriture().getPiece() != null &&
+                line.getEcriture().getPiece().getDossier() != null &&
+                line.getEcriture().getPiece().getDossier().getCabinet() != null) {
+            return line.getEcriture().getPiece().getDossier().getCabinet().getName();
+        }
+        return null;
+    }
+
     @Override
     public Line addLine(Line line) {
         Line savedLine = lineRepository.save(line);
 
-        // Audit
-        auditService.logSuccess(
+        // ✅ Audit avec cabinet cible
+        Long targetCabinetId = getTargetCabinetId(savedLine);
+        String targetCabinetName = getTargetCabinetName(savedLine);
+
+        auditService.logSuccessWithTargetCabinet(
                 userService.getCurrentUser(),
                 "CREATE",
                 "Line",
                 savedLine.getId(),
                 "Line-" + savedLine.getId(),
                 null,
-                savedLine
+                savedLine,
+                targetCabinetId,
+                targetCabinetName
         );
 
         return savedLine;
@@ -58,20 +85,25 @@ public class LineServiceImpl implements LineService {
 
             Line savedLine = lineRepository.save(existingLine);
 
-            // Audit
-            auditService.logSuccess(
+            // ✅ Audit avec cabinet cible
+            Long targetCabinetId = getTargetCabinetId(savedLine);
+            String targetCabinetName = getTargetCabinetName(savedLine);
+
+            auditService.logSuccessWithTargetCabinet(
                     userService.getCurrentUser(),
                     "UPDATE",
                     "Line",
                     id,
                     "Line-" + id,
                     oldLine,
-                    savedLine
+                    savedLine,
+                    targetCabinetId,
+                    targetCabinetName
             );
 
             return savedLine;
         }).orElseThrow(() -> {
-            // Audit échec
+            // Audit échec (pas de cabinet cible car ligne non trouvée)
             auditService.logFailure(
                     userService.getCurrentUser(),
                     "UPDATE",
@@ -89,15 +121,20 @@ public class LineServiceImpl implements LineService {
         Line line = lineRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Line not found with ID: " + id));
 
-        // Audit avant suppression
-        auditService.logSuccess(
+        // ✅ Audit avant suppression avec cabinet cible
+        Long targetCabinetId = getTargetCabinetId(line);
+        String targetCabinetName = getTargetCabinetName(line);
+
+        auditService.logSuccessWithTargetCabinet(
                 userService.getCurrentUser(),
                 "DELETE",
                 "Line",
                 id,
                 "Line-" + id,
                 line,
-                null
+                null,
+                targetCabinetId,
+                targetCabinetName
         );
 
         lineRepository.deleteById(id);

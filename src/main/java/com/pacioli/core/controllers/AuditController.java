@@ -28,7 +28,8 @@ public class AuditController {
     @PreAuthorize("hasRole('PACIOLI')")
     public ResponseEntity<Page<AuditLog>> getAuditLogs(
             @RequestParam(required = false) UUID userId,
-            @RequestParam(required = false) Long cabinetId,
+            @RequestParam(required = false) Long userCabinetId,
+            @RequestParam(required = false) Long targetCabinetId,
             @RequestParam(required = false) Long dossierId,
             @RequestParam(required = false) String entityType,
             @RequestParam(required = false) String action,
@@ -37,10 +38,10 @@ public class AuditController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        // Créer un Pageable SANS tri par défaut
+        // ✅ Créer un Pageable SANS tri (le tri est déjà dans la requête native)
         Pageable pageable = PageRequest.of(page, size);
 
-        // Ajuster les dates
+        // Ajuster les dates pour inclure toute la journée
         if (startDate != null) {
             startDate = startDate.with(LocalTime.MIN);
         }
@@ -49,7 +50,8 @@ public class AuditController {
         }
 
         Page<AuditLog> logs = auditLogRepository.searchAuditLogsNative(
-                userId, cabinetId, dossierId, entityType, action, startDate, endDate, pageable);
+                userId, userCabinetId, targetCabinetId, dossierId, entityType, action,
+                startDate, endDate, pageable);
 
         return ResponseEntity.ok(logs);
     }
@@ -65,15 +67,28 @@ public class AuditController {
         return ResponseEntity.ok(auditLogRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable));
     }
 
-    @GetMapping("/cabinet/{cabinetId}")
+    // ✅ VERSION CORRIGÉE - Pour les logs par cabinet utilisateur
+    @GetMapping("/user-cabinet/{userCabinetId}")
     @PreAuthorize("hasRole('PACIOLI')")
-    public ResponseEntity<Page<AuditLog>> getCabinetLogs(
-            @PathVariable Long cabinetId,
+    public ResponseEntity<Page<AuditLog>> getUserCabinetLogs(
+            @PathVariable Long userCabinetId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return ResponseEntity.ok(auditLogRepository.findByCabinetIdOrderByCreatedAtDesc(cabinetId, pageable));
+        return ResponseEntity.ok(auditLogRepository.findByUserCabinetIdOrderByCreatedAtDesc(userCabinetId, pageable));
+    }
+
+    // ✅ VERSION CORRIGÉE - Pour les logs par cabinet cible
+    @GetMapping("/target-cabinet/{targetCabinetId}")
+    @PreAuthorize("hasRole('PACIOLI')")
+    public ResponseEntity<Page<AuditLog>> getTargetCabinetLogs(
+            @PathVariable Long targetCabinetId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return ResponseEntity.ok(auditLogRepository.findByTargetCabinetIdOrderByCreatedAtDesc(targetCabinetId, pageable));
     }
 
     @GetMapping("/entity/{entityType}/{entityId}")

@@ -8,6 +8,7 @@ import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ public class AccountCreationService {
     private AccountRepository accountRepository;
 
     @Autowired
+    @Lazy
     private AuditService auditService;
 
     @Autowired

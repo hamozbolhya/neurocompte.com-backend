@@ -23,7 +23,22 @@ public class AccountServiceImpl implements AccountService {
         this.userService = userService;
     }
 
-    // ✅ GET - PAS D'AUDIT (comme demandé)
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible à partir d'un compte
+    private Long getTargetCabinetId(Account account) {
+        if (account != null && account.getDossier() != null && account.getDossier().getCabinet() != null) {
+            return account.getDossier().getCabinet().getId();
+        }
+        return null;
+    }
+
+    private String getTargetCabinetName(Account account) {
+        if (account != null && account.getDossier() != null && account.getDossier().getCabinet() != null) {
+            return account.getDossier().getCabinet().getName();
+        }
+        return null;
+    }
+
+    // ✅ GET - PAS D'AUDIT (inchangé)
     @Override
     public List<Account> getAllAccounts() {
         return accountRepository.findAll();
@@ -32,7 +47,8 @@ public class AccountServiceImpl implements AccountService {
     // ✅ GET - PAS D'AUDIT
     @Override
     public Account findById(Long id) {
-        return accountRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Account not found with ID: " + id));
+        return accountRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found with ID: " + id));
     }
 
     // ✅ GET - PAS D'AUDIT
@@ -47,8 +63,22 @@ public class AccountServiceImpl implements AccountService {
     public Account createAccount(Account account) {
         Account savedAccount = accountRepository.save(account);
 
-        // Audit succès création
-        auditService.logSuccess(userService.getCurrentUser(), "CREATE", "Account", savedAccount.getId(), savedAccount.getAccount() + " - " + savedAccount.getLabel(), null, savedAccount);
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(savedAccount);
+        String targetCabinetName = getTargetCabinetName(savedAccount);
+
+        // Audit succès création avec cabinet cible
+        auditService.logSuccessWithTargetCabinet(
+                userService.getCurrentUser(),
+                "CREATE",
+                "Account",
+                savedAccount.getId(),
+                savedAccount.getAccount() + " - " + savedAccount.getLabel(),
+                null,
+                savedAccount,
+                targetCabinetId,
+                targetCabinetName
+        );
 
         return savedAccount;
     }
@@ -75,13 +105,34 @@ public class AccountServiceImpl implements AccountService {
 
             Account savedAccount = accountRepository.save(existingAccount);
 
-            // Audit succès mise à jour
-            auditService.logSuccess(userService.getCurrentUser(), "UPDATE", "Account", id, savedAccount.getAccount() + " - " + savedAccount.getLabel(), oldAccount, savedAccount);
+            // ✅ Récupérer le cabinet cible
+            Long targetCabinetId = getTargetCabinetId(savedAccount);
+            String targetCabinetName = getTargetCabinetName(savedAccount);
+
+            // Audit succès mise à jour avec cabinet cible
+            auditService.logSuccessWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Account",
+                    id,
+                    savedAccount.getAccount() + " - " + savedAccount.getLabel(),
+                    oldAccount,
+                    savedAccount,
+                    targetCabinetId,
+                    targetCabinetName
+            );
 
             return savedAccount;
         }).orElseThrow(() -> {
-            // Audit échec mise à jour
-            auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Account", id, "Account-" + id, "Account not found with ID: " + id);
+            // Audit échec mise à jour (pas de cabinet cible car compte non trouvé)
+            auditService.logFailure(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Account",
+                    id,
+                    "Account-" + id,
+                    "Account not found with ID: " + id
+            );
             return new RuntimeException("Account not found with ID: " + id);
         });
     }
@@ -94,7 +145,14 @@ public class AccountServiceImpl implements AccountService {
         for (Long id : ids) {
             if (!accountRepository.existsById(id)) {
                 // Audit échec suppression
-                auditService.logFailure(userService.getCurrentUser(), "DELETE", "Account", id, "Account-" + id, "Account not found with ID: " + id);
+                auditService.logFailure(
+                        userService.getCurrentUser(),
+                        "DELETE",
+                        "Account",
+                        id,
+                        "Account-" + id,
+                        "Account not found with ID: " + id
+                );
                 throw new RuntimeException("Account not found with ID: " + id);
             }
         }
@@ -102,9 +160,22 @@ public class AccountServiceImpl implements AccountService {
         // Récupérer les comptes pour les détails d'audit avant suppression
         List<Account> accountsToDelete = accountRepository.findAllById(ids);
 
-        // Audit avant suppression pour chaque compte
+        // Audit avant suppression pour chaque compte avec cabinet cible
         for (Account account : accountsToDelete) {
-            auditService.logSuccess(userService.getCurrentUser(), "DELETE", "Account", account.getId(), account.getAccount() + " - " + account.getLabel(), account, null);
+            Long targetCabinetId = getTargetCabinetId(account);
+            String targetCabinetName = getTargetCabinetName(account);
+
+            auditService.logSuccessWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "DELETE",
+                    "Account",
+                    account.getId(),
+                    account.getAccount() + " - " + account.getLabel(),
+                    account,
+                    null,
+                    targetCabinetId,
+                    targetCabinetName
+            );
         }
 
         accountRepository.deleteAllById(ids);
@@ -113,7 +184,8 @@ public class AccountServiceImpl implements AccountService {
     // ✅ GET - PAS D'AUDIT
     @Override
     public Account findAccountById(Long id) {
-        return accountRepository.findById(id).orElseThrow(() -> new RuntimeException("Account not found with ID: " + id));
+        return accountRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Account not found with ID: " + id));
     }
 
     // ✅ GET - PAS D'AUDIT

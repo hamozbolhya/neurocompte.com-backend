@@ -49,6 +49,19 @@ public class HistoireServiceImpl implements HistoireService {
 
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible (à partir du dossier)
+    private Long getTargetCabinetId(String dossierId) {
+        // Ici, vous devriez récupérer le cabinet à partir du dossierId
+        // Si vous avez un service pour ça, vous pouvez l'injecter
+        // Pour l'instant, on retourne null si on ne peut pas le déterminer
+        return null;
+    }
+
+    // ✅ Méthode utilitaire pour récupérer le nom du cabinet cible
+    private String getTargetCabinetName(String dossierId) {
+        return null;
+    }
+
     @Override
     public String uploadHistoriqueFile(String dossierId, MultipartFile file, String fileType) {
         String requestId = UUID.randomUUID().toString();
@@ -59,6 +72,10 @@ public class HistoireServiceImpl implements HistoireService {
         fileDetails.put("fileType", fileType);
         fileDetails.put("fileName", file.getOriginalFilename());
         fileDetails.put("fileSize", file.getSize());
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(dossierId);
+        String targetCabinetName = getTargetCabinetName(dossierId);
 
         try {
             validateFile(file);
@@ -120,29 +137,33 @@ public class HistoireServiceImpl implements HistoireService {
             if (responseCode == 200) {
                 log.info("[{}] Upload success: {}", requestId, response);
 
-                // Audit: Succès envoi à l'IA
-                auditService.logSuccess(
+                // ✅ Audit avec cabinet cible
+                auditService.logSuccessWithTargetCabinet(
                         userService.getCurrentUser(),
                         "AI_UPLOAD",
                         "Histoire",
                         dossierId,
                         "Dossier-" + dossierId,
                         null,
-                        fileDetails
+                        fileDetails,
+                        targetCabinetId,
+                        targetCabinetName
                 );
 
                 return "Le fichier a été transféré à l'IA avec succès !";
             } else {
                 log.error("[{}] AI error: {} - {}", requestId, responseCode, response);
 
-                // Audit: Échec envoi à l'IA
-                auditService.logFailure(
+                // ✅ Audit d'échec avec cabinet cible
+                auditService.logFailureWithTargetCabinet(
                         userService.getCurrentUser(),
                         "AI_UPLOAD",
                         "Histoire",
                         dossierId,
                         "Dossier-" + dossierId,
-                        "AI error: " + responseCode + " - " + response.toString()
+                        "AI error: " + responseCode + " - " + response.toString(),
+                        targetCabinetId,
+                        targetCabinetName
                 );
 
                 throw new RuntimeException("Erreur lors de l'envoi à l'IA: " + response.toString());
@@ -151,14 +172,16 @@ public class HistoireServiceImpl implements HistoireService {
         } catch (IllegalArgumentException e) {
             log.error("[{}] Validation failure: {}", requestId, e.getMessage());
 
-            // Audit: Échec validation
-            auditService.logFailure(
+            // ✅ Audit d'échec de validation avec cabinet cible
+            auditService.logFailureWithTargetCabinet(
                     userService.getCurrentUser(),
                     "AI_UPLOAD",
                     "Histoire",
                     dossierId,
                     "Dossier-" + dossierId,
-                    "Validation error: " + e.getMessage()
+                    "Validation error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
             );
 
             throw e;
@@ -166,14 +189,16 @@ public class HistoireServiceImpl implements HistoireService {
         } catch (Exception e) {
             log.error("[{}] Upload failure: {}", requestId, e.getMessage(), e);
 
-            // Audit: Échec inattendu
-            auditService.logFailure(
+            // ✅ Audit d'échec inattendu avec cabinet cible
+            auditService.logFailureWithTargetCabinet(
                     userService.getCurrentUser(),
                     "AI_UPLOAD",
                     "Histoire",
                     dossierId,
                     "Dossier-" + dossierId,
-                    "Unexpected error: " + e.getMessage()
+                    "Unexpected error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
             );
 
             throw new RuntimeException("Erreur inattendue pendant l'envoi: " + e.getMessage());

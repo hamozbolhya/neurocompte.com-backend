@@ -756,23 +756,23 @@ public class EcritureServiceImpl implements EcritureService {
         Long targetCabinetId = null;
         String targetCabinetName = null;
 
-        auditService.logSuccessWithTargetCabinet(
-                userService.getCurrentUser(),
-                "EXPORT",
-                "Ecriture",
-                dossierId,
-                "Dossier-" + dossierId,
-                null,
-                Map.of(
-                        "exerciseId", exerciseId,
-                        "journalId", journalId,
-                        "startDate", startDate,
-                        "endDate", endDate,
-                        "exportCount", exports.size()
-                ),
-                targetCabinetId,
-                targetCabinetName
-        );
+//        auditService.logSuccessWithTargetCabinet(
+//                userService.getCurrentUser(),
+//                "EXPORT",
+//                "Ecriture",
+//                dossierId,
+//                "Dossier-" + dossierId,
+//                null,
+//                Map.of(
+//                        "exerciseId", exerciseId,
+//                        "journalId", journalId,
+//                        "startDate", startDate,
+//                        "endDate", endDate,
+//                        "exportCount", exports.size()
+//                ),
+//                targetCabinetId,
+//                targetCabinetName
+//        );
 
         return exports;
     }

@@ -14,8 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
-import java.io.FileWriter;
-import java.io.IOException;
 import java.time.LocalDate;
 import java.util.Optional;
 
@@ -44,13 +42,6 @@ public class NormalAIProcessor extends BaseAIProcessor {
 
         Optional<Piece> originalPiece = duplicationDetectionService.findOriginalPiece(piece);
         if (originalPiece.isPresent()) {
-            // #region agent log
-            try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
-                fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H5\",\"location\":\"NormalAIProcessor.processPieceWithRetry\",\"message\":\"Batch marked duplicate path\",\"data\":{\"pieceId\":"
-                        + piece.getId() + ",\"isForced\":" + piece.getIsForced() + ",\"originalId\":" + originalPiece.get().getId()
-                        + "},\"timestamp\":" + System.currentTimeMillis() + "}\n");
-            } catch (IOException ignored) {}
-            // #endregion
             log.info("🚫 Skipping duplicate piece: {} (original: {})", piece.getId(), originalPiece.get().getId());
             duplicationDetectionService.markAsDuplicate(piece, originalPiece.get());
             return;

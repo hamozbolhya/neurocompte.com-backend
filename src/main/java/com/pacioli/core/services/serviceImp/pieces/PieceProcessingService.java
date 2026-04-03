@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
@@ -672,16 +671,7 @@ public class PieceProcessingService {
             ecritures.clear();
         }
 
-        Piece saved = pieceRepository.save(piece);
-        // #region agent log
-        try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
-            fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H4\",\"location\":\"PieceProcessingService.forcePieceAsNotDuplicate\",\"message\":\"Piece forced as not duplicate\",\"data\":{\"pieceId\":"
-                    + saved.getId() + ",\"isForced\":" + saved.getIsForced() + ",\"isDuplicate\":" + saved.getIsDuplicate()
-                    + ",\"status\":\"" + (saved.getStatus() != null ? saved.getStatus().name() : "null")
-                    + "\"},\"timestamp\":" + System.currentTimeMillis() + "}\n");
-        } catch (IOException ignored) {}
-        // #endregion
-        return saved;
+        return pieceRepository.save(piece);
     }
 
     /**

@@ -7,8 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -33,43 +31,22 @@ public class DuplicationDetectionService {
      * or empty if it is the original (oldest) or no match exists.
      */
     public Optional<Piece> findOriginalPiece(Piece piece) {
-        // #region agent log
-        try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
-            fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H1\",\"location\":\"DuplicationDetectionService.findOriginalPiece\",\"message\":\"Entered duplicate check\",\"data\":{\"pieceId\":"
-                    + (piece != null ? piece.getId() : null)
-                    + ",\"isForced\":"
-                    + (piece != null ? piece.getIsForced() : null)
-                    + ",\"status\":\""
-                    + (piece != null && piece.getStatus() != null ? piece.getStatus().name() : "null")
-                    + "\"},\"timestamp\":" + System.currentTimeMillis() + "}\n");
-        } catch (IOException ignored) {}
-        // #endregion
-
         if (piece == null || piece.getFilename() == null) {
+            return Optional.empty();
+        }
+
+        if (Boolean.TRUE.equals(piece.getIsForced())) {
+            log.info("⏭ Pièce {} ignorée dans findOriginalPiece (batch, isForced=true)", piece.getId());
             return Optional.empty();
         }
 
         Optional<Piece> byHash = findOriginalByFileHash(piece);
         if (byHash.isPresent()) {
-            // #region agent log
-            try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
-                fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H2\",\"location\":\"DuplicationDetectionService.findOriginalPiece\",\"message\":\"Duplicate matched by hash\",\"data\":{\"pieceId\":"
-                        + piece.getId() + ",\"originalId\":" + byHash.get().getId() + ",\"isForced\":" + piece.getIsForced()
-                        + "},\"timestamp\":" + System.currentTimeMillis() + "}\n");
-            } catch (IOException ignored) {}
-            // #endregion
             return byHash;
         }
 
         Optional<Piece> byName = findOriginalByOriginalFileName(piece);
         if (byName.isPresent()) {
-            // #region agent log
-            try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
-                fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H3\",\"location\":\"DuplicationDetectionService.findOriginalPiece\",\"message\":\"Duplicate matched by name\",\"data\":{\"pieceId\":"
-                        + piece.getId() + ",\"originalId\":" + byName.get().getId() + ",\"isForced\":" + piece.getIsForced()
-                        + "},\"timestamp\":" + System.currentTimeMillis() + "}\n");
-            } catch (IOException ignored) {}
-            // #endregion
             return byName;
         }
 

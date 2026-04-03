@@ -25,9 +25,6 @@ public class AuditService {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
-    @Autowired
-    private UserService userService;
-
     private final ObjectMapper objectMapper;
 
     public AuditService() {

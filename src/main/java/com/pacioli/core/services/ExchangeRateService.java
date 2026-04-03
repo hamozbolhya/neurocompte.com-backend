@@ -15,6 +15,7 @@ import org.springframework.web.client.RestTemplate;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -56,10 +57,11 @@ public class ExchangeRateService {
             }
 
             // Use the latest rates endpoint
-            String url = String.format("%s?apikey=%s&base=USD", LATEST_RATES_URL, apiKey);
+            String url = String.format("%s?apikey=%s&base=USD", LATEST_RATES_URL,
+                    Objects.requireNonNull(apiKey, "currency.api.key"));
 
             log.info("Fetching latest exchange rates");
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+            ResponseEntity<String> response = restTemplate.getForEntity(Objects.requireNonNull(url), String.class);
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
@@ -174,7 +176,8 @@ public class ExchangeRateService {
         long dateSeed = date.toEpochDay();
         double randomFactor = 0.9 + (0.2 * ((dateSeed % 100) / 100.0));
 
-        return randomFactor;
+        // Scale deviation from 1.0 by currency volatility (amplitude ~ baseVolatility at extremes)
+        return 1.0 + (randomFactor - 1.0) * (10 * baseVolatility);
     }
 
     /**

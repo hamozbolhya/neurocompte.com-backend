@@ -23,8 +23,6 @@ public class ConfigurationService {
     private final ConfigurationRepository configurationRepository;
 
     private final Map<String, String> configCache = new HashMap<>();
-    private Instant lastCacheRefresh = Instant.now();
-
     @PostConstruct
     public void init() {
         refreshCache();
@@ -47,7 +45,7 @@ public class ConfigurationService {
 
             configCache.clear();
             configCache.putAll(newCache);
-            lastCacheRefresh = Instant.now();
+            Instant.now();
 
             log.debug("Configuration cache refreshed. {} configurations loaded", configCache.size());
         } catch (Exception e) {

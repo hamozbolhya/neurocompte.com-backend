@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Objects;
 
 @Component
 @Slf4j
@@ -47,7 +48,7 @@ public class AIServiceClient {
         headers.set("x-api-key", apiKey);
 
         ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl, HttpMethod.GET, new HttpEntity<>(headers), String.class
+                apiUrl, Objects.requireNonNull(HttpMethod.GET), new HttpEntity<>(headers), String.class
         );
 
         if (!response.getStatusCode().is2xxSuccessful()) {

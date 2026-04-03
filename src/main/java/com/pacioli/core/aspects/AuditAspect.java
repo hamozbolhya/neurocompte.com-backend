@@ -44,9 +44,6 @@ public class AuditAspect {
             error = t;
             throw t;
         } finally {
-            long executionTime = System.currentTimeMillis() - startTime;
-
-            // Log l'action
             if (error != null) {
                 auditService.logFailure(
                         currentUser,

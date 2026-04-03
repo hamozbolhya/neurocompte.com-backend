@@ -2,8 +2,6 @@ package com.pacioli.core.repositories;
 
 import com.pacioli.core.DTO.EcritureExportDTO;
 import com.pacioli.core.models.Ecriture;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -18,9 +16,6 @@ import java.util.Optional;
 public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     // Fetch all ecritures by Piece ID
     List<Ecriture> findByPieceId(Long pieceId);
-
-    // Fetch all ecritures
-    List<Ecriture> findAll();
 
     // Find Ecritures by Exercise ID
     @Query("SELECT e FROM Ecriture e WHERE e.piece.dossier.id IN " +
@@ -40,10 +35,6 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
 """)
     List<Ecriture> findEcrituresByExerciseAndCabinet(@Param("exerciseId") Long exerciseId,
                                                      @Param("cabinetId") Long cabinetId);
-
-
-    void deleteAllById(Iterable<? extends Long> ids);
-
 
     @Query("SELECT e FROM Ecriture e " +
             "JOIN e.piece p " +

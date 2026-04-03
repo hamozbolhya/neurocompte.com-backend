@@ -2,8 +2,6 @@ package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
-import com.pacioli.core.DTO.RoleDTO;
-import com.pacioli.core.DTO.UserDTO;
 import com.pacioli.core.Exceptions.ResourceNotFoundException;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.User;
@@ -18,6 +16,7 @@ import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -56,7 +55,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public Cabinet addCabinet(Cabinet cabinet) {
+    public Cabinet addCabinet(@NonNull Cabinet cabinet) {
         User currentUser = userService.getCurrentUser();
 
         Cabinet savedCabinet = cabinetRepository.save(cabinet);
@@ -83,7 +82,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public Cabinet updateCabinet(Long id, Cabinet cabinet) {
+    public Cabinet updateCabinet(@NonNull Long id, @NonNull Cabinet cabinet) {
         User currentUser = userService.getCurrentUser();
 
         return cabinetRepository.findById(id).map(existingCabinet -> {
@@ -139,7 +138,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public void deleteCabinet(Long id) {
+    public void deleteCabinet(@NonNull Long id) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -196,7 +195,7 @@ public class CabinetServiceImpl implements CabinetService {
     }
 
     @Override
-    public CabinetDTO fetchCabinetById(Long id) {
+    public CabinetDTO fetchCabinetById(@NonNull Long id) {
         CabinetDTO cabinetDTO = cabinetRepository.findCabinetById(id).orElseThrow(() -> {
             return new RuntimeException("Cabinet not found with id: " + id);
         });
@@ -205,7 +204,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public void assignCabinetToUser(Long cabinetId, UUID userId) {
+    public void assignCabinetToUser(@NonNull Long cabinetId, @NonNull UUID userId) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -294,7 +293,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public void unassignCabinetFromUser(UUID userId) {
+    public void unassignCabinetFromUser(@NonNull UUID userId) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -367,9 +366,7 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail) {
-        User currentUser = userService.getCurrentUser();
-
+    public CabinetStatsDTO getCabinetStatsForUser(@NonNull Long cabinetId, String userEmail) {
         try {
             // Find the cabinet
             Cabinet cabinet = cabinetRepository.findById(cabinetId).orElseThrow(() -> {

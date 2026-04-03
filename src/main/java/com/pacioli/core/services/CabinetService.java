@@ -3,6 +3,7 @@ package com.pacioli.core.services;
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -11,19 +12,19 @@ import java.util.UUID;
 @Service
 public interface CabinetService {
 
-    Cabinet addCabinet(Cabinet cabinet);
+    Cabinet addCabinet(@NonNull Cabinet cabinet);
 
-    Cabinet updateCabinet(Long id, Cabinet cabinet);
+    Cabinet updateCabinet(@NonNull Long id, @NonNull Cabinet cabinet);
 
-    void deleteCabinet(Long id);
+    void deleteCabinet(@NonNull Long id);
 
-    CabinetDTO fetchCabinetById(Long id);
+    CabinetDTO fetchCabinetById(@NonNull Long id);
 
-    void assignCabinetToUser(Long cabinetId, UUID userId);
+    void assignCabinetToUser(@NonNull Long cabinetId, @NonNull UUID userId);
 
-    void unassignCabinetFromUser(UUID userId);
+    void unassignCabinetFromUser(@NonNull UUID userId);
 
     Optional<Cabinet> findByIce(String ice);
 
-    CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail);
+    CabinetStatsDTO getCabinetStatsForUser(@NonNull Long cabinetId, String userEmail);
 }

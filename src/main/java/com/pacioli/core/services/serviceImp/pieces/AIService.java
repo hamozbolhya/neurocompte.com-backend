@@ -65,9 +65,6 @@ public class AIService {
         try {
             log.info("============ START AI FILE UPLOAD TRACE ============");
 
-            String uuid = filename.contains(".") ?
-                    filename.substring(0, filename.lastIndexOf('.')) : filename;
-
             String baseUrl = aiApiBaseUrl.endsWith("/") ?
                     aiApiBaseUrl.substring(0, aiApiBaseUrl.length() - 1) : aiApiBaseUrl;
 

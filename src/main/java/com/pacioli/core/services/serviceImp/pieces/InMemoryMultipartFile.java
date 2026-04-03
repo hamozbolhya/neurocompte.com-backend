@@ -1,10 +1,12 @@
 package com.pacioli.core.services.serviceImp.pieces;
 
+import org.springframework.lang.NonNull;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.util.Objects;
 
 // InMemoryMultipartFile class
 public class InMemoryMultipartFile implements MultipartFile {
@@ -14,15 +16,16 @@ public class InMemoryMultipartFile implements MultipartFile {
     private final byte[] content;
 
     public InMemoryMultipartFile(String name, String originalFilename, String contentType, byte[] content) {
-        this.name = name;
+        this.name = Objects.requireNonNull(name, "name");
         this.originalFilename = originalFilename;
         this.contentType = contentType;
-        this.content = content;
+        this.content = content != null ? content : new byte[0];
     }
 
     @Override
+    @NonNull
     public String getName() {
-        return name;
+        return Objects.requireNonNull(name);
     }
 
     @Override
@@ -37,7 +40,7 @@ public class InMemoryMultipartFile implements MultipartFile {
 
     @Override
     public boolean isEmpty() {
-        return content == null || content.length == 0;
+        return content.length == 0;
     }
 
     @Override
@@ -46,17 +49,19 @@ public class InMemoryMultipartFile implements MultipartFile {
     }
 
     @Override
+    @NonNull
     public byte[] getBytes() throws IOException {
-        return content;
+        return Objects.requireNonNull(content);
     }
 
     @Override
+    @NonNull
     public InputStream getInputStream() throws IOException {
         return new java.io.ByteArrayInputStream(content);
     }
 
     @Override
-    public void transferTo(java.io.File dest) throws IOException, IllegalStateException {
+    public void transferTo(@NonNull java.io.File dest) throws IOException, IllegalStateException {
         Files.write(dest.toPath(), content);
     }
 }

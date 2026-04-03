@@ -5,10 +5,12 @@ import com.pacioli.core.repositories.AccountRepository;
 import com.pacioli.core.services.AccountService;
 import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.UserService;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class AccountServiceImpl implements AccountService {
@@ -46,7 +48,7 @@ public class AccountServiceImpl implements AccountService {
 
     // ✅ GET - PAS D'AUDIT
     @Override
-    public Account findById(Long id) {
+    public Account findById(@NonNull Long id) {
         return accountRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found with ID: " + id));
     }
@@ -60,7 +62,7 @@ public class AccountServiceImpl implements AccountService {
     // ✅ CREATE - AVEC AUDIT
     @Override
     @Transactional
-    public Account createAccount(Account account) {
+    public Account createAccount(@NonNull Account account) {
         Account savedAccount = accountRepository.save(account);
 
         // ✅ Récupérer le cabinet cible
@@ -86,7 +88,7 @@ public class AccountServiceImpl implements AccountService {
     // ✅ UPDATE - AVEC AUDIT
     @Override
     @Transactional
-    public Account updateAccount(Long id, Account updatedAccount) {
+    public Account updateAccount(@NonNull Long id, @NonNull Account updatedAccount) {
         return accountRepository.findById(id).map(existingAccount -> {
             // Sauvegarder l'ancien état pour l'audit
             Account oldAccount = new Account();
@@ -140,20 +142,21 @@ public class AccountServiceImpl implements AccountService {
     // ✅ DELETE - AVEC AUDIT
     @Override
     @Transactional
-    public void deleteAccounts(List<Long> ids) {
+    public void deleteAccounts(@NonNull List<Long> ids) {
         // Valider que tous les comptes existent avant suppression
         for (Long id : ids) {
-            if (!accountRepository.existsById(id)) {
+            Long nid = Objects.requireNonNull(id, "null id in ids");
+            if (!accountRepository.existsById(nid)) {
                 // Audit échec suppression
                 auditService.logFailure(
                         userService.getCurrentUser(),
                         "DELETE",
                         "Account",
-                        id,
-                        "Account-" + id,
-                        "Account not found with ID: " + id
+                        nid,
+                        "Account-" + nid,
+                        "Account not found with ID: " + nid
                 );
-                throw new RuntimeException("Account not found with ID: " + id);
+                throw new RuntimeException("Account not found with ID: " + nid);
             }
         }
 
@@ -183,7 +186,7 @@ public class AccountServiceImpl implements AccountService {
 
     // ✅ GET - PAS D'AUDIT
     @Override
-    public Account findAccountById(Long id) {
+    public Account findAccountById(@NonNull Long id) {
         return accountRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Account not found with ID: " + id));
     }

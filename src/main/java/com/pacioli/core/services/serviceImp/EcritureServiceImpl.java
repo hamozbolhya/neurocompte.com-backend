@@ -9,17 +9,16 @@ import com.pacioli.core.services.UserService;
 import com.pacioli.core.utils.EcritureValidationUtil;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -35,7 +34,6 @@ public class EcritureServiceImpl implements EcritureService {
     private final AuditService auditService;
     private final UserService userService;
 
-    @Autowired
     public EcritureServiceImpl(EcritureRepository ecritureRepository, LineRepository lineRepository,
                                JournalRepository journalRepository, AccountRepository accountRepository,
                                PieceRepository pieceRepository, AuditService auditService, UserService userService) {
@@ -69,7 +67,7 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     // ✅ Méthode utilitaire à partir d'un ID d'écriture
-    private Long getTargetCabinetId(Long ecritureId) {
+    private Long getTargetCabinetId(@NonNull Long ecritureId) {
         try {
             Ecriture ecriture = ecritureRepository.findById(ecritureId).orElse(null);
             return getTargetCabinetId(ecriture);
@@ -80,7 +78,7 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     // ✅ Méthode utilitaire pour le nom du cabinet cible à partir d'un ID
-    private String getTargetCabinetName(Long ecritureId) {
+    private String getTargetCabinetName(@NonNull Long ecritureId) {
         try {
             Ecriture ecriture = ecritureRepository.findById(ecritureId).orElse(null);
             return getTargetCabinetName(ecriture);
@@ -91,7 +89,7 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     @Override
-    public List<Ecriture> getEcrituresByPieceId(Long pieceId) {
+    public List<Ecriture> getEcrituresByPieceId(@NonNull Long pieceId) {
         return ecritureRepository.findByPieceId(pieceId);
     }
 
@@ -107,7 +105,7 @@ public class EcritureServiceImpl implements EcritureService {
         int start = page * size;
         int end = Math.min(start + size, allDTOs.size());
 
-        List<EcritureDTO> paginatedDTOs = allDTOs.subList(start, end);
+        List<EcritureDTO> paginatedDTOs = new ArrayList<>(allDTOs.subList(start, end));
 
         // Return as Page
         return new PageImpl<>(paginatedDTOs, PageRequest.of(page, size), allDTOs.size());
@@ -172,7 +170,7 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Override
     @Transactional
-    public Ecriture updateEcriture(Ecriture ecriture) {
+    public Ecriture updateEcriture(@NonNull Ecriture ecriture) {
         Ecriture savedEcriture = ecritureRepository.save(ecriture);
 
         // ✅ Audit avec cabinet cible
@@ -195,13 +193,13 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     @Override
-    public Ecriture getEcritureById(Long id) {
+    public Ecriture getEcritureById(@NonNull Long id) {
         return ecritureRepository.findById(id).orElse(null);
     }
 
     @Override
     @Transactional
-    public void deleteEcritures(List<Long> ecritureIds) {
+    public void deleteEcritures(@NonNull List<Long> ecritureIds) {
         // Récupérer les écritures pour avoir le cabinet cible
         List<Ecriture> ecritures = ecritureRepository.findAllById(ecritureIds);
 
@@ -225,19 +223,20 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Validate that all IDs exist before deletion
         ecritureIds.forEach(id -> {
-            if (!ecritureRepository.existsById(id)) {
-                String errorMessage = "Ecriture with ID " + id + " does not exist";
+            Long nid = Objects.requireNonNull(id, "ecriture id");
+            if (!ecritureRepository.existsById(nid)) {
+                String errorMessage = "Ecriture with ID " + nid + " does not exist";
 
-                Long targetCabinetId = getTargetCabinetId(id);
-                String targetCabinetName = getTargetCabinetName(id);
+                Long targetCabinetId = getTargetCabinetId(nid);
+                String targetCabinetName = getTargetCabinetName(nid);
 
                 // Audit échec
                 auditService.logFailureWithTargetCabinet(
                         userService.getCurrentUser(),
                         "DELETE",
                         "Ecriture",
-                        id,
-                        "Ecriture-" + id,
+                        nid,
+                        "Ecriture-" + nid,
                         errorMessage,
                         targetCabinetId,
                         targetCabinetName
@@ -252,9 +251,10 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Transactional
     @Override
-    public void updateCompte(String accountId, List<Long> ecritureIds) {
+    public void updateCompte(String accountId, @NonNull List<Long> ecritureIds) {
         // 1️⃣ Convert the account ID (String) to a Long
-        Long accountLongId = Long.valueOf(accountId);
+        long accountPk = Long.parseLong(accountId);
+        Long accountLongId = accountPk;
 
         // 2️⃣ Fetch the account from the database
         Account account = accountRepository.findById(accountLongId).orElseThrow(() -> {
@@ -278,8 +278,9 @@ public class EcritureServiceImpl implements EcritureService {
         Long targetCabinetId = null;
         String targetCabinetName = null;
         if (!ecritureIds.isEmpty()) {
-            targetCabinetId = getTargetCabinetId(ecritureIds.get(0));
-            targetCabinetName = getTargetCabinetName(ecritureIds.get(0));
+            Long firstEcritureId = Objects.requireNonNull(ecritureIds.get(0), "ecriture id");
+            targetCabinetId = getTargetCabinetId(firstEcritureId);
+            targetCabinetName = getTargetCabinetName(firstEcritureId);
         }
 
         auditService.logSuccessWithTargetCabinet(
@@ -297,7 +298,7 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Override
     @Transactional
-    public EcritureDTO getEcritureDetails(Long ecritureId) {
+    public EcritureDTO getEcritureDetails(@NonNull Long ecritureId) {
         Ecriture ecriture = ecritureRepository.findEcritureByIdWithDetails(ecritureId)
                 .orElseThrow(() -> new RuntimeException("Ecriture not found with ID: " + ecritureId));
 
@@ -402,7 +403,7 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Transactional
     @Override
-    public Ecriture updateEcriture(Long ecritureId, Ecriture ecritureRequest) {
+    public Ecriture updateEcriture(@NonNull Long ecritureId, @NonNull Ecriture ecritureRequest) {
         Ecriture existingEcriture = ecritureRepository.findEcritureByIdCustom(ecritureId)
                 .orElseThrow(() -> {
                     Long targetCabinetId = getTargetCabinetId(ecritureId);
@@ -458,17 +459,18 @@ public class EcritureServiceImpl implements EcritureService {
             throw new IllegalArgumentException(errorMessage);
         }
 
-        Journal newJournal = journalRepository.findById(ecritureRequest.getJournal().getId())
+        Long newJournalId = Objects.requireNonNull(ecritureRequest.getJournal().getId(), "journal id");
+        Journal newJournal = journalRepository.findById(newJournalId)
                 .orElseThrow(() -> {
                     auditService.logFailure(
                             userService.getCurrentUser(),
                             "UPDATE",
                             "Journal",
-                            ecritureRequest.getJournal().getId(),
-                            "Journal-" + ecritureRequest.getJournal().getId(),
-                            "Journal non trouvé avec l'identifiant : " + ecritureRequest.getJournal().getId()
+                            newJournalId,
+                            "Journal-" + newJournalId,
+                            "Journal non trouvé avec l'identifiant : " + newJournalId
                     );
-                    return new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + ecritureRequest.getJournal().getId());
+                    return new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + newJournalId);
                 });
 
         if (existingEcriture.getJournal() != null &&
@@ -631,8 +633,10 @@ public class EcritureServiceImpl implements EcritureService {
                 Double existingExchangeRate = existingLine.getExchangeRate();
 
                 // Fetch the Account to ensure it is managed
-                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
-                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+                Long lineAccountId = Objects.requireNonNull(
+                        Objects.requireNonNull(updatedLine.getAccount(), "line account").getId(), "account id");
+                Account managedAccount = accountRepository.findById(lineAccountId)
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + lineAccountId));
 
                 existingLine.setAccount(managedAccount);
                 existingLine.setLabel(updatedLine.getLabel());
@@ -698,8 +702,10 @@ public class EcritureServiceImpl implements EcritureService {
 
             } else {
                 // Add a new line
-                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
-                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+                Long newLineAccountId = Objects.requireNonNull(
+                        Objects.requireNonNull(updatedLine.getAccount(), "line account").getId(), "account id");
+                Account managedAccount = accountRepository.findById(newLineAccountId)
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + newLineAccountId));
 
                 Line newLine = new Line();
                 newLine.setAccount(managedAccount);
@@ -748,32 +754,8 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     @Override
-    public List<EcritureExportDTO> exportEcritures(Long dossierId, Long exerciseId, Long journalId,
+    public List<EcritureExportDTO> exportEcritures(@NonNull Long dossierId, Long exerciseId, Long journalId,
                                                    LocalDate startDate, LocalDate endDate) {
-        List<EcritureExportDTO> exports = ecritureRepository.findEcrituresByFilters(dossierId, exerciseId, journalId, startDate, endDate);
-
-        // ✅ Audit d'export
-        Long targetCabinetId = null;
-        String targetCabinetName = null;
-
-//        auditService.logSuccessWithTargetCabinet(
-//                userService.getCurrentUser(),
-//                "EXPORT",
-//                "Ecriture",
-//                dossierId,
-//                "Dossier-" + dossierId,
-//                null,
-//                Map.of(
-//                        "exerciseId", exerciseId,
-//                        "journalId", journalId,
-//                        "startDate", startDate,
-//                        "endDate", endDate,
-//                        "exportCount", exports.size()
-//                ),
-//                targetCabinetId,
-//                targetCabinetName
-//        );
-
-        return exports;
+        return ecritureRepository.findEcrituresByFilters(dossierId, exerciseId, journalId, startDate, endDate);
     }
 }

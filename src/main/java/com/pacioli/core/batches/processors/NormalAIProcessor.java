@@ -11,6 +11,7 @@ import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
 import java.io.FileWriter;
@@ -105,7 +106,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
         }
     }
 
-    private void extractAndSaveAIData(Piece piece, JsonNode normalizedResponse) throws JsonProcessingException {
+    private void extractAndSaveAIData(@NonNull Piece piece, JsonNode normalizedResponse) throws JsonProcessingException {
         try {
             JsonNode ecrituresNode = normalizedResponse.get("ecritures");
 
@@ -125,7 +126,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
         }
     }
 
-    private void extractAmountAndCurrency(Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
+    private void extractAmountAndCurrency(@NonNull Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
         // Extract amount
         double originalAmount = calculateLargestAmount(ecrituresNode);
         piece.setAiAmount(originalAmount);
@@ -148,7 +149,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
                 originalAmount, invoiceCurrency, piece.getConvertedCurrency(), piece.getExchangeRate());
     }
 
-    private void applyFallbackCurrency(Piece piece) {
+    private void applyFallbackCurrency(@NonNull Piece piece) {
         log.warn("⚠️ No valid invoice entries, using dossier currency");
         String dossierCurrency = getDossierCurrencyCode(piece.getDossier());
         piece.setAiAmount(0.0);

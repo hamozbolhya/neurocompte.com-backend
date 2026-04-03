@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
+import java.util.Objects;
 import java.util.Map;
 import java.util.UUID;
 
@@ -71,7 +72,8 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Company> responseEntity = restTemplate.exchange(url, HttpMethod.POST, requestEntity, Company.class);
+            ResponseEntity<Company> responseEntity = restTemplate.exchange(
+                    Objects.requireNonNull(url), Objects.requireNonNull(HttpMethod.POST), requestEntity, Company.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
@@ -231,7 +233,8 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Company> responseEntity = restTemplate.exchange(url, HttpMethod.PUT, requestEntity, Company.class);
+            ResponseEntity<Company> responseEntity = restTemplate.exchange(
+                    Objects.requireNonNull(url), Objects.requireNonNull(HttpMethod.PUT), requestEntity, Company.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();
@@ -387,7 +390,8 @@ public class CompanyAiServiceImpl implements CompanyAiService {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<Void> responseEntity = restTemplate.exchange(url, HttpMethod.DELETE, requestEntity, Void.class);
+            ResponseEntity<Void> responseEntity = restTemplate.exchange(
+                    Objects.requireNonNull(url), Objects.requireNonNull(HttpMethod.DELETE), requestEntity, Void.class);
             long duration = System.currentTimeMillis() - startTime;
 
             HttpStatus statusCode = (HttpStatus) responseEntity.getStatusCode();

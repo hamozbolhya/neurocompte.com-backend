@@ -16,12 +16,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -48,7 +49,6 @@ public class DossierServiceImpl implements DossierService {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
     public DossierServiceImpl(DossierRepository dossierRepository,
                               CompanyAiService companyAiService,
                               AuditService auditService,
@@ -77,7 +77,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public Dossier createDossier(Dossier dossier, List<Exercise> exercicesData) {
+    public Dossier createDossier(@NonNull Dossier dossier, List<Exercise> exercicesData) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Creating dossier: {} for cabinet: {}", requestId, dossier.getName(), dossier.getCabinet().getId());
 
@@ -94,7 +94,9 @@ public class DossierServiceImpl implements DossierService {
         }
 
         // If no Dossier with the same name exists in this cabinet, check the Cabinet exists
-        Cabinet cabinet = cabinetRepository.findById(dossier.getCabinet().getId()).orElseThrow(() -> {
+        Long cabinetEntityId = Objects.requireNonNull(
+                Objects.requireNonNull(dossier.getCabinet(), "cabinet").getId(), "cabinet id");
+        Cabinet cabinet = cabinetRepository.findById(cabinetEntityId).orElseThrow(() -> {
             auditService.logFailure(userService.getCurrentUser(), "CREATE", "Dossier", null, dossier.getName(), "Cabinet non trouvé");
             return new RuntimeException("Cabinet non trouvé");
         });
@@ -203,7 +205,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public Dossier updateExercises(Long dossierId, List<Exercise> updatedExercises) {
+    public Dossier updateExercises(@NonNull Long dossierId, List<Exercise> updatedExercises) {
         // Fetch the dossier by ID
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
             auditService.logFailure(userService.getCurrentUser(), "UPDATE", "Exercise", dossierId, "Dossier-" + dossierId, "Dossier non trouvé");
@@ -219,7 +221,10 @@ public class DossierServiceImpl implements DossierService {
         // Validate and update the exercises
         for (Exercise updatedExercise : updatedExercises) {
             // Fetch the existing exercise (if updating)
-            Exercise existingExercise = exerciseRepository.findById(updatedExercise.getId()).orElse(null);
+            Long exerciseId = updatedExercise.getId();
+            Exercise existingExercise = exerciseId != null
+                    ? exerciseRepository.findById(exerciseId).orElse(null)
+                    : null;
 
             // Validate the new date range
             validateExerciseDateRange(dossier, updatedExercise, existingExercise);
@@ -276,7 +281,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public void deleteExercises(Long dossierId, List<Long> exerciseIds) {
+    public void deleteExercises(@NonNull Long dossierId, @NonNull List<Long> exerciseIds) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Suppression des exercices pour le dossier ID: {}, Identifiants des exercices: {}", requestId, dossierId, exerciseIds);
 
@@ -365,7 +370,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public DossierDTO updateDossier(Long id, Dossier dossierDetails) {
+    public DossierDTO updateDossier(@NonNull Long id, @NonNull Dossier dossierDetails) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Updating dossier with ID: {}", requestId, id);
 
@@ -381,8 +386,6 @@ public class DossierServiceImpl implements DossierService {
         // Store original values for comparison
         String originalName = existingDossier.getName();
         Country originalCountry = existingDossier.getCountry();
-        Integer originalPrecision = existingDossier.getDecimalPrecision();
-
         // Sauvegarder l'ancien état
         Dossier oldDossier = new Dossier();
         oldDossier.setId(existingDossier.getId());
@@ -483,7 +486,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public void deleteDossier(Long dossierId) {
+    public void deleteDossier(@NonNull Long dossierId) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Deleting dossier with ID: {}", requestId, dossierId);
 
@@ -544,7 +547,7 @@ public class DossierServiceImpl implements DossierService {
 
     @Override
     @Transactional
-    public DossierDTO updateActivity(Long dossierId, String activity) {
+    public DossierDTO updateActivity(@NonNull Long dossierId, String activity) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Updating activity for dossier ID: {} to: {}", requestId, dossierId, activity);
 
@@ -569,8 +572,6 @@ public class DossierServiceImpl implements DossierService {
             company.setName(savedDossier.getName());
             company.setCountry(savedDossier.getCountry() != null ? savedDossier.getCountry().getCode() : null);
             company.setActivity(savedDossier.getActivity());
-
-            Company updatedCompany = companyAiService.updateCompany(savedDossier.getId(), company);
             log.info("[{}] Company AI updated successfully for dossier ID: {}, company data {}", requestId, dossierId, company);
         } catch (Exception ex) {
             log.warn("[{}] Failed to update AI service for dossier ID: {}: {}", requestId, dossierId, ex.getMessage());
@@ -606,6 +607,7 @@ public class DossierServiceImpl implements DossierService {
         return getTheDossierById(dossierId);
     }
 
+    @Override
     @Transactional
     public int updateAllCompaniesInAi() {
         log.info("Starting batch update of all companies in AI service");
@@ -703,55 +705,62 @@ public class DossierServiceImpl implements DossierService {
 
     // Les méthodes get (sans modification)
     @Override
-    public Dossier getDossierById(Long dossierId) {
+    public Dossier getDossierById(@NonNull Long dossierId) {
         return dossierRepository.findById(dossierId).orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
     }
 
     @Override
-    public DossierDTO getTheDossierById(Long dossierId) {
+    public DossierDTO getTheDossierById(@NonNull Long dossierId) {
         return dossierRepository.findDossierById(dossierId).orElseThrow(() -> new RuntimeException("Dossier non trouvé avec l'identifiant : " + dossierId));
     }
 
     @Override
-    public Page<DossierDTO> getDossiersByCabinetId(Long cabinetId, Pageable pageable) {
+    public Page<DossierDTO> getDossiersByCabinetId(@NonNull Long cabinetId, Pageable pageable) {
         return dossierRepository.findDossierDTOsByCabinetId(cabinetId, pageable);
     }
 
-    public DossierDTO getDossierForUser(Long dossierId, UUID userId) {
+    @Override
+    public DossierDTO getDossierForUser(@NonNull Long dossierId, @NonNull UUID userId) {
         log.info("User {} accessing dossier {}", userId, dossierId);
         Dossier dossier = dossierRepository.findByIdAndCabinetUsersId(dossierId, userId).orElseThrow(() -> new SecurityException("Dossier not found or access denied"));
         return convertToDTO(dossier);
     }
 
     @Override
-    public DossierDTO getDossierForPacioli(Long dossierId) {
+    public DossierDTO getDossierForPacioli(@NonNull Long dossierId) {
         log.info("PACIOLI user accessing dossier {}", dossierId);
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new RuntimeException("Dossier not found"));
         return convertToDTO(dossier);
     }
 
-    public Page<Dossier> getDossiersForUser(UUID userId, Pageable pageable) {
+    @Override
+    public Page<Dossier> getDossiersForUser(@NonNull UUID userId, Pageable pageable) {
         log.info("User {} fetching accessible dossiers", userId);
         return dossierRepository.findByCabinetUsersId(userId, pageable);
     }
 
-    public Dossier createDossierSecure(Dossier dossier, List<Exercise> exercicesData, UUID userId) {
+    @Override
+    public Dossier createDossierSecure(@NonNull Dossier dossier, List<Exercise> exercicesData, @NonNull UUID userId) {
         return createDossier(dossier, exercicesData);
     }
 
-    public boolean userHasAccessToCabinet(UUID userId, Long cabinetId) {
+    @Override
+    public boolean userHasAccessToCabinet(@NonNull UUID userId, @NonNull Long cabinetId) {
         return userRepository.existsByIdAndCabinetId(userId, cabinetId);
     }
 
-    public boolean userHasAccessToDossier(UUID userId, Long dossierId) {
+    @Override
+    public boolean userHasAccessToDossier(@NonNull UUID userId, @NonNull Long dossierId) {
         return dossierRepository.existsByIdAndCabinetUsersId(dossierId, userId);
     }
 
-    public DossierDTO updateDossierSecure(Long id, Dossier dossierDetails, UUID userId) {
+    @Override
+    public DossierDTO updateDossierSecure(@NonNull Long id, @NonNull Dossier dossierDetails, @NonNull UUID userId) {
         return updateDossier(id, dossierDetails);
     }
 
-    public void deleteDossierSecure(Long dossierId, UUID userId) {
+    @Override
+    public void deleteDossierSecure(@NonNull Long dossierId, @NonNull UUID userId) {
         if (!userHasAccessToDossier(userId, dossierId)) {
             throw new SecurityException("User cannot delete this dossier");
         }

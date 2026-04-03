@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -59,20 +60,22 @@ public class EcritureController {
         log.info("User {} filtering ecritures for dossier: {}, cabinet: {}",
                 principal.getUsername(), dossierId, cabinetId);
 
-        UUID userId = extractUserIdFromPrincipal(principal);
+        UUID userId = Objects.requireNonNull(extractUserIdFromPrincipal(principal), "userId");
+        Long did = Objects.requireNonNull(dossierId, "dossierId");
+        Long cid = Objects.requireNonNull(cabinetId, "cabinetId");
 
         // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
         boolean hasAccess = securityHelper.isPacioli(principal)
-                || dossierService.userHasAccessToDossier(userId, dossierId);
+                || dossierService.userHasAccessToDossier(userId, did);
 
         if (!hasAccess) {
             log.error("User {} attempted to access ecritures from unauthorized dossier {}",
-                    principal.getUsername(), dossierId);
+                    principal.getUsername(), did);
             throw new SecurityException("User cannot access this dossier");
         }
 
         if (exerciseId != null) {
-            boolean isValid = exerciseService.validateExerciseAndCabinet(exerciseId, cabinetId);
+            boolean isValid = exerciseService.validateExerciseAndCabinet(exerciseId, cid);
             if (!isValid) {
                 return ResponseEntity.badRequest().body(null);
             }
@@ -80,14 +83,15 @@ public class EcritureController {
 
         Page<EcritureDTO> ecritures;
         ecritures = ecritureService.getEcrituresByExerciseAndCabinet(
-                exerciseId, cabinetId, page, size);
+                exerciseId, cid, page, size);
         return ResponseEntity.ok(ecritures);
     }
 
     // Fetch Ecritures by Piece ID
     @GetMapping("/piece/{pieceId}")
     public ResponseEntity<List<Ecriture>> getEcrituresByPieceId(@PathVariable("pieceId") Long pieceId) {
-        List<Ecriture> ecritures = ecritureService.getEcrituresByPieceId(pieceId);
+        List<Ecriture> ecritures = ecritureService.getEcrituresByPieceId(
+                Objects.requireNonNull(pieceId, "pieceId"));
         return ResponseEntity.ok(ecritures);
     }
 
@@ -95,7 +99,7 @@ public class EcritureController {
     public ResponseEntity<?> updateEcriture(@PathVariable Long id, @RequestBody Map<String, Object> updates) {
         try {
             // Fetch the existing Ecriture
-            Ecriture existingEcriture = ecritureService.getEcritureById(id);
+            Ecriture existingEcriture = ecritureService.getEcritureById(Objects.requireNonNull(id, "id"));
             if (existingEcriture == null) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Ecriture non trouvée avec ID: " + id);
             }
@@ -104,8 +108,11 @@ public class EcritureController {
             updates.forEach((key, value) -> {
                 switch (key) {
                     case "journal":
+                        Long dossierIdForJournal = Objects.requireNonNull(
+                                Objects.requireNonNull(existingEcriture.getPiece(), "piece").getDossier(), "dossier")
+                                .getId();
                         Journal journal = journalService.findByName((String) value,
-                                existingEcriture.getPiece().getDossier().getId());
+                                Objects.requireNonNull(dossierIdForJournal, "dossierId"));
                         if (journal == null) {
                             throw new RuntimeException("Journal non trouvé avec le nom: " + value);
                         }
@@ -137,7 +144,7 @@ public class EcritureController {
     @DeleteMapping("/delete")
     public ResponseEntity<String> deleteEcritures(@RequestBody List<Long> ecritureIds) {
         try {
-            ecritureService.deleteEcritures(ecritureIds);
+            ecritureService.deleteEcritures(Objects.requireNonNull(ecritureIds, "ecritureIds"));
             return ResponseEntity.ok("Ecritures deleted successfully");
         } catch (EntityNotFoundException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Ecriture non trouvée avec ID: " + ecritureIds);
@@ -151,13 +158,14 @@ public class EcritureController {
     public ResponseEntity<String> updateCompte(
             @RequestParam("account") String account,
             @RequestBody List<Long> ecritureIds) {
-        ecritureService.updateCompte(account, ecritureIds);
+        ecritureService.updateCompte(account, Objects.requireNonNull(ecritureIds, "ecritureIds"));
         return ResponseEntity.ok("Compte updated successfully");
     }
 
     @GetMapping("/ecritures/{ecritureId}")
     public ResponseEntity<EcritureDTO> getEcritureDetails(@PathVariable Long ecritureId) {
-        EcritureDTO ecritureDetails = ecritureService.getEcritureDetails(ecritureId);
+        EcritureDTO ecritureDetails = ecritureService.getEcritureDetails(
+                Objects.requireNonNull(ecritureId, "ecritureId"));
         return ResponseEntity.ok(ecritureDetails);
     }
 
@@ -203,20 +211,17 @@ public class EcritureController {
 
         log.info("User {} exporting ecritures for dossier: {}", principal.getUsername(), dossierId);
 
-        UUID userId = extractUserIdFromPrincipal(principal);
-
-        if (userId == null) {
-            throw new SecurityException("Anonymous user attempting to export ecritures");
-        }
+        UUID userId = Objects.requireNonNull(extractUserIdFromPrincipal(principal), "userId");
+        Long did = Objects.requireNonNull(dossierId, "dossierId");
 
         // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
         boolean hasAccess = securityHelper.isPacioli(principal)
-                || dossierService.userHasAccessToDossier(userId, dossierId);
+                || dossierService.userHasAccessToDossier(userId, did);
 
         if (!hasAccess) {
             log.error("User {} attempted to export ecritures from unauthorized dossier {}",
-                    principal.getUsername(), dossierId);
-            throw new SecurityException("This dossier " + dossierId + " does not exist in your cabinet");
+                    principal.getUsername(), did);
+            throw new SecurityException("This dossier " + did + " does not exist in your cabinet");
         }
 
         // Default `endDate` to `LocalDate.now()` if missing
@@ -224,7 +229,7 @@ public class EcritureController {
 
         List<EcritureExportDTO> exportData;
         exportData = ecritureService.exportEcritures(
-                dossierId, exerciseId, journalId, startDate, endDate);
+                did, exerciseId, journalId, startDate, endDate);
 
         return exportData;
     }

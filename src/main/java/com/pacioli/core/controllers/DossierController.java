@@ -27,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -67,8 +68,8 @@ public class DossierController {
             log.debug("[{}] Incoming Exercises: {}", requestId, request.getExercises());
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to cabinet
-            UUID userId = extractUserId(principal);
-            Long cabinetId = request.getDossier().getCabinet().getId();
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long cabinetId = Objects.requireNonNull(request.getDossier().getCabinet().getId(), "cabinetId");
 
             boolean hasAccess = securityHelper.isPacioli(principal)
                     || dossierService.userHasAccessToCabinet(userId, cabinetId);
@@ -122,24 +123,25 @@ public class DossierController {
                                                      @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
         log.info("User {} fetching dossier by ID: {}", principal.getUsername(), dossierId);
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long did = Objects.requireNonNull(dossierId, "dossierId");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, dossierId);
+                    || dossierService.userHasAccessToDossier(userId, did);
 
             if (!hasAccess) {
-                log.error("Access denied for user {} to dossier {}", principal.getUsername(), dossierId);
+                log.error("Access denied for user {} to dossier {}", principal.getUsername(), did);
                 throw new SecurityException("User cannot access this dossier");
             }
 
             // ✅ Si PACIOLI, on peut bypasser la vérification user/dossier
             DossierDTO dossier;
             if (securityHelper.isPacioli(principal)) {
-                log.info("PACIOLI user bypassing user validation for dossier {}", dossierId);
-                dossier = dossierService.getDossierForPacioli(dossierId);
+                log.info("PACIOLI user bypassing user validation for dossier {}", did);
+                dossier = dossierService.getDossierForPacioli(did);
             } else {
-                dossier = dossierService.getDossierForUser(dossierId, userId);
+                dossier = dossierService.getDossierForUser(did, userId);
             }
 
             return ResponseEntity.ok(dossier);
@@ -156,7 +158,7 @@ public class DossierController {
             @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
         log.info("User {} fetching all accessible dossiers", principal.getUsername());
-        UUID userId = extractUserId(principal);
+        UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
 
         // Sinon, retourner seulement les dossiers accessibles par l'utilisateur
         log.info("Regular user {} accessing only their accessible dossiers", principal.getUsername());
@@ -173,19 +175,20 @@ public class DossierController {
         log.info("User {} fetching dossiers for cabinet: {}", principal.getUsername(), cabinetId);
 
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long cid = Objects.requireNonNull(cabinetId, "cabinetId");
 
             // ✅ Utilisation du Helper : PACIOLI ou Accès Cabinet standard
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToCabinet(userId, cabinetId);
+                    || dossierService.userHasAccessToCabinet(userId, cid);
 
             if (!hasAccess) {
-                log.error("Access denied for user {} to cabinet {}", principal.getUsername(), cabinetId);
+                log.error("Access denied for user {} to cabinet {}", principal.getUsername(), cid);
                 throw new SecurityException("User cannot access this cabinet");
             }
 
             // ✅ Si PACIOLI, retourner tous les dossiers du cabinet
-            return dossierService.getDossiersByCabinetId(cabinetId, PageRequest.of(page, size));
+            return dossierService.getDossiersByCabinetId(cid, PageRequest.of(page, size));
 
         } catch (SecurityException e) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Accès refusé", e);
@@ -201,14 +204,15 @@ public class DossierController {
         log.info("User {} updating exercises for dossier ID: {}", principal.getUsername(), dossierId);
 
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long did = Objects.requireNonNull(dossierId, "dossierId");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, dossierId);
+                    || dossierService.userHasAccessToDossier(userId, did);
 
             if (!hasAccess) {
-                log.error("User {} attempted to update unauthorized dossier {}", principal.getUsername(), dossierId);
+                log.error("User {} attempted to update unauthorized dossier {}", principal.getUsername(), did);
                 throw new SecurityException("User cannot access this dossier");
             }
 
@@ -218,7 +222,7 @@ public class DossierController {
 
             // ✅ Si PACIOLI, on peut bypasser certaines vérifications internes
             Dossier updatedDossier;
-            updatedDossier = dossierService.updateExercises(dossierId, updatedExercises);
+            updatedDossier = dossierService.updateExercises(did, updatedExercises);
             return ResponseEntity.ok(updatedDossier);
         } catch (SecurityException e) {
             log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
@@ -241,21 +245,22 @@ public class DossierController {
         try {
             log.info("User {} deleting exercises from dossier ID: {}, Exercises: {}", principal.getUsername(), dossierId, exerciseIds);
 
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long did = Objects.requireNonNull(dossierId, "dossierId");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, dossierId);
+                    || dossierService.userHasAccessToDossier(userId, did);
 
             if (!hasAccess) {
-                log.error("User {} attempted to delete from unauthorized dossier {}", principal.getUsername(), dossierId);
+                log.error("User {} attempted to delete from unauthorized dossier {}", principal.getUsername(), did);
                 throw new SecurityException("User cannot access this dossier");
             }
 
             if (exerciseIds == null || exerciseIds.isEmpty()) {
                 throw new IllegalArgumentException("Les identifiants des exercices ne peuvent pas être vides");
             }
-            dossierService.deleteExercises(dossierId, exerciseIds);
+            dossierService.deleteExercises(did, exerciseIds);
             return ResponseEntity.noContent().build();
         } catch (SecurityException e) {
             log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
@@ -278,23 +283,24 @@ public class DossierController {
         log.info("User {} updating dossier with ID: {}", principal.getUsername(), id);
 
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long dossierPk = Objects.requireNonNull(id, "id");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, id);
+                    || dossierService.userHasAccessToDossier(userId, dossierPk);
 
             if (!hasAccess) {
-                log.error("User {} attempted to update unauthorized dossier {}", principal.getUsername(), id);
+                log.error("User {} attempted to update unauthorized dossier {}", principal.getUsername(), dossierPk);
                 throw new SecurityException("User cannot access this dossier");
             }
 
             // Convert DTO to entity for the update
             Dossier dossierEntity = convertToEntity(dossierDetails);
-            dossierEntity.setId(id); // Ensure the ID is set for update
+            dossierEntity.setId(dossierPk); // Ensure the ID is set for update
 
             // ✅ SECURE: Use secure update method
-            DossierDTO updatedDossier = dossierService.updateDossierSecure(id, dossierEntity, userId);
+            DossierDTO updatedDossier = dossierService.updateDossierSecure(dossierPk, dossierEntity, userId);
             return ResponseEntity.ok(updatedDossier);
         } catch (SecurityException e) {
             log.error("Access denied for user {}: {}", principal.getUsername(), e.getMessage());
@@ -311,20 +317,21 @@ public class DossierController {
         log.info("[{}] User {} deleting dossier with ID: {}", requestId, principal.getUsername(), dossierId);
 
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long did = Objects.requireNonNull(dossierId, "dossierId");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, dossierId);
+                    || dossierService.userHasAccessToDossier(userId, did);
 
             if (!hasAccess) {
-                log.error("[{}] User {} attempted to delete unauthorized dossier {}", requestId, principal.getUsername(), dossierId);
+                log.error("[{}] User {} attempted to delete unauthorized dossier {}", requestId, principal.getUsername(), did);
                 throw new SecurityException("User cannot access this dossier");
             }
 
 
-            dossierService.deleteDossierSecure(dossierId, userId);
-            log.info("[{}] Dossier deleted successfully with ID: {}", requestId, dossierId);
+            dossierService.deleteDossierSecure(did, userId);
+            log.info("[{}] Dossier deleted successfully with ID: {}", requestId, did);
             return ResponseEntity.noContent().build();
 
         } catch (SecurityException e) {
@@ -349,21 +356,22 @@ public class DossierController {
         log.info("[{}] User {} updating activity for dossier ID: {}", requestId, principal.getUsername(), dossierId);
 
         try {
-            UUID userId = extractUserId(principal);
+            UUID userId = Objects.requireNonNull(extractUserId(principal), "userId");
+            Long did = Objects.requireNonNull(dossierId, "dossierId");
 
             // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
             boolean hasAccess = securityHelper.isPacioli(principal)
-                    || dossierService.userHasAccessToDossier(userId, dossierId);
+                    || dossierService.userHasAccessToDossier(userId, did);
 
             if (!hasAccess) {
-                log.error("[{}] User {} attempted to update unauthorized dossier {}", requestId, principal.getUsername(), dossierId);
+                log.error("[{}] User {} attempted to update unauthorized dossier {}", requestId, principal.getUsername(), did);
                 throw new SecurityException("User cannot access this dossier");
             }
 
             String activity = request.get("activity");
             DossierDTO updatedDossier;
-            updatedDossier = dossierService.updateActivity(dossierId, activity);
-            log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, dossierId);
+            updatedDossier = dossierService.updateActivity(did, activity);
+            log.info("[{}] Activity updated successfully for dossier ID: {}", requestId, did);
             return ResponseEntity.ok(updatedDossier);
 
         } catch (SecurityException e) {

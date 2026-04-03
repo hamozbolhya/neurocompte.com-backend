@@ -13,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -34,7 +35,8 @@ public class ExerciesController {
 
     @GetMapping("/cabinet/{cabinetId}")
     public ResponseEntity<List<Exercise>> getExercisesByCabinetId(@PathVariable Long cabinetId) {
-        List<Exercise> exercises = exerciseService.getExercisesByCabinetId(cabinetId);
+        List<Exercise> exercises = exerciseService.getExercisesByCabinetId(
+                Objects.requireNonNull(cabinetId, "cabinetId"));
         return ResponseEntity.ok(exercises);
     }
 
@@ -45,22 +47,20 @@ public class ExerciesController {
 
         log.info("User {} fetching exercises for dossier: {}", principal.getUsername(), dossierId);
 
-        UUID userId = extractUserIdFromPrincipal(principal);
-        if(userId == null) {
-            throw new SecurityException("Anonymous user attempting to fetch exercises");
-        }
+        UUID userId = Objects.requireNonNull(extractUserIdFromPrincipal(principal), "userId");
+        Long did = Objects.requireNonNull(dossierId, "dossierId");
 
         // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
         boolean hasAccess = securityHelper.isPacioli(principal)
-                || dossierService.userHasAccessToDossier(userId, dossierId);
+                || dossierService.userHasAccessToDossier(userId, did);
 
         if (!hasAccess) {
             log.error("User {} attempted to access exercises from unauthorized dossier {}",
-                    principal.getUsername(), dossierId);
-            throw new SecurityException("This dossier " + dossierId + " does not exist in your cabinet");
+                    principal.getUsername(), did);
+            throw new SecurityException("This dossier " + did + " does not exist in your cabinet");
         }
 
-        List<Exercise> exercises = exerciseService.getExercisesByDossier(dossierId);
+        List<Exercise> exercises = exerciseService.getExercisesByDossier(did);
         return ResponseEntity.ok(exercises);
     }
 
@@ -69,7 +69,9 @@ public class ExerciesController {
             @PathVariable Long dossierId,
             @RequestBody List<ExerciseRequest> exerciseRequests) {
 
-        List<Exercise> createdExercises = exerciseService.createExercisesForDossier(dossierId, exerciseRequests);
+        List<Exercise> createdExercises = exerciseService.createExercisesForDossier(
+                Objects.requireNonNull(dossierId, "dossierId"),
+                Objects.requireNonNull(exerciseRequests, "exerciseRequests"));
         return ResponseEntity.ok(createdExercises);
     }
 

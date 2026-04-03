@@ -6,7 +6,6 @@ import com.pacioli.core.DTO.AI.BankStatementResponse;
 import com.pacioli.core.config.BankApiProperties;
 import com.pacioli.core.services.AI.services.BankApiService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -32,7 +31,6 @@ public class BankApiServiceImpl implements BankApiService {
 
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("pdf", "jpeg", "jpg", "png");
 
-    @Autowired
     public BankApiServiceImpl(RestTemplate restTemplate, BankApiProperties bankApiProperties) {
         this.restTemplate = restTemplate;
         this.bankApiProperties = bankApiProperties;

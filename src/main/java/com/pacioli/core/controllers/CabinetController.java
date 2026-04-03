@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -39,23 +40,24 @@ public class CabinetController {
         if (existingCabinet.isPresent()) {
             throw new RuntimeException("Le cabinet avec l'ICE donné existe déjà.");
         }
-        return cabinetService.addCabinet(cabinet);
+        return cabinetService.addCabinet(Objects.requireNonNull(cabinet, "cabinet"));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<Cabinet> updateCabinet(@PathVariable Long id, @RequestBody Cabinet cabinet) {
-        return ResponseEntity.ok(cabinetService.updateCabinet(id, cabinet));
+        return ResponseEntity.ok(cabinetService.updateCabinet(Objects.requireNonNull(id, "id"),
+                Objects.requireNonNull(cabinet, "cabinet")));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCabinet(@PathVariable Long id) {
-        cabinetService.deleteCabinet(id);
+        cabinetService.deleteCabinet(Objects.requireNonNull(id, "id"));
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<CabinetDTO> fetchCabinetById(@PathVariable Long id) {
-        return ResponseEntity.ok(cabinetService.fetchCabinetById(id));
+        return ResponseEntity.ok(cabinetService.fetchCabinetById(Objects.requireNonNull(id, "id")));
     }
 
     @GetMapping
@@ -95,7 +97,8 @@ public class CabinetController {
             @PathVariable Long cabinetId,
             @PathVariable UUID userId) {
         try {
-            cabinetService.assignCabinetToUser(cabinetId, userId);
+            cabinetService.assignCabinetToUser(Objects.requireNonNull(cabinetId, "cabinetId"),
+                    Objects.requireNonNull(userId, "userId"));
             return "Cabinet assigned to user successfully.";
         } catch (Exception e) {
             return "Error: " + e.getMessage();
@@ -105,7 +108,7 @@ public class CabinetController {
     @DeleteMapping("/{userId}/unassign-cabinet")
     public ResponseEntity<?> unassignCabinetFromUser(@PathVariable UUID userId) {
         try {
-            cabinetService.unassignCabinetFromUser(userId);
+            cabinetService.unassignCabinetFromUser(Objects.requireNonNull(userId, "userId"));
             return ResponseEntity.ok("Cabinet unassigned successfully from user");
         } catch (RuntimeException e) {
             return ResponseEntity.status(404).body(e.getMessage());
@@ -117,7 +120,8 @@ public class CabinetController {
             @PathVariable Long cabinetId,
             @PathVariable String userEmail) {
 
-        CabinetStatsDTO stats = cabinetService.getCabinetStatsForUser(cabinetId, userEmail);
+        CabinetStatsDTO stats = cabinetService.getCabinetStatsForUser(Objects.requireNonNull(cabinetId, "cabinetId"),
+                userEmail);
         return ResponseEntity.ok(stats);
     }
 

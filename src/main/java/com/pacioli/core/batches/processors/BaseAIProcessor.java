@@ -23,6 +23,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Component
@@ -240,8 +241,9 @@ public abstract class BaseAIProcessor {
 
     public void processValidAIResponse(Piece piece, JsonNode aiResponse) throws JsonProcessingException {
         try {
+            Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required for processValidAIResponse");
             // ✅ STEP 1: Reload piece to ensure we have latest data
-            Piece refreshedPiece = pieceRepository.findById(piece.getId())
+            Piece refreshedPiece = pieceRepository.findById(pieceId)
                     .orElseThrow(() -> new RuntimeException("Piece not found after AI data extraction"));
 
             // ✅ STEP 2: Process DTO and save ecritures

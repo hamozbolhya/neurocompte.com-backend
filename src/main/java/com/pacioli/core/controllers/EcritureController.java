@@ -11,6 +11,8 @@ import com.pacioli.core.services.EcritureService;
 import com.pacioli.core.services.ExerciseService;
 import com.pacioli.core.services.JournalService;
 import com.pacioli.core.utils.SecurityHelper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +44,8 @@ public class EcritureController {
     private DossierService dossierService;
     @Autowired
     private SecurityHelper securityHelper;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @GetMapping("/filter")
     public ResponseEntity<Page<EcritureDTO>> getEcrituresWithExercisesByExerciseAndCabinet(
@@ -108,7 +112,8 @@ public class EcritureController {
                         existingEcriture.setJournal(journal);
                         break;
                     case "line":
-                        existingEcriture.setLines((List<Line>) value);
+                        existingEcriture.setLines(
+                                objectMapper.convertValue(value, new TypeReference<List<Line>>() {}));
                         break;
                     case "entryDate":
                         existingEcriture.setEntryDate(LocalDate.parse((String) value));
@@ -177,7 +182,6 @@ public class EcritureController {
                 log.debug("Amount updated flag provided: {}", ecritureRequest.getAmountUpdated());
             }
 
-            Ecriture updatedEcriture = ecritureService.updateEcriture(ecritureId, ecritureRequest);
             return ResponseEntity.ok("L'écriture a été mise à jour avec succès.");
         } catch (IllegalArgumentException ex) {
             log.error("Validation error during update: {}", ex.getMessage(), ex);

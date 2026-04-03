@@ -45,7 +45,6 @@ public class DossierController {
     @Autowired
     private SecurityHelper securityHelper;
 
-    @Autowired
     public DossierController(DossierService dossierService) {
         this.dossierService = dossierService;
     }

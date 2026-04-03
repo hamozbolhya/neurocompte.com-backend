@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -256,11 +257,11 @@ public class PieceController {
             }
 
             // Create a resource
-            Resource resource = new UrlResource(filePath.toUri());
+            Resource resource = new UrlResource(Objects.requireNonNull(filePath.toUri()));
 
             // Return the file as a response
             return ResponseEntity.ok()
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .contentType(Objects.requireNonNull(MediaType.APPLICATION_OCTET_STREAM))
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                     .body(resource);
 

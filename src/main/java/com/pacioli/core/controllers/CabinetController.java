@@ -8,7 +8,6 @@ import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.services.CabinetService;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.annotations.Parameter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;

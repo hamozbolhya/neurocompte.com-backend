@@ -28,7 +28,6 @@ public class ExerciesController {
     @Autowired
     private SecurityHelper securityHelper;
 
-    @Autowired
     public ExerciesController(ExerciseService exerciseService) {
         this.exerciseService = exerciseService;
     }

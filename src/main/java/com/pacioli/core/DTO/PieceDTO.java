@@ -54,11 +54,6 @@ public class PieceDTO {
         // Debug log
         if (ecritures != null) {
             log.info("📊 Set {} ecritures in PieceDTO", ecritures.size());
-            for (int i = 0; i < ecritures.size(); i++) {
-                EcrituresDTO2 ecriture = ecritures.get(i);
-//                log.info("  Ecriture {}: {} lines", i,
-//                        ecriture.getLines() != null ? ecriture.getLines().size() : 0);
-            }
         }
     }
 }

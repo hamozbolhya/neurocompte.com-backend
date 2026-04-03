@@ -34,9 +34,6 @@ public class AuditAspect {
 
         Object result = null;
         Throwable error = null;
-
-        long startTime = System.currentTimeMillis();
-
         try {
             result = joinPoint.proceed();
             return result;

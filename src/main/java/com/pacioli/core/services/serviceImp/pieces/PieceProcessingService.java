@@ -8,6 +8,7 @@ import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.serviceImp.AccountCreationService;
 import com.pacioli.core.services.serviceImp.DuplicateDetectionService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +29,6 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class PieceProcessingService {
 
-    private static final String DEFAULT_CURRENCY = "USD";
     private static final String DEFAULT_DEVISE = "MAD";
 
     private final PieceRepository pieceRepository;
@@ -232,7 +232,7 @@ public class PieceProcessingService {
      * Save Ecritures for piece
      */
     @Transactional
-    public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
+    public void saveEcrituresForPiece(Piece piece, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("🔥🔥🔥 SAVE ECritures START =========================================");
 //        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
@@ -351,7 +351,7 @@ public class PieceProcessingService {
                     }
 
                     // ✅ SAVE LINES after linking
-                    lineRepository.saveAll(ecriture.getLines());
+                    lineRepository.saveAll(Objects.requireNonNull(ecriture.getLines()));
                     totalLines += ecriture.getLines().size();
 
                     log.info("✅ Saved {} lines for Ecriture {}",
@@ -653,18 +653,23 @@ public class PieceProcessingService {
         piece.setExchangeRateUpdated(false);
 
         // Delete factureData if exists
-        if (piece.getFactureData() != null) {
-            factureDataRepository.delete(piece.getFactureData());
+        FactureData factureData = piece.getFactureData();
+        if (factureData != null) {
+            factureDataRepository.delete(factureData);
             piece.setFactureData(null);
         }
 
         // Delete ecritures and lines
-        if (piece.getEcritures() != null) {
-            for (Ecriture ecriture : piece.getEcritures()) {
-                lineRepository.deleteAll(ecriture.getLines());
+        List<Ecriture> ecritures = piece.getEcritures();
+        if (ecritures != null) {
+            for (Ecriture ecriture : ecritures) {
+                List<Line> lines = ecriture.getLines();
+                if (lines != null) {
+                    lineRepository.deleteAll(lines);
+                }
             }
-            ecritureRepository.deleteAll(piece.getEcritures());
-            piece.getEcritures().clear();
+            ecritureRepository.deleteAll(ecritures);
+            ecritures.clear();
         }
 
         Piece saved = pieceRepository.save(piece);
@@ -682,9 +687,9 @@ public class PieceProcessingService {
     /**
      * Create piece files as ZIP
      */
-    public byte[] createPieceFilesZip(Long pieceId) {
+    public byte[] createPieceFilesZip(@NonNull Long pieceId) {
         try {
-            Optional<Piece> pieceOpt = pieceRepository.findById(pieceId);
+            Optional<Piece> pieceOpt = pieceRepository.findById(Objects.requireNonNull(pieceId, "pieceId"));
             if (!pieceOpt.isPresent()) {
                 return null;
             }

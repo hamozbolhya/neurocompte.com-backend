@@ -11,6 +11,7 @@ import com.pacioli.core.services.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,7 +51,7 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     @Transactional
-    public Role createRole(String roleName, List<String> permissionIds) {
+    public Role createRole(String roleName, @NonNull List<String> permissionIds) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -62,7 +63,8 @@ public class RoleServiceImpl implements RoleService {
             List<String> permissionNames = new ArrayList<>();
 
             for (String id : permissionIds) {
-                Optional<Permission> permission = permissionRepository.findById(id);
+                String permissionId = Objects.requireNonNull(id, "permission id");
+                Optional<Permission> permission = permissionRepository.findById(permissionId);
                 permission.ifPresent(p -> {
                     permissions.add(p);
                     permissionNames.add(p.getName());
@@ -134,12 +136,12 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     @Transactional
-    public Role updateRole(UUID roleId, String roleName) {
+    public Role updateRole(@NonNull UUID roleId, String roleName) {
         User currentUser = userService.getCurrentUser();
 
         try {
             // Find the role by its ID
-            Role role = roleRepository.findById(String.valueOf(roleId))
+            Role role = roleRepository.findById(Objects.requireNonNull(String.valueOf(roleId), "roleId"))
                     .orElseThrow(() -> {
                         // ✅ MODIFICATION: Utilisation de logFailureWithTargetCabinet
                         auditService.logFailureWithTargetCabinet(

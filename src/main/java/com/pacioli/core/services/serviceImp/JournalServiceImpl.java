@@ -6,6 +6,7 @@ import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.JournalService;
 import com.pacioli.core.services.UserService;
 import jakarta.transaction.Transactional;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -39,7 +40,7 @@ public class JournalServiceImpl implements JournalService {
     }
 
     @Override
-    public Journal addJournal(Journal journal, Long dossierId) {
+    public Journal addJournal(@NonNull Journal journal, @NonNull Long dossierId) {
         // Check if a journal with the same name already exists in the dossier
         if (journalRepository.existsByNameAndDossierId(journal.getName(), dossierId)) {
             auditService.logFailure(
@@ -75,7 +76,7 @@ public class JournalServiceImpl implements JournalService {
     }
 
     @Override
-    public Journal updateJournal(Long id, Journal updatedJournal) {
+    public Journal updateJournal(@NonNull Long id, @NonNull Journal updatedJournal) {
         return journalRepository.findById(id).map(existingJournal -> {
             // Sauvegarder l'ancien état pour l'audit
             Journal oldJournal = new Journal();
@@ -125,7 +126,7 @@ public class JournalServiceImpl implements JournalService {
 
     @Override
     @Transactional
-    public void deleteJournal(Long id) {
+    public void deleteJournal(@NonNull Long id) {
         Journal journal = journalRepository.findById(id).orElseThrow(() -> {
             auditService.logFailure(
                     userService.getCurrentUser(),
@@ -185,13 +186,13 @@ public class JournalServiceImpl implements JournalService {
     }
 
     @Override
-    public List<Journal> getJournalsByDossierId(Long dossierId) {
+    public List<Journal> getJournalsByDossierId(@NonNull Long dossierId) {
         List<Journal> journals = journalRepository.findByDossierId(dossierId);
         return journals;
     }
 
     @Override
-    public Journal getJournalById(Long id) {
+    public Journal getJournalById(@NonNull Long id) {
         Journal journal = journalRepository.findById(id).orElseThrow(() -> {
             auditService.logFailure(
                     userService.getCurrentUser(),
@@ -215,7 +216,8 @@ public class JournalServiceImpl implements JournalService {
         return journal;
     }
 
-    public Journal findByName(String name, Long dossierId) {
+    @Override
+    public Journal findByName(String name, @NonNull Long dossierId) {
         Journal journal = journalRepository.findByNameAndDossierId(name, dossierId).orElseThrow(() -> {
             auditService.logFailure(
                     userService.getCurrentUser(),

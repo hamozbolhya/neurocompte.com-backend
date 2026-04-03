@@ -15,8 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -123,7 +123,7 @@ public class UserServiceImpl implements UserService {
         if (userInfo.getRoleIds() != null && !userInfo.getRoleIds().isEmpty()) {
             Set<Role> roles = new HashSet<>();
             for (String roleId : userInfo.getRoleIds()) {
-                Optional<Role> roleOptional = roleRepository.findById(roleId);
+                Optional<Role> roleOptional = roleRepository.findById(Objects.requireNonNull(roleId, "roleId"));
                 roleOptional.ifPresent(role -> {
                     roles.add(role);
                     roleNames.add(role.getName());
@@ -165,8 +165,9 @@ public class UserServiceImpl implements UserService {
 
     // ✅ ASSIGN ROLES - AVEC AUDIT
     @Override
-    public UserInfo assignRolesToUser(String userId, List<String> roleIds) {
-        Optional<User> userOptional = userRepository.findById(UUID.fromString(userId));
+    public UserInfo assignRolesToUser(String userId, @NonNull List<String> roleIds) {
+        UUID uid = Objects.requireNonNull(UUID.fromString(Objects.requireNonNull(userId, "userId")), "userId");
+        Optional<User> userOptional = userRepository.findById(uid);
         if (userOptional.isPresent()) {
             User user = userOptional.get();
 
@@ -179,7 +180,9 @@ public class UserServiceImpl implements UserService {
             Set<String> newRoleNames = new HashSet<>();
 
             for (String roleId : roleIds) {
-                Optional<Role> roleOptional = roleRepository.findById(String.valueOf(UUID.fromString(roleId)));
+                String rid = Objects.requireNonNull(roleId, "roleId");
+                Optional<Role> roleOptional = roleRepository.findById(
+                        Objects.requireNonNull(String.valueOf(UUID.fromString(rid)), "roleId"));
                 roleOptional.ifPresent(role -> {
                     roles.add(role);
                     newRoleNames.add(role.getName());
@@ -241,8 +244,9 @@ public class UserServiceImpl implements UserService {
 
     // ✅ ASSIGN ROLE - AVEC AUDIT
     @Override
-    public User assignRoleToUser(String userId, String roleId) {
-        Optional<User> userOpt = userRepository.findById(UUID.fromString(userId));
+    public User assignRoleToUser(String userId, @NonNull String roleId) {
+        UUID uid = Objects.requireNonNull(UUID.fromString(Objects.requireNonNull(userId, "userId")), "userId");
+        Optional<User> userOpt = userRepository.findById(uid);
         Optional<Role> roleOpt = roleRepository.findById(roleId);
 
         if (userOpt.isPresent() && roleOpt.isPresent()) {
@@ -286,8 +290,9 @@ public class UserServiceImpl implements UserService {
 
     // ✅ REMOVE ROLE - AVEC AUDIT
     @Override
-    public User removeRoleFromUser(String userId, String roleId) {
-        Optional<User> userOpt = userRepository.findById(UUID.fromString(userId));
+    public User removeRoleFromUser(String userId, @NonNull String roleId) {
+        UUID uid = Objects.requireNonNull(UUID.fromString(Objects.requireNonNull(userId, "userId")), "userId");
+        Optional<User> userOpt = userRepository.findById(uid);
         Optional<Role> roleOpt = roleRepository.findById(roleId);
 
         if (userOpt.isPresent() && roleOpt.isPresent()) {
@@ -331,14 +336,14 @@ public class UserServiceImpl implements UserService {
 
     // ✅ GET - PAS D'AUDIT
     @Override
-    public List<User> getUsersByCabinetId(Long cabinetId) {
+    public List<User> getUsersByCabinetId(@NonNull Long cabinetId) {
         return userRepository.findByCabinetId(cabinetId);
     }
 
     // ✅ UPDATE HOLD STATUS - AVEC AUDIT
     @Transactional
     @Override
-    public void updateUserHoldStatus(UUID userId, boolean isHold) {
+    public void updateUserHoldStatus(@NonNull UUID userId, boolean isHold) {
         Optional<User> userOptional = userRepository.findById(userId);
         if (userOptional.isEmpty()) {
             // Audit échec
@@ -373,7 +378,7 @@ public class UserServiceImpl implements UserService {
     // ✅ UPDATE DELETE STATUS - AVEC AUDIT
     @Transactional
     @Override
-    public void updateUserDeleteStatus(UUID userId, boolean isDeleted) {
+    public void updateUserDeleteStatus(@NonNull UUID userId, boolean isDeleted) {
         Optional<User> userOptional = userRepository.findById(userId);
         if (userOptional.isEmpty()) {
             // Audit échec
@@ -408,7 +413,7 @@ public class UserServiceImpl implements UserService {
     // ✅ UPDATE PASSWORD - AVEC AUDIT
     @Transactional
     @Override
-    public void updateUserPassword(UUID userId, String newPassword) {
+    public void updateUserPassword(@NonNull UUID userId, String newPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> {
                     // Audit échec
@@ -441,7 +446,7 @@ public class UserServiceImpl implements UserService {
 
     // ✅ UPDATE USER INFO - AVEC AUDIT
     @Override
-    public void updateUserInfo(UUID userId, UpdateUserInfoRequest request) {
+    public void updateUserInfo(@NonNull UUID userId, UpdateUserInfoRequest request) {
         Optional<User> userOptional = userRepository.findById(userId);
 
         if (userOptional.isPresent()) {
@@ -459,7 +464,7 @@ public class UserServiceImpl implements UserService {
             user.setEmail(request.getEmail());
 
             // Fetch the Role based on roleId (String)
-            Role role = roleRepository.findById(request.getRoleId())
+            Role role = roleRepository.findById(Objects.requireNonNull(request.getRoleId(), "roleId"))
                     .orElseThrow(() -> {
                         auditService.logFailure(
                                 getCurrentUser(),

@@ -8,10 +8,11 @@ import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.ExerciseService;
 import com.pacioli.core.services.UserService;
 import com.pacioli.core.DTO.ExerciseRequest;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,6 @@ public class ExerciseServiceImpl implements ExerciseService {
     private final AuditService auditService;
     private final UserService userService;
 
-    @Autowired
     public ExerciseServiceImpl(ExerciceRepository exerciseRepository, DossierRepository dossierRepository,
                                AuditService auditService, UserService userService) {
         this.exerciseRepository = exerciseRepository;
@@ -67,7 +67,7 @@ public class ExerciseServiceImpl implements ExerciseService {
     }
 
     @Override
-    public List<Exercise> getExercisesByCabinetId(Long cabinetId) {
+    public List<Exercise> getExercisesByCabinetId(@NonNull Long cabinetId) {
         List<Exercise> exercises = exerciseRepository.findExercisesByCabinetId(cabinetId);
 
         // ✅ Audit de consultation
@@ -82,7 +82,7 @@ public class ExerciseServiceImpl implements ExerciseService {
     }
 
     @Override
-    public List<Exercise> getExercisesByDossier(Long dossierId) {
+    public List<Exercise> getExercisesByDossier(@NonNull Long dossierId) {
         List<Exercise> exercises = exerciseRepository.findExercisesByDossierID(dossierId);
 
         // ✅ Audit de consultation
@@ -97,7 +97,7 @@ public class ExerciseServiceImpl implements ExerciseService {
     }
 
     @Override
-    public boolean validateExerciseAndCabinet(Long exerciseId, Long cabinetId) {
+    public boolean validateExerciseAndCabinet(@NonNull Long exerciseId, Long cabinetId) {
         boolean isValid = exerciseRepository.validateExerciseAndCabinet(exerciseId, cabinetId).isPresent();
 
         // ✅ Audit avec cabinet cible (si on peut récupérer l'exercice)
@@ -124,7 +124,7 @@ public class ExerciseServiceImpl implements ExerciseService {
 
     @Override
     @Transactional
-    public List<Exercise> createExercisesForDossier(Long dossierId, List<ExerciseRequest> exerciseRequests) {
+    public List<Exercise> createExercisesForDossier(@NonNull Long dossierId, @NonNull List<ExerciseRequest> exerciseRequests) {
         // Find the dossier
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> {
             // ✅ Audit d'échec (pas de dossier donc pas de cabinet cible)
@@ -219,7 +219,7 @@ public class ExerciseServiceImpl implements ExerciseService {
             return exercise;
         }).collect(Collectors.toList());
 
-        List<Exercise> savedExercises = exerciseRepository.saveAll(exercises);
+        List<Exercise> savedExercises = exerciseRepository.saveAll(new ArrayList<>(exercises));
 
         // ✅ Audit avec cabinet cible
         Map<String, Object> exerciseDetails = new HashMap<>();

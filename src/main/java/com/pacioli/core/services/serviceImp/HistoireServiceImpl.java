@@ -6,11 +6,7 @@ import com.pacioli.core.services.HistoireService;
 import com.pacioli.core.services.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
@@ -18,8 +14,6 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -31,7 +25,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class HistoireServiceImpl implements HistoireService {
 
-    private final RestTemplate restTemplate;
     private final HistoireAiProperties histoireAiProperties;
     private final AuditService auditService;
     private final UserService userService;

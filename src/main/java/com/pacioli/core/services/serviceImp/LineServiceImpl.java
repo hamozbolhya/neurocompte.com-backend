@@ -5,7 +5,10 @@ import com.pacioli.core.repositories.LineRepository;
 import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.LineService;
 import com.pacioli.core.services.UserService;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
+
+import java.util.Objects;
 
 @Service
 public class LineServiceImpl implements LineService {
@@ -44,8 +47,8 @@ public class LineServiceImpl implements LineService {
     }
 
     @Override
-    public Line addLine(Line line) {
-        Line savedLine = lineRepository.save(line);
+    public Line addLine(@NonNull Line line) {
+        Line savedLine = lineRepository.save(Objects.requireNonNull(line, "line"));
 
         // ✅ Audit avec cabinet cible
         Long targetCabinetId = getTargetCabinetId(savedLine);
@@ -67,7 +70,7 @@ public class LineServiceImpl implements LineService {
     }
 
     @Override
-    public Line updateLine(Long id, Line updatedLine) {
+    public Line updateLine(@NonNull Long id, @NonNull Line updatedLine) {
         return lineRepository.findById(id).map(existingLine -> {
             // Sauvegarder l'ancien état pour l'audit
             Line oldLine = new Line();
@@ -117,7 +120,7 @@ public class LineServiceImpl implements LineService {
     }
 
     @Override
-    public void deleteLine(Long id) {
+    public void deleteLine(@NonNull Long id) {
         Line line = lineRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Line not found with ID: " + id));
 

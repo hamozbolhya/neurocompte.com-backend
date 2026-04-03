@@ -22,6 +22,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.lang.NonNull;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -65,7 +66,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece savePiece(String pieceData, MultipartFile file, Long dossierId, String country) {
+    public Piece savePiece(String pieceData, MultipartFile file, @NonNull Long dossierId, String country) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -126,7 +127,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData, JsonNode originalAiResponse) {
+    public Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse) {
         User currentUser = userService.getCurrentUser();
 
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
@@ -331,32 +332,32 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Page<PieceDTO> getPiecesForUser(UUID userId, Pageable pageable) {
+    public Page<PieceDTO> getPiecesForUser(@NonNull UUID userId, @NonNull Pageable pageable) {
         Page<Piece> piecesPage = pieceRepository.findByDossierCabinetUsersId(userId, pageable);
         List<PieceDTO> pieceDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
-        return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
+        return new PageImpl<>(new ArrayList<>(pieceDTOs), pageable, piecesPage.getTotalElements());
     }
 
 
     // Core CRUD operations
     @Override
     @Transactional
-    public Page<PieceDTO> getPiecesByDossier(Long dossierId, Pageable pageable) {
+    public Page<PieceDTO> getPiecesByDossier(@NonNull Long dossierId, @NonNull Pageable pageable) {
         Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
         List<PieceDTO> pieceDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
-        return new PageImpl<>(pieceDTOs, pageable, piecesPage.getTotalElements());
+        return new PageImpl<>(new ArrayList<>(pieceDTOs), pageable, piecesPage.getTotalElements());
     }
 
     @Override
     @Transactional
-    public List<Piece> getPiecesByDossierIdSortedByDate(Long dossierId) {
+    public List<Piece> getPiecesByDossierIdSortedByDate(@NonNull Long dossierId) {
         List<Piece> pieces = pieceRepository.findByDossierIdWithDetailsOrderByUploadDateDesc(dossierId);
         return pieces;
     }
 
 
     @Override
-    public Piece getPieceById(Long id) {
+    public Piece getPieceById(@NonNull Long id) {
         return pieceRepository.findById(id).orElseThrow(() -> {
             return new IllegalArgumentException("Piece with id " + id + " not found");
         });
@@ -364,7 +365,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public PieceDTO getPieceDetails(Long pieceId) {
+    public PieceDTO getPieceDetails(@NonNull Long pieceId) {
         Piece piece = getPieceById(pieceId);
         PieceDTO dto = pieceDTOMapper.toBasicDTO(piece);
         pieceDTOMapper.addFactureDataIfExists(piece, dto);
@@ -374,7 +375,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public void deletePiece(Long id) {
+    public void deletePiece(@NonNull Long id) {
         User currentUser = userService.getCurrentUser();
 
         try {
@@ -402,7 +403,7 @@ public class PieceServiceImpl implements PieceService {
     // Status operations
     @Override
     @Transactional
-    public Piece updatePieceStatus(Long pieceId, String newStatus) {
+    public Piece updatePieceStatus(@NonNull Long pieceId, String newStatus) {
         Piece piece = getPieceById(pieceId);
         PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
 
@@ -413,7 +414,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece forcePieceNotDuplicate(Long pieceId) {
+    public Piece forcePieceNotDuplicate(@NonNull Long pieceId) {
         User currentUser = userService.getCurrentUser();
 
         Piece piece = getPieceById(pieceId);
@@ -443,7 +444,7 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public PieceStatsDTO getPieceStatsByDossier(Long dossierId) {
+    public PieceStatsDTO getPieceStatsByDossier(@NonNull Long dossierId) {
         PieceStatsDTO stats = pieceRepository.getPieceStatsByDossierId(dossierId);
         PieceStatsDTO result = (stats != null) ? stats : createEmptyStats(dossierId);
         return result;
@@ -451,21 +452,21 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public List<PieceStatsDTO> getPieceStatsByCabinet(Long cabinetId) {
+    public List<PieceStatsDTO> getPieceStatsByCabinet(@NonNull Long cabinetId) {
         List<PieceStatsDTO> stats = pieceRepository.getPieceStatsByCabinetId(cabinetId);
         return stats;
     }
 
     // File operations
     @Override
-    public byte[] getPieceFilesAsZip(Long pieceId) {
+    public byte[] getPieceFilesAsZip(@NonNull Long pieceId) {
         return pieceProcessingService.createPieceFilesZip(pieceId);
     }
 
     // Notification operations
     @Override
     @Transactional
-    public void notifyPiecesUpdate(Long dossierId) {
+    public void notifyPiecesUpdate(@NonNull Long dossierId) {
         // NE PAS AUDITER - c'est une notification technique
 
         if (messagingTemplate == null) {
@@ -478,7 +479,7 @@ public class PieceServiceImpl implements PieceService {
             List<Piece> pieces = pieceRepository.findByDossierIdOrderByUploadDateDesc(dossierId);
             List<PieceDTO> basicDTOs = pieces.stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
 
-            messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, basicDTOs);
+            messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, new ArrayList<>(basicDTOs));
 
             log.debug("Notified WebSocket /topic/dossier-pieces/{} — {} pieces", dossierId, basicDTOs.size());
 
@@ -510,7 +511,7 @@ public class PieceServiceImpl implements PieceService {
     }
 
     private PieceStatsDTO createEmptyStats(Long dossierId) {
-        return dossierRepository.findById(dossierId).map(dossier -> {
+        return dossierRepository.findById(Objects.requireNonNull(dossierId, "dossierId")).map(dossier -> {
             PieceStatsDTO stats = new PieceStatsDTO();
             stats.setDossierId(dossier.getId());
             stats.setDossierName(dossier.getName());
@@ -550,6 +551,7 @@ public class PieceServiceImpl implements PieceService {
     }
 
     private void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
-        pieceProcessingService.saveEcrituresForPiece(piece, dossierId, pieceData, originalAiResponse);
+        pieceProcessingService.saveEcrituresForPiece(piece, Objects.requireNonNull(dossierId, "dossierId"), pieceData,
+                originalAiResponse);
     }
 }

@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -141,7 +142,8 @@ public class AIPieceProcessingService {
 
     private void processSinglePiece(Piece piece) {
         try {
-            Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
+            Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required for batch processing");
+            Piece currentPiece = pieceRepository.findById(pieceId).orElse(piece);
 
             if (shouldSkipProcessing(currentPiece)) {
                 log.info("⏭️ Skipping piece {} - status: {}", currentPiece.getId(), currentPiece.getStatus());
@@ -152,8 +154,8 @@ public class AIPieceProcessingService {
             aiResponseProcessor.processPieceWithRetry(currentPiece, 1);
 
             // ✅ CRITICAL FIX: Reload the piece after AI processing to get updated AI data
-            Piece processedPiece = pieceRepository.findById(piece.getId())
-                    .orElseThrow(() -> new RuntimeException("Piece not found after processing: " + piece.getId()));
+            Piece processedPiece = pieceRepository.findById(pieceId)
+                    .orElseThrow(() -> new RuntimeException("Piece not found after processing: " + pieceId));
 
             log.info("✅ AI processing completed for piece {} - new status: {}, AI Amount: {}, AI Currency: {}",
                     processedPiece.getId(), processedPiece.getStatus(),
@@ -190,7 +192,8 @@ public class AIPieceProcessingService {
     }
 
     private void updatePieceStatus(Piece piece, PieceStatus status) {
-        Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
+        Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required");
+        Piece currentPiece = pieceRepository.findById(pieceId).orElse(piece);
         currentPiece.setStatus(status);
 
         // ✅ Preserve AI data if it exists

@@ -30,9 +30,6 @@ public class BankAIProcessor extends BaseAIProcessor {
     private AIResponseNormalizer responseNormalizer;
 
     @Autowired
-    private CurrencyConversionService currencyConversionService;
-
-    @Autowired
     private CurrencyDataExtractionService currencyDataExtractionService;
 
     @Autowired

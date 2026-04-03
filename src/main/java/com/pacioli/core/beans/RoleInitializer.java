@@ -22,19 +22,6 @@ public class RoleInitializer {
                                         CabinetRepository cabinetRepository,
                                         PasswordEncoder passwordEncoder) {
         return args -> {
-            // Create default roles
-            Role adminRole = roleRepository.findByName("Adminstrateur").orElseGet(() -> {
-                Role role = new Role();
-                role.setName("Adminstrateur");
-                return roleRepository.save(role);
-            });
-
-            Role utilisateurRole = roleRepository.findByName("Utilisateur").orElseGet(() -> {
-                Role role = new Role();
-                role.setName("Utilisateur");
-                return roleRepository.save(role);
-            });
-
             Role pacioliRole = roleRepository.findByName("PACIOLI").orElseGet(() -> {
                 Role role = new Role();
                 role.setName("PACIOLI");

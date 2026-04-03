@@ -23,6 +23,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -127,7 +128,8 @@ public class PieceServiceImpl implements PieceService {
 
     @Override
     @Transactional
-    public Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse) {
+    public Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData,
+            @Nullable JsonNode originalAiResponse) {
         User currentUser = userService.getCurrentUser();
 
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));

@@ -7,6 +7,7 @@ import com.pacioli.core.models.Piece;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -22,7 +23,8 @@ public interface PieceService {
     Page<PieceDTO> getPiecesForUser(@NonNull UUID userId, @NonNull Pageable pageable);
 
     Piece savePiece(String pieceData, MultipartFile file, @NonNull Long dossierId, String country);
-    Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse);
+    Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData,
+            @Nullable JsonNode originalAiResponse);
 
     Piece updatePieceStatus(@NonNull Long pieceId, String newStatus);
     Piece forcePieceNotDuplicate(@NonNull Long pieceId);
@@ -34,7 +36,7 @@ public interface PieceService {
 
     void notifyPiecesUpdate(@NonNull Long dossierId);
 
-    default Piece saveEcrituresAndFacture(Long pieceId, Long dossierId, String pieceData) {
+    default Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData) {
         return saveEcrituresAndFacture(pieceId, dossierId, pieceData, null);
     }
 }

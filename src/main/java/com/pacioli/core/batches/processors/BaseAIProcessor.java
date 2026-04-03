@@ -202,12 +202,14 @@ public abstract class BaseAIProcessor {
     }
 
     protected void updatePieceStatus(Piece piece, PieceStatus status) {
-        pieceService.updatePieceStatus(piece.getId(), status.name());
+        Long id = Objects.requireNonNull(piece.getId(), "piece id");
+        pieceService.updatePieceStatus(id, status.name());
     }
 
     protected void rejectPiece(Piece piece, String reason) {
-        log.error("❌ Rejecting piece {}: {}", piece.getId(), reason);
-        pieceService.updatePieceStatus(piece.getId(), PieceStatus.REJECTED.name());
+        Long id = Objects.requireNonNull(piece.getId(), "piece id");
+        log.error("❌ Rejecting piece {}: {}", id, reason);
+        pieceService.updatePieceStatus(id, PieceStatus.REJECTED.name());
     }
 
     /**
@@ -257,9 +259,11 @@ public abstract class BaseAIProcessor {
             JsonNode convertedResponse = createConvertedResponseNode(pieceDTO, aiResponse);
 
             // ✅ STEP 4: Save to database
+            Dossier dossier = Objects.requireNonNull(refreshedPiece.getDossier(), "dossier");
+            Long dossierId = Objects.requireNonNull(dossier.getId(), "dossier id");
             pieceService.saveEcrituresAndFacture(
-                    refreshedPiece.getId(),
-                    refreshedPiece.getDossier().getId(),
+                    pieceId,
+                    dossierId,
                     objectMapper.writeValueAsString(pieceDTO),
                     convertedResponse
             );

@@ -213,9 +213,10 @@ public class AIPieceProcessingService {
 
     private void notifyPiecesUpdate(Long dossierId) {
         try {
-            log.info("📢 Sending WebSocket notification for dossier {}", dossierId);
-            pieceService.notifyPiecesUpdate(dossierId);
-            log.info("✅ WebSocket notification sent for dossier {}", dossierId);
+            Long id = Objects.requireNonNull(dossierId, "dossierId");
+            log.info("📢 Sending WebSocket notification for dossier {}", id);
+            pieceService.notifyPiecesUpdate(id);
+            log.info("✅ WebSocket notification sent for dossier {}", id);
         } catch (Exception e) {
             log.error("❌ Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage());
         }

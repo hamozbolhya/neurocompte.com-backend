@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @RestController
@@ -26,7 +27,8 @@ public class RoleController {
     // Endpoint to create a new role with associated permissions
     @PostMapping
     public ResponseEntity<Role> createRole(@RequestBody RoleRequest roleRequest) {
-        Role createdRole = roleService.createRole(roleRequest.getName(), roleRequest.getPermissionIds());
+        Role createdRole = roleService.createRole(roleRequest.getName(),
+                Objects.requireNonNull(roleRequest.getPermissionIds(), "permissionIds"));
         return ResponseEntity.ok(createdRole);
     }
 
@@ -35,8 +37,7 @@ public class RoleController {
     public ResponseEntity<Role> updateRole(
             @PathVariable UUID id,
             @RequestBody RoleRequest roleRequest) {
-        //TODO WHEN YOU UPDATE ROLE AND PERMISSIONS ADD THE COMMENT LINE TO THE LOOP
-        Role updatedRole = roleService.updateRole(id, roleRequest.getName());
+        Role updatedRole = roleService.updateRole(Objects.requireNonNull(id, "id"), roleRequest.getName());
                 //, roleRequest.getPermissionIds()
 
         return ResponseEntity.ok(updatedRole);

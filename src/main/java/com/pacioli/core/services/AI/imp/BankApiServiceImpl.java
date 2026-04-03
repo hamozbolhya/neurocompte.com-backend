@@ -20,6 +20,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -80,8 +82,13 @@ public class BankApiServiceImpl implements BankApiService {
                 log.debug("🔧 [{}] Generated new file ID: {}", requestId, fileId);
             }
 
-            // Get file extension
-            String fileExtension = StringUtils.getFilenameExtension(originalFilename).toLowerCase();
+            // Get file extension (getFilenameExtension may return null)
+            String ext = StringUtils.getFilenameExtension(originalFilename);
+            if (ext == null || ext.isEmpty()) {
+                log.error("❌ [{}] Could not resolve file extension for {}", requestId, originalFilename);
+                return BankStatementResponse.error("Invalid file name", HttpStatus.BAD_REQUEST, "INVALID_FILE_TYPE");
+            }
+            String fileExtension = ext.toLowerCase(Locale.ROOT);
 
             // Generate the URL
             String fileUrl = generateFileUrl(request.getDossierId(), fileId, fileExtension);
@@ -137,11 +144,11 @@ public class BankApiServiceImpl implements BankApiService {
             long startTime = System.currentTimeMillis();
 
             // Use URI.create() to prevent RestTemplate from re-encoding
-            URI uri = URI.create(fileUrl);
+            URI uri = Objects.requireNonNull(URI.create(fileUrl), "uri");
 
             ResponseEntity<String> response = restTemplate.exchange(
-                    uri,  // Use URI instead of String URL
-                    HttpMethod.PUT,
+                    uri,
+                    Objects.requireNonNull(HttpMethod.PUT),
                     requestEntity,
                     String.class
             );
@@ -187,9 +194,10 @@ public class BankApiServiceImpl implements BankApiService {
             log.error("❌ [{}] External API returned non-success status: {} - Response: {}",
                     requestId, response.getStatusCode(), response.getBody());
 
+            HttpStatus errorStatus = HttpStatus.resolve(response.getStatusCode().value());
             return BankStatementResponse.error(
                     "External API returned status: " + response.getStatusCode(),
-                    HttpStatus.valueOf(response.getStatusCodeValue()),
+                    errorStatus != null ? errorStatus : HttpStatus.INTERNAL_SERVER_ERROR,
                     response.getBody()
             );
         }
@@ -287,7 +295,7 @@ public class BankApiServiceImpl implements BankApiService {
             // Prepare headers with API key
             HttpHeaders headers = new HttpHeaders();
             headers.set("x-api-key", "u4d9s6oPlh8BGnlfFkT4P1iuZKKP9heZ5uvJ57pL"); // Your API key
-            headers.setAccept(Arrays.asList(MediaType.APPLICATION_JSON));
+            headers.setAccept(Objects.requireNonNull(List.of(MediaType.APPLICATION_JSON)));
 
             HttpEntity<String> requestEntity = new HttpEntity<>(headers);
 
@@ -319,11 +327,11 @@ public class BankApiServiceImpl implements BankApiService {
             long startTime = System.currentTimeMillis();
 
             // Use URI.create() to prevent encoding issues
-            URI uri = URI.create(fileUrl);
+            URI uri = Objects.requireNonNull(URI.create(fileUrl), "uri");
 
             ResponseEntity<String> response = restTemplate.exchange(
                     uri,
-                    HttpMethod.GET,
+                    Objects.requireNonNull(HttpMethod.GET),
                     requestEntity,
                     String.class
             );
@@ -367,9 +375,10 @@ public class BankApiServiceImpl implements BankApiService {
             log.error("❌ [{}] External GET API returned non-success status: {} - Response: {}",
                     requestId, response.getStatusCode(), response.getBody());
 
+            HttpStatus errorStatus = HttpStatus.resolve(response.getStatusCode().value());
             return BankStatementGetResponse.error(
                     "External API returned status: " + response.getStatusCode(),
-                    HttpStatus.valueOf(response.getStatusCodeValue()),
+                    errorStatus != null ? errorStatus : HttpStatus.INTERNAL_SERVER_ERROR,
                     response.getBody()
             );
         }

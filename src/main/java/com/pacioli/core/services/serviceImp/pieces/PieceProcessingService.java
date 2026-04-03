@@ -689,7 +689,7 @@ public class PieceProcessingService {
      */
     public byte[] createPieceFilesZip(@NonNull Long pieceId) {
         try {
-            Optional<Piece> pieceOpt = pieceRepository.findById(Objects.requireNonNull(pieceId, "pieceId"));
+            Optional<Piece> pieceOpt = pieceRepository.findById(pieceId);
             if (!pieceOpt.isPresent()) {
                 return null;
             }

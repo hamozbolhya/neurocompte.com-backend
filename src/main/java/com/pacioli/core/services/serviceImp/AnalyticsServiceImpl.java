@@ -19,6 +19,7 @@ import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.AnalyticsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.lang.NonNull;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -762,7 +763,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
     }
 
-    public Map<String, Object> getCabinetAnalytics(Long cabinetId) {
+    public Map<String, Object> getCabinetAnalytics(@NonNull Long cabinetId) {
         log.info("Generating analytics for cabinet: {}", cabinetId);
 
         try {
@@ -815,7 +816,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
     }
 
-    public Map<String, Object> getCabinetAnalyticsForPeriod(Long cabinetId, LocalDate startDate, LocalDate endDate) {
+    public Map<String, Object> getCabinetAnalyticsForPeriod(@NonNull Long cabinetId, LocalDate startDate, LocalDate endDate) {
         log.info("Generating analytics for cabinet: {} for period: {} to {}", cabinetId, startDate, endDate);
 
         if (startDate.isAfter(endDate)) {
@@ -927,7 +928,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         return cabinetAnalytics;
     }
 
-    private Map<String, Object> generateManualUpdateStatsForCabinetAndPeriod(Long cabinetId, LocalDate startDate, LocalDate endDate) {
+    private Map<String, Object> generateManualUpdateStatsForCabinetAndPeriod(@NonNull Long cabinetId, LocalDate startDate, LocalDate endDate) {
         Map<String, Object> manualUpdateStats = new HashMap<>();
 
         Long manualEcritures = ecritureRepository.countManuallyUpdatedEcrituresByCabinetAndPeriod(cabinetId, startDate, endDate);
@@ -955,7 +956,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         return manualUpdateStats;
     }
 
-    private Map<String, Object> generateManualUpdateStatsForCabinet(Long cabinetId) {
+    private Map<String, Object> generateManualUpdateStatsForCabinet(@NonNull Long cabinetId) {
         Map<String, Object> manualUpdateStats = new HashMap<>();
 
         Long manualEcritures = ecritureRepository.countManuallyUpdatedEcrituresByCabinet()

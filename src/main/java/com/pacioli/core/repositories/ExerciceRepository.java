@@ -26,8 +26,6 @@ public interface ExerciceRepository extends JpaRepository<Exercise, Long> {
             @Param("endDate") LocalDate endDate,
             @Param("exerciseId") Long exerciseId);
 
-    List<Exercise> findAllById(Iterable<Long> ids);
-
     @Query("SELECT ex FROM Exercise ex " +
             "JOIN ex.dossier d " +
             "WHERE d.cabinet.id = :cabinetId")

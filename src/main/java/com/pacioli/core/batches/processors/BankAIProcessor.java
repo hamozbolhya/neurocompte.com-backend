@@ -3,7 +3,6 @@ package com.pacioli.core.batches.processors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pacioli.core.DTO.AI.BankStatementGetResponse;
-import com.pacioli.core.batches.processors.converters.CurrencyConversionService;
 import com.pacioli.core.batches.processors.converters.CurrencyDataExtractionService;
 import com.pacioli.core.batches.processors.detection.DuplicationDetectionService;
 import com.pacioli.core.batches.processors.normalizers.AIResponseNormalizer;

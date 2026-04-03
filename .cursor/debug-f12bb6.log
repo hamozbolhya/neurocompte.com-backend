@@ -1,0 +1,38 @@
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1411, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1414, isDuplicate: true
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1413, isDuplicate: true
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1410, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1412, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1411, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1411, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1410, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1410, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1412, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1412, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1411, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1411, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1410, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1410, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1412, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1412, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+DEBUG_C: PieceDTOMapper.toBasicDTO - pieceId: 1395, isDuplicate: false
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1415,"isForced":false,"status":"UPLOADED"},"timestamp":1775175415874}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1416,"isForced":false,"status":"UPLOADED"},"timestamp":1775175415891}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1417,"isForced":false,"status":"UPLOADED"},"timestamp":1775175415892}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1418,"isForced":false,"status":"UPLOADED"},"timestamp":1775175475796}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1419,"isForced":false,"status":"UPLOADED"},"timestamp":1775175475797}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H2","location":"DuplicationDetectionService.findOriginalPiece","message":"Duplicate matched by hash","data":{"pieceId":1419,"originalId":1416,"isForced":false},"timestamp":1775175475812}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H2","location":"DuplicationDetectionService.findOriginalPiece","message":"Duplicate matched by hash","data":{"pieceId":1418,"originalId":1415,"isForced":false},"timestamp":1775175475900}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H5","location":"NormalAIProcessor.processPieceWithRetry","message":"Batch marked duplicate path","data":{"pieceId":1419,"isForced":false,"originalId":1416},"timestamp":1775175475900}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H5","location":"NormalAIProcessor.processPieceWithRetry","message":"Batch marked duplicate path","data":{"pieceId":1418,"isForced":false,"originalId":1415},"timestamp":1775175475903}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H4","location":"PieceProcessingService.forcePieceAsNotDuplicate","message":"Piece forced as not duplicate","data":{"pieceId":1419,"isForced":true,"isDuplicate":false,"status":"UPLOADED"},"timestamp":1775175482598}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H1","location":"DuplicationDetectionService.findOriginalPiece","message":"Entered duplicate check","data":{"pieceId":1419,"isForced":true,"status":"UPLOADED"},"timestamp":1775175535813}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H2","location":"DuplicationDetectionService.findOriginalPiece","message":"Duplicate matched by hash","data":{"pieceId":1419,"originalId":1416,"isForced":true},"timestamp":1775175535937}
+{"sessionId":"f12bb6","runId":"forced-check-1","hypothesisId":"H5","location":"NormalAIProcessor.processPieceWithRetry","message":"Batch marked duplicate path","data":{"pieceId":1419,"isForced":true,"originalId":1416},"timestamp":1775175535939}

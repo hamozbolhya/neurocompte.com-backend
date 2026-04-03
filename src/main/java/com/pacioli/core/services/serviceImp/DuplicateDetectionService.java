@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -17,67 +18,140 @@ import java.util.Optional;
 @Slf4j
 public class DuplicateDetectionService {
 
+    private static final String BANK_PIECE_TYPE = "Relevés bancaires";
+
     @Autowired
     private PieceRepository pieceRepository;
 
+    private static boolean isBankStatement(Piece piece) {
+        return piece != null && piece.getType() != null
+                && BANK_PIECE_TYPE.equalsIgnoreCase(piece.getType().trim());
+    }
+
+    private static final Comparator<Piece> BY_UPLOAD_THEN_ID = Comparator
+            .comparing(Piece::getUploadDate, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(Piece::getId);
+
+    /** Oldest piece in {@code candidates} (stable tie-break on id). */
+    private static Optional<Piece> oldestAmong(List<Piece> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        return candidates.stream()
+                .filter(p -> p.getId() != null)
+                .min(BY_UPLOAD_THEN_ID);
+    }
+
     /**
-     * Check for technical duplicates based on original filename and similar patterns
-     * This should be called during piece upload (savePiece method)
-     *
-     * @param dossierId        The dossier ID
-     * @param originalFileName The original filename of the uploaded file
-     * @return Optional containing the original piece if duplicate found
+     * True duplicate only if {@code self} is not the canonical original: oldest in the whole group
+     * (same hash / same name / same similarity cluster). Using "oldest among <i>other</i> matches" wrongly
+     * marks the first upload as duplicate of the second when two+ files share a hash.
      */
-    public Optional<Piece> checkTechnicalDuplicate(Long dossierId, String originalFileName) {
-        log.info("🔍 Checking for technical duplicate: dossier={}, filename={}", dossierId, originalFileName);
+    private static Optional<Piece> duplicateOfCanonicalOriginal(List<Piece> group, Piece self) {
+        if (self == null || self.getId() == null) {
+            return Optional.empty();
+        }
+        Optional<Piece> canonical = oldestAmong(group);
+        if (canonical.isEmpty() || canonical.get().getId().equals(self.getId())) {
+            return Optional.empty();
+        }
+        return canonical;
+    }
 
-        // ✅ Check 1: Exact filename match using List
-        List<Piece> matches = pieceRepository.findAllByDossierIdAndOriginalFileName(dossierId, originalFileName);
-        if (!matches.isEmpty()) {
-            Piece firstMatch = matches.get(0); // Use the first found
-            log.warn("⚠️ Exact filename duplicate detected: {} match(es) found for file: {} in dossier: {}",
-                    matches.size(), originalFileName, dossierId);
-            return Optional.of(firstMatch);
+    /** Label for logs / audit when originalFileName is missing (multipart vs JSON upload). */
+    private static String originalDisplayLabel(Piece p) {
+        if (p == null) {
+            return "?";
+        }
+        String n = p.getOriginalFileName();
+        if (n != null && !n.isBlank()) {
+            return n;
+        }
+        return p.getFilename() != null ? p.getFilename() : "?";
+    }
+
+    /**
+     * Same file bytes (MD5) already stored in this dossier on another piece.
+     */
+    private Optional<Piece> checkDuplicateByFileHash(Piece piece) {
+        if (piece.getFileHash() == null || piece.getFileHash().isBlank()) {
+            return Optional.empty();
+        }
+        if (piece.getDossier() == null || piece.getDossier().getId() == null) {
+            return Optional.empty();
+        }
+        List<Piece> matches = pieceRepository.findByDossierIdAndFileHash(
+                piece.getDossier().getId(), piece.getFileHash().trim());
+        Optional<Piece> original = duplicateOfCanonicalOriginal(matches, piece);
+        if (original.isPresent()) {
+            log.warn("⚠️ Duplicate by MD5 in dossier {}: piece {} matches piece {} (hash prefix {}, original id={}, original label={})",
+                    piece.getDossier().getId(), piece.getId(), original.get().getId(),
+                    piece.getFileHash().length() > 8 ? piece.getFileHash().substring(0, 8) : piece.getFileHash(),
+                    original.get().getId(), originalDisplayLabel(original.get()));
+        }
+        return original;
+    }
+
+    /**
+     * Same original filename in dossier (case-insensitive), excluding current piece.
+     * Replaces fragile {@code matches.get(0)} which could be the same row or arbitrary order.
+     */
+    private Optional<Piece> checkOriginalFileNameDuplicateInDossier(Piece piece) {
+        String name = piece.getOriginalFileName();
+        if (name == null || name.trim().isEmpty() || piece.getDossier() == null || piece.getDossier().getId() == null) {
+            return Optional.empty();
+        }
+        List<Piece> matches = pieceRepository.findAllByDossierIdAndOriginalFileNameIgnoreCase(
+                piece.getDossier().getId(), name.trim());
+        Optional<Piece> original = duplicateOfCanonicalOriginal(matches, piece);
+        if (original.isPresent()) {
+            log.warn("⚠️ Duplicate original filename in dossier {}: '{}' → piece {} vs {} (original id={}, original label={})",
+                    piece.getDossier().getId(), name.trim(), piece.getId(), original.get().getId(),
+                    original.get().getId(), originalDisplayLabel(original.get()));
+        }
+        return original;
+    }
+
+    /**
+     * Non-bank: exact name (case-insensitive) then similar-filename heuristics.
+     */
+    public Optional<Piece> checkTechnicalDuplicate(Piece piece) {
+        Long dossierId = piece.getDossier().getId();
+        String originalFileName = piece.getOriginalFileName();
+        log.debug("🔍 Technical duplicate check: dossier={}, pieceId={}, filename={}", dossierId, piece.getId(), originalFileName);
+
+        Optional<Piece> byName = checkOriginalFileNameDuplicateInDossier(piece);
+        if (byName.isPresent()) {
+            return byName;
         }
 
-        // ✅ Check 2: Similar filename patterns (for renamed files)
-        Optional<Piece> similarMatch = checkSimilarFilenames(dossierId, originalFileName);
-        if (similarMatch.isPresent()) {
-            log.warn("⚠️ Similar filename pattern detected for file: {} in dossier: {}", originalFileName, dossierId);
-            return similarMatch;
+        Optional<Piece> similar = checkSimilarFilenames(dossierId, originalFileName, piece);
+        if (similar.isPresent()) {
+            log.warn("⚠️ Similar filename pattern: piece {} in dossier {}", piece.getId(), dossierId);
+            return similar;
         }
 
-        log.info("✅ No technical duplicate found for file: {}", originalFileName);
         return Optional.empty();
     }
 
-
     /**
-     * Check for similar filename patterns to detect renamed files
+     * Similar filename patterns (renamed copies); excludes {@code excludePieceId}.
      */
-    private Optional<Piece> checkSimilarFilenames(Long dossierId, String originalFileName) {
-        if (originalFileName == null || originalFileName.trim().isEmpty()) {
+    private Optional<Piece> checkSimilarFilenames(Long dossierId, String originalFileName, Piece self) {
+        if (originalFileName == null || originalFileName.trim().isEmpty() || self == null || self.getId() == null) {
             return Optional.empty();
         }
 
-        // Extract base filename without extension and common suffixes
         String baseFileName = extractBaseFileName(originalFileName);
 
-        if (baseFileName.length() < 3) { // Skip very short filenames
+        if (baseFileName.length() < 3) {
             return Optional.empty();
         }
 
-        log.debug("🔍 Checking for similar filenames with base: {}", baseFileName);
+        log.debug("🔍 Similar filenames with base: {}", baseFileName);
 
         List<Piece> similarPieces = pieceRepository.findSimilarFileNames(dossierId, originalFileName, baseFileName);
-
-        if (!similarPieces.isEmpty()) {
-            Piece similarPiece = similarPieces.get(0); // Take the oldest
-            log.info("Found similar filename: {} vs {}", originalFileName, similarPiece.getOriginalFileName());
-            return Optional.of(similarPiece);
-        }
-
-        return Optional.empty();
+        return duplicateOfCanonicalOriginal(similarPieces, self);
     }
 
     /**
@@ -123,8 +197,6 @@ public class DuplicateDetectionService {
             return Optional.empty();
         }
 
-        Long dossierId = piece.getDossier().getId();
-
         // Check 1: Invoice-based duplicates (if FactureData is available)
         if (piece.getFactureData() != null) {
             Optional<Piece> invoiceDuplicate = checkInvoiceDuplicate(piece);
@@ -168,8 +240,9 @@ public class DuplicateDetectionService {
 
         if (!duplicates.isEmpty()) {
             Piece originalPiece = duplicates.get(0); // Take the first (oldest) as original
-            log.warn("⚠️ Invoice-based duplicate detected for piece {}: matches piece {} (invoice date: {}, total: {})",
-                    piece.getId(), originalPiece.getId(), invoiceDate, totalTTC);
+            log.warn("⚠️ Invoice-based duplicate detected for piece {}: matches piece {} (invoice date: {}, total: {}, original id={}, original label={})",
+                    piece.getId(), originalPiece.getId(), invoiceDate, totalTTC,
+                    originalPiece.getId(), originalDisplayLabel(originalPiece));
             return Optional.of(originalPiece);
         }
 
@@ -202,8 +275,9 @@ public class DuplicateDetectionService {
 
             if (!duplicates.isEmpty()) {
                 Piece originalPiece = duplicates.get(0); // Take the first (oldest) as original
-                log.warn("⚠️ Ecriture-based duplicate detected for piece {}: matches piece {} (entry date: {}, amount: {})",
-                        piece.getId(), originalPiece.getId(), entryDate, maxAmount);
+                log.warn("⚠️ Ecriture-based duplicate detected for piece {}: matches piece {} (entry date: {}, amount: {}, original id={}, original label={})",
+                        piece.getId(), originalPiece.getId(), entryDate, maxAmount,
+                        originalPiece.getId(), originalDisplayLabel(originalPiece));
                 return Optional.of(originalPiece);
             }
         }
@@ -217,27 +291,53 @@ public class DuplicateDetectionService {
             return Optional.empty();
         }
 
-        log.info("🔍 Performing comprehensive duplicate check for piece {}", piece.getId());
+        log.info("🔍 Performing comprehensive duplicate check for piece {} (fileHash={}, originalFileName={})",
+                piece.getId(), piece.getFileHash(), piece.getOriginalFileName());
 
-        // Check 1: Technical duplicates (filename-based)
-        Optional<Piece> technicalDuplicate = checkTechnicalDuplicate(
-                piece.getDossier().getId(), piece.getOriginalFileName());
-        if (technicalDuplicate.isPresent() && !technicalDuplicate.get().getId().equals(piece.getId())) {
-            log.warn("🚫 Technical duplicate found during comprehensive check");
-            return technicalDuplicate;
+        boolean bank = isBankStatement(piece);
+
+        // Check 1: MD5 content hash (same dossier) — strongest for re-uploaded identical files
+        Optional<Piece> hashDuplicate = checkDuplicateByFileHash(piece);
+        if (hashDuplicate.isPresent()) {
+            Piece orig = hashDuplicate.get();
+            log.info("🚫 Duplicate trace: piece {} is duplicate of piece {} (reason=MD5, original={})",
+                    piece.getId(), orig.getId(), originalDisplayLabel(orig));
+            return hashDuplicate;
+        }
+
+        // Check 2: Original filename (case-insensitive); bank skips fuzzy "similar name" only
+        Optional<Piece> nameDuplicate = bank
+                ? checkOriginalFileNameDuplicateInDossier(piece)
+                : checkTechnicalDuplicate(piece);
+        if (nameDuplicate.isPresent()) {
+            Piece orig = nameDuplicate.get();
+            log.info("🚫 Duplicate trace: piece {} is duplicate of piece {} (reason=filename/technical, original={})",
+                    piece.getId(), orig.getId(), originalDisplayLabel(orig));
+            return nameDuplicate;
+        }
+
+        // Bank statements: skip functional / ecriture duplicate logic. Different PDFs often share the same
+        // transaction date and line amounts (same bank, recurring fees, round amounts) → false positives.
+        if (bank) {
+            log.debug("Bank statement — skipping ecriture/invoice duplicate heuristics for piece {}", piece.getId());
+            return Optional.empty();
         }
 
         // Check 2: Functional duplicates (invoice + ecriture based)
         Optional<Piece> functionalDuplicate = checkFunctionalDuplicate(piece);
         if (functionalDuplicate.isPresent()) {
-            log.warn("🚫 Functional duplicate found during comprehensive check");
+            Piece orig = functionalDuplicate.get();
+            log.info("🚫 Duplicate trace: piece {} is duplicate of piece {} (reason=functional, original={})",
+                    piece.getId(), orig.getId(), originalDisplayLabel(orig));
             return functionalDuplicate;
         }
 
         // Check 3: Enhanced ecriture-based check with tolerance for rounding differences
         Optional<Piece> toleranceDuplicate = checkEcritureDuplicateWithTolerance(piece);
         if (toleranceDuplicate.isPresent()) {
-            log.warn("🚫 Tolerance-based duplicate found during comprehensive check");
+            Piece orig = toleranceDuplicate.get();
+            log.info("🚫 Duplicate trace: piece {} is duplicate of piece {} (reason=tolerance/ecriture, original={})",
+                    piece.getId(), orig.getId(), originalDisplayLabel(orig));
             return toleranceDuplicate;
         }
 
@@ -281,8 +381,9 @@ public class DuplicateDetectionService {
 
             if (!duplicates.isEmpty()) {
                 Piece originalPiece = duplicates.get(0);
-                log.warn("⚠️ Tolerance-based duplicate detected for piece {}: matches piece {} (entry date: {}, amount: {}±{})",
-                        piece.getId(), originalPiece.getId(), entryDate, maxAmount, tolerance);
+                log.warn("⚠️ Tolerance-based duplicate detected for piece {}: matches piece {} (entry date: {}, amount: {}±{}, original id={}, original label={})",
+                        piece.getId(), originalPiece.getId(), entryDate, maxAmount, tolerance,
+                        originalPiece.getId(), originalDisplayLabel(originalPiece));
                 return Optional.of(originalPiece);
             }
         }

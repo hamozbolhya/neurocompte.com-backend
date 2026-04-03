@@ -5,6 +5,7 @@ import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -26,6 +27,10 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     // Find by file hash
     List<Piece> findByFileHash(String fileHash);
+
+    List<Piece> findByDossierIdAndFileHash(Long dossierId, String fileHash);
+
+    List<Piece> findAllByDossierIdAndOriginalFileNameIgnoreCase(Long dossierId, String originalFileName);
 
     // Find similar AI data with amount range
     @Query("SELECT p FROM Piece p WHERE " +
@@ -56,6 +61,11 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     // ==================== EXISTING METHODS ====================
 
     Page<Piece> findByDossierId(Long dossierId, Pageable pageable);
+
+    /** All pieces in dossier (no page cap) — WebSocket push; fetch originalPiece + dossier for duplicate fields in DTO. */
+    @EntityGraph(type = EntityGraph.EntityGraphType.FETCH, attributePaths = {"originalPiece", "dossier"})
+    List<Piece> findByDossierIdOrderByUploadDateDesc(Long dossierId);
+
     List<Piece> findAllByDossierIdAndOriginalFileName(Long dossierId, String originalFileName);
     List<Piece> findByOriginalPieceId(Long originalPieceId);
 

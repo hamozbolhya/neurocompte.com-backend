@@ -15,6 +15,7 @@ import com.pacioli.core.services.serviceImp.pieces.AIService;
 import com.pacioli.core.services.serviceImp.pieces.FileProcessingResult;
 import com.pacioli.core.services.serviceImp.pieces.FileService;
 import com.pacioli.core.services.serviceImp.pieces.PieceProcessingService;
+import com.pacioli.core.utils.FileContentHashing;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -34,9 +35,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class PieceServiceImpl implements PieceService {
-
-    private static final int DEFAULT_PAGE_SIZE = 10;
-    private static final int DEFAULT_PAGE = 0;
 
     private final PieceRepository pieceRepository;
     private final PieceDTOMapper pieceDTOMapper;
@@ -73,6 +71,17 @@ public class PieceServiceImpl implements PieceService {
         try {
             log.info("saving piece {}", pieceData);
             Piece piece = deserializePiece(pieceData, dossierId);
+
+            // Original name + MD5 from the actual upload (JSON body often omits or misstates originalFileName)
+            try {
+                piece.setFileHash(FileContentHashing.md5Hex(file.getBytes()));
+            } catch (IOException ioe) {
+                log.warn("Could not compute MD5 for upload: {}", ioe.getMessage());
+            }
+            String multipartOriginalName = file.getOriginalFilename();
+            if (multipartOriginalName != null && !multipartOriginalName.isBlank()) {
+                piece.setOriginalFileName(multipartOriginalName.trim());
+            }
 
             // Validate and save file - returns both filename and the file to process
             FileProcessingResult fileResult = fileService.validateAndSaveFile(file, piece.getType());
@@ -159,10 +168,17 @@ public class PieceServiceImpl implements PieceService {
 
                     duplicateDetectionService.markAsDuplicate(piece, comprehensiveDuplicate.get());
 
+                    Piece orig = comprehensiveDuplicate.get();
+                    String auditOriginalName = orig.getOriginalFileName();
+                    if (auditOriginalName == null || auditOriginalName.isBlank()) {
+                        auditOriginalName = orig.getFilename();
+                    }
                     // Audit: Détection de doublon avec cabinet cible
-                    auditService.logSuccessWithTargetCabinet(currentUser, "DUPLICATE_DETECTED", "Piece", piece.getId(), piece.getOriginalFileName(), null, Map.of("originalPieceId", comprehensiveDuplicate.get().getId(), "originalPieceName", comprehensiveDuplicate.get().getOriginalFileName()), targetCabinetId, targetCabinetName);
-
-                    log.info("⏭️ Marked piece {} as DUPLICATE of piece {}", piece.getId(), comprehensiveDuplicate.get().getId());
+                    auditService.logSuccessWithTargetCabinet(currentUser, "DUPLICATE_DETECTED", "Piece", piece.getId(), piece.getOriginalFileName(), null, Map.of("originalPieceId", orig.getId(), "originalPieceName", auditOriginalName != null ? auditOriginalName : ""), targetCabinetId, targetCabinetName);
+                    log.info("⏭️ Marked piece {} as DUPLICATE of piece {} (original label: {})",
+                            piece.getId(), orig.getId(),
+                            orig.getOriginalFileName() != null && !orig.getOriginalFileName().isBlank()
+                                    ? orig.getOriginalFileName() : orig.getFilename());
                     notifyPiecesUpdate(dossierId);
                     return piece;
                 }
@@ -458,14 +474,13 @@ public class PieceServiceImpl implements PieceService {
         }
 
         try {
-            Pageable pageable = org.springframework.data.domain.PageRequest.of(DEFAULT_PAGE, DEFAULT_PAGE_SIZE);
-            Page<Piece> piecesPage = pieceRepository.findByDossierId(dossierId, pageable);
-
-            List<PieceDTO> basicDTOs = piecesPage.getContent().stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
+            // Full dossier list — never paginate here (a fixed page size would truncate WebSocket payloads).
+            List<Piece> pieces = pieceRepository.findByDossierIdOrderByUploadDateDesc(dossierId);
+            List<PieceDTO> basicDTOs = pieces.stream().map(pieceDTOMapper::toBasicDTO).collect(Collectors.toList());
 
             messagingTemplate.convertAndSend("/topic/dossier-pieces/" + dossierId, basicDTOs);
 
-            log.info("✅ Successfully notified WebSocket for dossier {} with {} basic pieces", dossierId, basicDTOs.size());
+            log.debug("Notified WebSocket /topic/dossier-pieces/{} — {} pieces", dossierId, basicDTOs.size());
 
         } catch (Exception e) {
             log.error("💥 Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage(), e);

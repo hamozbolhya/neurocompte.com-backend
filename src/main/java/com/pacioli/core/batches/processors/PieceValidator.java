@@ -13,31 +13,39 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class PieceValidator {
 
+    private static final int MAX_ENTRY_SNIPPET_CHARS = 400;
+
     @Autowired
     private ObjectMapper objectMapper;
 
-    public boolean isValidAIResponse(JsonNode root) {
-//        log.info("🔍 Validating AI response structure - Root keys: {}", root.fieldNames());
+    private static String summarizeNode(JsonNode node, int maxChars) {
+        if (node == null) {
+            return "null";
+        }
+        String s = node.toString();
+        if (s.length() <= maxChars) {
+            return s;
+        }
+        return s.substring(0, maxChars) + "… (" + s.length() + " chars)";
+    }
 
+    public boolean isValidAIResponse(JsonNode root) {
         // Check for normalized structure first
         if (root.has("ecritures")) {
-            log.info("✅ Found normalized ecritures structure");
             return validateEcrituresArray(root.get("ecritures"));
         }
 
         // Check for original outputText structure
         if (root.has("outputText")) {
-            log.info("📄 Found outputText structure");
             return validateEcritures(root.get("outputText"));
         }
 
         // Check if root itself is the ecritures array
         if (root.isArray()) {
-            log.info("📄 Root is direct ecritures array");
             return validateEcrituresArray(root);
         }
 
-        log.error("❌ Invalid AI response structure - no ecritures or outputText found");
+        log.error("❌ Invalid AI response structure — expected ecritures, outputText, or root array");
         return false;
     }
 
@@ -78,7 +86,7 @@ public class PieceValidator {
             return false;
 
         } catch (Exception e) {
-            log.error("💥 Error validating ecritures: {}", e.getMessage(), e);
+            log.error("❌ Error validating ecritures from outputText: {}", e.getMessage());
             return false;
         }
     }
@@ -118,11 +126,10 @@ public class PieceValidator {
     private boolean validateAllEcritureEntries(JsonNode ecritures) {
         for (int i = 0; i < ecritures.size(); i++) {
             if (!validateEcritureFields(ecritures.get(i))) {
-                log.error("❌ Invalid ecriture at index {}: {}", i, ecritures.get(i));
+                log.error("❌ Invalid invoice ecriture at index {} — {}", i, summarizeNode(ecritures.get(i), MAX_ENTRY_SNIPPET_CHARS));
                 return false;
             }
         }
-        log.info("✅ All {} ecriture entries are valid", ecritures.size());
         return true;
     }
 
@@ -181,9 +188,8 @@ public class PieceValidator {
                 return false;
             }
 
-            // ✅ ADDED: Comma support for European decimal format
             String rawValue = entry.get(field).asText().trim();
-            String normalizedValue = rawValue.replace(',', '.');
+            String normalizedValue = normalizeAmountStringForParsing(rawValue);
 
             if (!isValidNumericValue(normalizedValue)) {
                 log.error("❌ Invalid numeric value for field {}: {} (normalized from '{}')", field, normalizedValue, rawValue);
@@ -191,6 +197,64 @@ public class PieceValidator {
             }
         }
         return true;
+    }
+
+    /**
+     * Parses amount strings from AI output: US thousands (1,071,520), EU decimals (1234,56),
+     * EU thousands (1.071.520), and US decimals (1234.56).
+     */
+    static String normalizeAmountStringForParsing(String rawValue) {
+        if (rawValue == null) {
+            return "";
+        }
+        String s = rawValue.trim().replace('\u00A0', ' ').replaceAll("\\s+", "");
+        if (s.isEmpty()) {
+            return "";
+        }
+
+        int commaCount = 0;
+        int dotCount = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == ',') {
+                commaCount++;
+            } else if (c == '.') {
+                dotCount++;
+            }
+        }
+
+        // Mixed: 1,234,567.89 (US) or 1.234.567,89 (EU)
+        if (commaCount >= 1 && dotCount == 1) {
+            int lastDot = s.lastIndexOf('.');
+            int lastComma = s.lastIndexOf(',');
+            if (lastDot > lastComma) {
+                return s.replace(",", "");
+            }
+            return s.replace(".", "").replace(',', '.');
+        }
+
+        // Only commas
+        if (commaCount > 0 && dotCount == 0) {
+            int lastComma = s.lastIndexOf(',');
+            String after = s.substring(lastComma + 1);
+            if (commaCount > 1) {
+                return s.replace(",", "");
+            }
+            if (after.length() <= 2) {
+                return s.substring(0, lastComma) + '.' + after;
+            }
+            return s.replace(",", "");
+        }
+
+        // Only dots: several dots → EU-style thousands (1.071.520); one dot → decimal (1234.56)
+        if (dotCount > 0 && commaCount == 0) {
+            if (dotCount > 1) {
+                return s.replace(".", "");
+            }
+            return s;
+        }
+
+        return s;
     }
 
     private boolean isValidNumericValue(String value) {
@@ -208,22 +272,18 @@ public class PieceValidator {
     }
 
     public boolean isValidBankAIResponse(JsonNode root) {
-//        log.info("🏦 Validating bank AI response structure - Root keys: {}", root.fieldNames());
-
         // Check if it's already a normalized response with ecritures
         if (root.has("ecritures")) {
             JsonNode ecrituresNode = root.get("ecritures");
-            log.info("🏦 Validating normalized bank response with {} entries", ecrituresNode.size());
             return isValidBankEcrituresArray(ecrituresNode);
         }
 
         // Check for outputText structure (original format)
         if (root.has("outputText")) {
-            log.info("🏦 Validating bank response with outputText");
             return validateBankEcritures(root.get("outputText"));
         }
 
-        log.error("❌ Bank AI response has neither 'ecritures' nor 'outputText'");
+        log.error("❌ Bank AI response — missing both 'ecritures' and 'outputText'");
         return false;
     }
 
@@ -245,7 +305,7 @@ public class PieceValidator {
             return isValidBankEcrituresArray(entries);
 
         } catch (Exception e) {
-            log.error("💥 Error validating bank ecritures: {}", e.getMessage(), e);
+            log.error("❌ Error parsing/validating bank ecritures: {}", e.getMessage());
             return false;
         }
     }
@@ -257,22 +317,12 @@ public class PieceValidator {
         // First check if we already have a flat ecritures array (from normalized response)
         if (parsedJson.has("ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("ecritures");
-            log.info("🏦 Found flat ecritures array with {} entries", ecrituresNode.size());
-
-            // Check if these are transaction groups or regular entries
-            if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                JsonNode firstItem = ecrituresNode.get(0);
-                if (firstItem.has("isTransactionGroup") && firstItem.get("isTransactionGroup").asBoolean()) {
-                    log.info("🏦 Found transaction group structure");
-                }
-            }
             return ecrituresNode;
         }
 
         // Then check for the nested Ecritures → entries structure
         if (parsedJson.has("Ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("Ecritures");
-            log.info("🏦 Found nested Ecritures structure with {} transaction groups", ecrituresNode.size());
 
             if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
                 ArrayNode allEntries = objectMapper.createArrayNode();
@@ -297,7 +347,6 @@ public class PieceValidator {
                 }
 
                 if (allEntries.size() > 0) {
-                    log.info("🏦 Created {} transaction groups", allEntries.size());
                     return allEntries;
                 }
             }
@@ -305,7 +354,6 @@ public class PieceValidator {
 
         // ✅ NEW: Also check for direct array structure (some bank responses might be arrays)
         if (parsedJson.isArray()) {
-            log.info("🏦 Bank response is direct array with {} entries", parsedJson.size());
             return parsedJson;
         }
 
@@ -335,15 +383,15 @@ public class PieceValidator {
                 JsonNode innerEntries = entry.get("entries");
                 for (int j = 0; j < innerEntries.size(); j++) {
                     if (!validateBankEcritureFields(innerEntries.get(j))) {
-                        log.error("❌ Invalid bank ecriture at index {} in transaction group {}: {}",
-                                j, i, innerEntries.get(j));
+                        log.error("❌ Invalid bank ecriture at inner index {} in group {} — {}",
+                                j, i, summarizeNode(innerEntries.get(j), MAX_ENTRY_SNIPPET_CHARS));
                         return false;
                     }
                 }
             } else {
                 // Regular entry validation
                 if (!validateBankEcritureFields(entry)) {
-                    log.error("❌ Invalid bank ecriture at index {}: {}", i, entry);
+                    log.error("❌ Invalid bank ecriture at index {} — {}", i, summarizeNode(entry, MAX_ENTRY_SNIPPET_CHARS));
                     return false;
                 }
             }

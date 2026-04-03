@@ -34,10 +34,12 @@ public class PieceDTOMapper {
         dto.setIsForced(piece.getIsForced());
 
         // Add duplicate information
-        dto.setIsDuplicate(piece.getIsDuplicate());
+        dto.setIsDuplicate(Boolean.TRUE.equals(piece.getIsDuplicate()));
         if (piece.getOriginalPiece() != null) {
-            dto.setOriginalPieceId(piece.getOriginalPiece().getId());
-            dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+            Piece orig = piece.getOriginalPiece();
+            dto.setOriginalPieceId(orig.getId());
+            String origName = orig.getOriginalFileName();
+            dto.setOriginalPieceName(origName != null && !origName.isBlank() ? origName : orig.getFilename());
         }
 
         // Add AI currency and amount info

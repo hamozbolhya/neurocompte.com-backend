@@ -5,6 +5,7 @@ import com.pacioli.core.models.Piece;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.PieceService;
+import com.pacioli.core.services.serviceImp.mappers.PieceDTOMapper;
 import com.pacioli.core.utils.SecurityHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +49,9 @@ public class PieceController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private PieceDTOMapper pieceDTOMapper;
 
     @Autowired
     private SecurityHelper securityHelper;
@@ -101,7 +105,7 @@ public class PieceController {
     }
 
     @PostMapping("/save-ecritures-and-facture")
-    public ResponseEntity<Piece> saveEcrituresAndFacture(
+    public ResponseEntity<PieceDTO> saveEcrituresAndFacture(
             @RequestBody String pieceData,
             @RequestParam(name = "piece_id", required = true) Long pieceId,
             @RequestParam(name = "dossier_id", required = true) Long dossierId,
@@ -128,7 +132,11 @@ public class PieceController {
         }
 
         Piece savedPiece = pieceService.saveEcrituresAndFacture(pieceId, dossierId, pieceData);
-        return ResponseEntity.ok(savedPiece);
+        // PieceDTO — JsonBackReference on entity.originalPiece hides duplicate link when serializing Piece
+        PieceDTO dto = pieceDTOMapper.toBasicDTO(savedPiece);
+        pieceDTOMapper.addFactureDataIfExists(savedPiece, dto);
+        pieceDTOMapper.addEcrituresIfExists(savedPiece, dto);
+        return ResponseEntity.ok(dto);
     }
 
     @GetMapping

@@ -14,7 +14,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.time.LocalDate;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -41,38 +44,47 @@ public class BankAIProcessor extends BaseAIProcessor {
             return;
         }
 
-        if (duplicationDetectionService.isDuplicate(piece)) {
-            log.info("🚫 Skipping duplicate piece: {}", piece.getId());
-            updatePieceStatus(piece, PieceStatus.DUPLICATE);
+        Optional<Piece> originalPiece = duplicationDetectionService.findOriginalPiece(piece);
+        if (originalPiece.isPresent()) {
+            // #region agent log
+            try (FileWriter fw = new FileWriter("/Users/hamzaboulahia/perso/neurocompte.com-backend/.cursor/debug-f12bb6.log", true)) {
+                fw.write("{\"sessionId\":\"f12bb6\",\"runId\":\"forced-check-1\",\"hypothesisId\":\"H5\",\"location\":\"BankAIProcessor.processPieceWithRetry\",\"message\":\"Batch marked duplicate path\",\"data\":{\"pieceId\":"
+                        + piece.getId() + ",\"isForced\":" + piece.getIsForced() + ",\"originalId\":" + originalPiece.get().getId()
+                        + "},\"timestamp\":" + System.currentTimeMillis() + "}\n");
+            } catch (IOException ignored) {}
+            // #endregion
+            log.info("🚫 Skipping duplicate bank piece: {} (original: {})", piece.getId(), originalPiece.get().getId());
+            duplicationDetectionService.markAsDuplicate(piece, originalPiece.get());
             return;
         }
 
         updatePieceStatus(piece, PieceStatus.PROCESSING);
 
         try {
-            log.info("🏦 Processing bank piece: {}", piece.getFilename());
+            log.debug("🏦 Processing bank piece: {}", piece.getFilename());
             JsonNode aiResponse = callBankService(piece);
 
             // Normalize the response
             JsonNode normalizedResponse = responseNormalizer.normalizeAIResponse(aiResponse, true);
-            log.info("🏦 Normalized response keys: {}", normalizedResponse.fieldNames());
 
             // Check if the normalized response is valid
             if (!pieceValidator.isValidBankAIResponse(normalizedResponse)) {
-                log.warn("❌ Invalid normalized bank response, retrying...");
-                handleInvalidResponse(piece, attempt, normalizedResponse.toString());
+                log.warn("❌ Bank piece {} — validation failed. {}", piece.getId(), describeNormalizedShape(normalizedResponse));
+                handleInvalidResponse(piece, attempt,
+                        "bank AI response failed validation; " + describeNormalizedShape(normalizedResponse));
                 return;
             }
 
             // Extract the ecritures from normalized response for processing
             JsonNode ecrituresNode = normalizedResponse.get("ecritures");
             if (ecrituresNode == null || !ecrituresNode.isArray() || ecrituresNode.size() == 0) {
-                log.warn("❌ No ecritures in normalized bank response, retrying...");
-                handleInvalidResponse(piece, attempt, normalizedResponse.toString());
+                log.warn("❌ Bank piece {} — no ecritures after normalization. {}", piece.getId(), describeNormalizedShape(normalizedResponse));
+                handleInvalidResponse(piece, attempt,
+                        "no ecritures array or empty after normalization; " + describeNormalizedShape(normalizedResponse));
                 return;
             }
 
-            log.info("✅ Valid bank AI response with {} ecritures", ecrituresNode.size());
+            log.debug("✅ Bank piece {} — {} ecritures validated", piece.getId(), ecrituresNode.size());
 
             // Process the data - pass the normalized response which contains ecritures
             extractAndSaveAIData(piece, normalizedResponse);
@@ -88,18 +100,10 @@ public class BankAIProcessor extends BaseAIProcessor {
 
     private void extractAndSaveAIData(Piece piece, JsonNode aiResponse) throws JsonProcessingException {
         try {
-            log.info("🔍 Starting extractAndSaveAIData for piece {}", piece.getId());
-
-            // ❌ PROBLEM: Don't call asText() on already parsed JSON!
-            // String responseText = aiResponse.asText();
-            // JsonNode parsedJson = objectMapper.readTree(responseText);
-
-            // ✅ FIX: Use the aiResponse directly (it's already parsed JSON)
             JsonNode ecrituresNode = findEcrituresNodeForAI(aiResponse);
-            log.info("🔍 Found ecritures node: {}", ecrituresNode != null);
 
             if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                log.info("🏦 Processing {} bank entries", ecrituresNode.size());
+                log.debug("🏦 Piece {} — extracting from {} bank ecriture groups/lines", piece.getId(), ecrituresNode.size());
                 JsonNode firstEntry = ecrituresNode.get(0);
 
                 extractAmountAndCurrency(piece, ecrituresNode, firstEntry);
@@ -108,15 +112,16 @@ public class BankAIProcessor extends BaseAIProcessor {
                 setFinalPieceAmount(piece);
 
                 pieceRepository.save(piece);
-                log.info("✅ Saved bank piece with AI Amount: {}, Final Amount: {}, Currency: {}",
-                        piece.getAiAmount(), piece.getAmount(), piece.getAiCurrency());
+                log.debug("Piece {} — saved AI amount={}, final amount={}, currency={}",
+                        piece.getId(), piece.getAiAmount(), piece.getAmount(), piece.getAiCurrency());
 
             } else {
                 log.warn("⚠️ No ecritures found in AI response");
                 applyFallbackCurrency(piece);
             }
         } catch (Exception e) {
-            log.error("❌ Failed to extract bank AI data: {}", e.getMessage(), e);
+            log.error("❌ Failed to extract bank AI data for piece {}: {}", piece.getId(), e.getMessage());
+            log.debug("extractAndSaveAIData failure", e);
             applyFallbackCurrency(piece);
         }
     }
@@ -127,12 +132,12 @@ public class BankAIProcessor extends BaseAIProcessor {
                 // Use converted amount
                 Double convertedAmount = piece.getAiAmount() * piece.getExchangeRate();
                 piece.setAmount(convertedAmount);
-                log.info("💰 Set converted bank amount: {} (Original: {} × Rate: {})",
+                log.debug("💰 Set converted bank amount: {} (Original: {} × Rate: {})",
                         convertedAmount, piece.getAiAmount(), piece.getExchangeRate());
             } else {
                 // No conversion, use AI amount directly
                 piece.setAmount(piece.getAiAmount());
-                log.info("💰 Set direct bank amount: {}", piece.getAiAmount());
+                log.debug("💰 Set direct bank amount: {}", piece.getAiAmount());
             }
         } else {
             piece.setAmount(0.0);
@@ -142,8 +147,6 @@ public class BankAIProcessor extends BaseAIProcessor {
 
     private void extractAmountAndCurrency(Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
         try {
-            log.info("🔍 Starting extractAmountAndCurrency for bank statement");
-
             // Calculate total amount from ALL transactions
             double totalAmount = 0.0;
             for (JsonNode node : ecrituresNode) {
@@ -162,7 +165,7 @@ public class BankAIProcessor extends BaseAIProcessor {
             }
 
             piece.setAiAmount(totalAmount);
-            log.info("💰 Total bank statement amount: {}", totalAmount);
+            log.debug("💰 Total bank statement amount for piece {}: {}", piece.getId(), totalAmount);
 
             // Extract currency from first valid entry
             String bankCurrency = null;
@@ -178,20 +181,20 @@ public class BankAIProcessor extends BaseAIProcessor {
             }
 
             piece.setAiCurrency(bankCurrency);
-            log.info("💰 Extracted bank currency: {}", bankCurrency);
+            log.debug("💰 Extracted bank currency: {}", bankCurrency);
 
-            // ... rest of the method remains the same
             String dossierCurrency = getDossierCurrencyCode(piece.getDossier());
-            log.info("💰 Dossier currency: {}", dossierCurrency);
+            log.debug("💰 Dossier currency: {}", dossierCurrency);
 
             String transactionDateStr = extractStringSafely(firstEntry, "Date", null);
             LocalDate transactionDate = parseDate(transactionDateStr != null ? transactionDateStr : piece.getUploadDate().toString());
-            log.info("📅 Transaction date: {}", transactionDate);
+            log.debug("📅 Transaction date: {}", transactionDate);
 
             currencyDataExtractionService.calculateAndApplyExchangeRate(piece, bankCurrency, dossierCurrency, transactionDate);
 
         } catch (Exception e) {
-            log.error("❌ Error in extractAmountAndCurrency: {}", e.getMessage(), e);
+            log.error("❌ Error in extractAmountAndCurrency for piece {}: {}", piece.getId(), e.getMessage());
+            log.debug("extractAmountAndCurrency stack trace", e);
             throw e;
         }
     }
@@ -210,7 +213,7 @@ public class BankAIProcessor extends BaseAIProcessor {
             String filename = piece.getFilename();
             String fileId = filename.substring(0, filename.lastIndexOf('.'));
 
-            log.info("🏦 Fetching bank statement for: {}", fileId);
+            log.debug("🏦 Fetching bank statement for: {}", fileId);
             BankStatementGetResponse bankResponse = bankApiService.getBankStatementResult(fileId);
 
             if (!bankResponse.isSuccess()) {
@@ -233,15 +236,15 @@ public class BankAIProcessor extends BaseAIProcessor {
     }
 
     @Override
-    protected void handleInvalidResponse(Piece piece, int attempt, String jsonResponse) throws InterruptedException {
+    protected void handleInvalidResponse(Piece piece, int attempt, String rejectionDetail) throws InterruptedException {
         if (attempt < batchConfig.getMaxRetries()) {
-            log.warn("🔄 Retrying bank piece {} due to invalid AI response (attempt {}/{})",
-                    piece.getId(), attempt, batchConfig.getMaxRetries());
+            log.warn("🔄 Retrying bank piece {} (attempt {}/{}): {}",
+                    piece.getId(), attempt, batchConfig.getMaxRetries(), rejectionDetail);
             Thread.sleep(batchConfig.getRetryDelayMs()); // This will now be 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
-            log.error("❌ Bank file rejected - invalid AI response after all attempts: {}", jsonResponse);
-            rejectPiece(piece, "Invalid AI response after all attempts");
+            log.error("❌ Bank file rejected piece {} after all attempts — {}", piece.getId(), rejectionDetail);
+            rejectPiece(piece, "Invalid AI response after all attempts: " + rejectionDetail);
         }
     }
 

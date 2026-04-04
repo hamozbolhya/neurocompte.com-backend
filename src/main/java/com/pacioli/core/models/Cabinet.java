@@ -25,6 +25,12 @@ public class Cabinet {
     private LocalDate contractStartDate;
     private LocalDate contractEndDate;
 
+    @Enumerated(EnumType.STRING)
+    private CabinetContractTier contractTier;
+
+    private Integer normalStatementPieceQuota;
+    private Integer bankStatementPageQuota;
+
     @OneToMany(mappedBy = "cabinet")
     @JsonManagedReference("cabinet-dossiers") // Unique reference for Cabinet-Dossiers
     @ToString.Exclude  // Prevent circular reference in toString

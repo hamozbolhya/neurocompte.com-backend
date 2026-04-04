@@ -1,5 +1,6 @@
 package com.pacioli.core.DTO;
 
+import com.pacioli.core.models.CabinetContractTier;
 import lombok.Data;
 
 import lombok.AllArgsConstructor;
@@ -21,12 +22,18 @@ public class CabinetDTO {
     private String ville;
     private LocalDate contractStartDate;
     private LocalDate contractEndDate;
+    private CabinetContractTier contractTier;
+    private Integer normalStatementPieceQuota;
+    private Integer bankStatementPageQuota;
 
     // List of users assigned to the cabinet, including their roles
     private List<UserDTO> users;
 
     public CabinetDTO(Long id, String name, String address, String phone, String ice, String ville,
-                      LocalDate contractStartDate, LocalDate contractEndDate) {
+                      LocalDate contractStartDate, LocalDate contractEndDate,
+                      CabinetContractTier contractTier,
+                      Integer normalStatementPieceQuota,
+                      Integer bankStatementPageQuota) {
         this.id = id;
         this.name = name;
         this.address = address;
@@ -35,6 +42,9 @@ public class CabinetDTO {
         this.ville = ville;
         this.contractStartDate = contractStartDate;
         this.contractEndDate = contractEndDate;
+        this.contractTier = contractTier;
+        this.normalStatementPieceQuota = normalStatementPieceQuota;
+        this.bankStatementPageQuota = bankStatementPageQuota;
     }
 }
 

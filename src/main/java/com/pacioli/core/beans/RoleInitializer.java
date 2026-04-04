@@ -3,6 +3,7 @@ package com.pacioli.core.beans;
 import com.pacioli.core.models.Role;
 import com.pacioli.core.models.User;
 import com.pacioli.core.models.Cabinet;
+import com.pacioli.core.models.CabinetContractTier;
 import com.pacioli.core.repositories.RoleRepository;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.repositories.CabinetRepository;
@@ -45,6 +46,9 @@ public class RoleInitializer {
                                 LocalDate start = LocalDate.now();
                                 newCabinet.setContractStartDate(start);
                                 newCabinet.setContractEndDate(start.plusYears(1).minusDays(1));
+                                newCabinet.setContractTier(CabinetContractTier.CUSTOM);
+                                newCabinet.setNormalStatementPieceQuota(1_000_000);
+                                newCabinet.setBankStatementPageQuota(1_000_000);
                                 return cabinetRepository.save(newCabinet);
                             });
 

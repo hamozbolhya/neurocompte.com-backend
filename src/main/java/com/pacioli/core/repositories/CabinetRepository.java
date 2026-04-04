@@ -13,7 +13,7 @@ import java.util.Optional;
 @Repository
 public interface CabinetRepository extends JpaRepository<Cabinet, Long> {
     Optional<Cabinet> findByIce(String ice);
-    @Query("SELECT new com.pacioli.core.DTO.CabinetDTO(c.id, c.name, c.address, c.phone, c.ice, c.ville, c.contractStartDate, c.contractEndDate) FROM Cabinet c WHERE c.id = :id")
+    @Query("SELECT new com.pacioli.core.DTO.CabinetDTO(c.id, c.name, c.address, c.phone, c.ice, c.ville, c.contractStartDate, c.contractEndDate, c.contractTier, c.normalStatementPieceQuota, c.bankStatementPageQuota) FROM Cabinet c WHERE c.id = :id")
     Optional<CabinetDTO> findCabinetById(@Param("id") Long id);
 
     @Query("""

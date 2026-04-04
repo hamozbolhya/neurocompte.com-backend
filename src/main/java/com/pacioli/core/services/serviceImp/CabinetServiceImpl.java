@@ -99,12 +99,46 @@ public class CabinetServiceImpl implements CabinetService {
         }
     }
 
+    private void validateContractQuotas(@NonNull Cabinet cabinet) {
+        if (cabinet.getContractTier() == null) {
+            throw new IllegalArgumentException("Le type de contrat (contractTier) est obligatoire.");
+        }
+        Integer pieces = cabinet.getNormalStatementPieceQuota();
+        Integer pages = cabinet.getBankStatementPageQuota();
+        if (pieces == null) {
+            throw new IllegalArgumentException("Le quota de pièces (relevés normaux) est obligatoire.");
+        }
+        if (pages == null) {
+            throw new IllegalArgumentException("Le quota de pages (relevés bancaires) est obligatoire.");
+        }
+        if (pieces < 0 || pages < 0) {
+            throw new IllegalArgumentException("Les quotas doivent être des entiers positifs ou nuls.");
+        }
+    }
+
+    private void mergeContractQuotasOnUpdate(@NonNull Cabinet existing, @NonNull Cabinet incoming) {
+        if (incoming.getContractTier() != null) {
+            existing.setContractTier(incoming.getContractTier());
+        }
+        if (incoming.getNormalStatementPieceQuota() != null) {
+            existing.setNormalStatementPieceQuota(incoming.getNormalStatementPieceQuota());
+        }
+        if (incoming.getBankStatementPageQuota() != null) {
+            existing.setBankStatementPageQuota(incoming.getBankStatementPageQuota());
+        }
+        if (existing.getContractTier() != null || existing.getNormalStatementPieceQuota() != null
+                || existing.getBankStatementPageQuota() != null) {
+            validateContractQuotas(existing);
+        }
+    }
+
     @Override
     @Transactional
     public Cabinet addCabinet(@NonNull Cabinet cabinet) {
         User currentUser = userService.getCurrentUser();
 
         applyAndValidateContractDates(cabinet);
+        validateContractQuotas(cabinet);
 
         Cabinet savedCabinet = cabinetRepository.save(cabinet);
 
@@ -144,6 +178,9 @@ public class CabinetServiceImpl implements CabinetService {
             oldCabinet.setVille(existingCabinet.getVille());
             oldCabinet.setContractStartDate(existingCabinet.getContractStartDate());
             oldCabinet.setContractEndDate(existingCabinet.getContractEndDate());
+            oldCabinet.setContractTier(existingCabinet.getContractTier());
+            oldCabinet.setNormalStatementPieceQuota(existingCabinet.getNormalStatementPieceQuota());
+            oldCabinet.setBankStatementPageQuota(existingCabinet.getBankStatementPageQuota());
 
             // Mise à jour
             existingCabinet.setName(cabinet.getName());
@@ -153,6 +190,7 @@ public class CabinetServiceImpl implements CabinetService {
             existingCabinet.setVille(cabinet.getVille());
 
             mergeAndValidateContractDatesOnUpdate(existingCabinet, cabinet);
+            mergeContractQuotasOnUpdate(existingCabinet, cabinet);
 
             Cabinet updatedCabinet = cabinetRepository.save(existingCabinet);
 

@@ -80,7 +80,10 @@ public class CabinetController {
                         .append("\"ice\":").append(cabinet.getIce() != null ? "\"" + cabinet.getIce() + "\"" : "null").append(",")
                         .append("\"ville\":").append(cabinet.getVille() != null ? "\"" + cabinet.getVille().replace("\"", "\\\"") + "\"" : "null").append(",")
                         .append("\"contractStartDate\":").append(jsonLocalDate(cabinet.getContractStartDate())).append(",")
-                        .append("\"contractEndDate\":").append(jsonLocalDate(cabinet.getContractEndDate()))
+                        .append("\"contractEndDate\":").append(jsonLocalDate(cabinet.getContractEndDate())).append(",")
+                        .append("\"contractTier\":").append(jsonEnum(cabinet.getContractTier())).append(",")
+                        .append("\"normalStatementPieceQuota\":").append(jsonInteger(cabinet.getNormalStatementPieceQuota())).append(",")
+                        .append("\"bankStatementPageQuota\":").append(jsonInteger(cabinet.getBankStatementPageQuota()))
                         .append("}");
             }
             json.append("]");
@@ -148,6 +151,9 @@ public class CabinetController {
                         cabinetInfo.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
                         cabinetInfo.put("contractStartDate", cabinet.getContractStartDate());
                         cabinetInfo.put("contractEndDate", cabinet.getContractEndDate());
+                        cabinetInfo.put("contractTier", cabinet.getContractTier() != null ? cabinet.getContractTier().name() : null);
+                        cabinetInfo.put("normalStatementPieceQuota", cabinet.getNormalStatementPieceQuota());
+                        cabinetInfo.put("bankStatementPageQuota", cabinet.getBankStatementPageQuota());
 
                         return cabinetInfo;
                     })
@@ -163,5 +169,13 @@ public class CabinetController {
 
     private static String jsonLocalDate(LocalDate d) {
         return d != null ? "\"" + d + "\"" : "null";
+    }
+
+    private static String jsonEnum(Enum<?> e) {
+        return e != null ? "\"" + e.name() + "\"" : "null";
+    }
+
+    private static String jsonInteger(Integer n) {
+        return n != null ? n.toString() : "null";
     }
 }

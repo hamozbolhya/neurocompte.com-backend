@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,7 +78,9 @@ public class CabinetController {
                         .append("\"address\":").append(cabinet.getAddress() != null ? "\"" + cabinet.getAddress().replace("\"", "\\\"") + "\"" : "null").append(",")
                         .append("\"phone\":").append(cabinet.getPhone() != null ? "\"" + cabinet.getPhone() + "\"" : "null").append(",")
                         .append("\"ice\":").append(cabinet.getIce() != null ? "\"" + cabinet.getIce() + "\"" : "null").append(",")
-                        .append("\"ville\":").append(cabinet.getVille() != null ? "\"" + cabinet.getVille().replace("\"", "\\\"") + "\"" : "null")
+                        .append("\"ville\":").append(cabinet.getVille() != null ? "\"" + cabinet.getVille().replace("\"", "\\\"") + "\"" : "null").append(",")
+                        .append("\"contractStartDate\":").append(jsonLocalDate(cabinet.getContractStartDate())).append(",")
+                        .append("\"contractEndDate\":").append(jsonLocalDate(cabinet.getContractEndDate()))
                         .append("}");
             }
             json.append("]");
@@ -143,6 +146,8 @@ public class CabinetController {
 
                         cabinetInfo.put("totalPieces", totalPieces != null ? totalPieces : 0L);
                         cabinetInfo.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
+                        cabinetInfo.put("contractStartDate", cabinet.getContractStartDate());
+                        cabinetInfo.put("contractEndDate", cabinet.getContractEndDate());
 
                         return cabinetInfo;
                     })
@@ -154,5 +159,9 @@ public class CabinetController {
             log.error("Error fetching cabinets with stats: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    private static String jsonLocalDate(LocalDate d) {
+        return d != null ? "\"" + d + "\"" : "null";
     }
 }

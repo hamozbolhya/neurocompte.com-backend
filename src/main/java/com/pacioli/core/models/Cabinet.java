@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Entity
@@ -20,6 +21,9 @@ public class Cabinet {
     private String phone;
     private String ice;
     private String ville;
+
+    private LocalDate contractStartDate;
+    private LocalDate contractEndDate;
 
     @OneToMany(mappedBy = "cabinet")
     @JsonManagedReference("cabinet-dossiers") // Unique reference for Cabinet-Dossiers

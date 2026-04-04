@@ -10,6 +10,8 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.Set;
 
@@ -40,6 +42,9 @@ public class RoleInitializer {
                             .orElseGet(() -> {
                                 Cabinet newCabinet = new Cabinet();
                                 newCabinet.setName("PACIOLI_SYSTEM");
+                                LocalDate start = LocalDate.now();
+                                newCabinet.setContractStartDate(start);
+                                newCabinet.setContractEndDate(start.plusYears(1).minusDays(1));
                                 return cabinetRepository.save(newCabinet);
                             });
 

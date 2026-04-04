@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.*;
 
 @Slf4j
@@ -53,10 +54,57 @@ public class CabinetServiceImpl implements CabinetService {
         return cabinet != null ? cabinet.getName() : null;
     }
 
+    /**
+     * Default one-year window aligned on the subscription date: end = start + 1 year − 1 day
+     * (e.g. 15 May → 14 May next year).
+     */
+    static LocalDate defaultContractEndDate(@NonNull LocalDate contractStartDate) {
+        return contractStartDate.plusYears(1).minusDays(1);
+    }
+
+    private void applyAndValidateContractDates(@NonNull Cabinet cabinet) {
+        LocalDate start = cabinet.getContractStartDate();
+        if (start == null) {
+            throw new IllegalArgumentException("La date de début de contrat est obligatoire.");
+        }
+        LocalDate end = cabinet.getContractEndDate();
+        if (end == null) {
+            end = defaultContractEndDate(start);
+            cabinet.setContractEndDate(end);
+        }
+        if (!end.isAfter(start)) {
+            throw new IllegalArgumentException("La date de fin de contrat doit être postérieure à la date de début.");
+        }
+    }
+
+    /** Preserves existing dates when the client omits them; backfills default end when start exists but end is missing. */
+    private void mergeAndValidateContractDatesOnUpdate(@NonNull Cabinet existing, @NonNull Cabinet incoming) {
+        if (incoming.getContractStartDate() != null) {
+            existing.setContractStartDate(incoming.getContractStartDate());
+        }
+        if (incoming.getContractEndDate() != null) {
+            existing.setContractEndDate(incoming.getContractEndDate());
+        }
+        LocalDate start = existing.getContractStartDate();
+        if (start == null) {
+            return;
+        }
+        LocalDate end = existing.getContractEndDate();
+        if (end == null) {
+            existing.setContractEndDate(defaultContractEndDate(start));
+            end = existing.getContractEndDate();
+        }
+        if (!end.isAfter(start)) {
+            throw new IllegalArgumentException("La date de fin de contrat doit être postérieure à la date de début.");
+        }
+    }
+
     @Override
     @Transactional
     public Cabinet addCabinet(@NonNull Cabinet cabinet) {
         User currentUser = userService.getCurrentUser();
+
+        applyAndValidateContractDates(cabinet);
 
         Cabinet savedCabinet = cabinetRepository.save(cabinet);
 
@@ -94,6 +142,8 @@ public class CabinetServiceImpl implements CabinetService {
             oldCabinet.setPhone(existingCabinet.getPhone());
             oldCabinet.setIce(existingCabinet.getIce());
             oldCabinet.setVille(existingCabinet.getVille());
+            oldCabinet.setContractStartDate(existingCabinet.getContractStartDate());
+            oldCabinet.setContractEndDate(existingCabinet.getContractEndDate());
 
             // Mise à jour
             existingCabinet.setName(cabinet.getName());
@@ -101,6 +151,8 @@ public class CabinetServiceImpl implements CabinetService {
             existingCabinet.setPhone(cabinet.getPhone());
             existingCabinet.setIce(cabinet.getIce());
             existingCabinet.setVille(cabinet.getVille());
+
+            mergeAndValidateContractDatesOnUpdate(existingCabinet, cabinet);
 
             Cabinet updatedCabinet = cabinetRepository.save(existingCabinet);
 

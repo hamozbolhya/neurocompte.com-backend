@@ -21,6 +21,8 @@ public interface CabinetService {
 
     CabinetDTO fetchCabinetById(@NonNull Long id);
 
+    void renewContract(@NonNull Long cabinetId, @NonNull CabinetRequest renewalRequest);
+
     void assignCabinetToUser(@NonNull Long cabinetId, @NonNull UUID userId);
 
     void unassignCabinetFromUser(@NonNull UUID userId);

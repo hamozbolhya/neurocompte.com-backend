@@ -280,6 +280,40 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
+    public void renewContract(@NonNull Long cabinetId, @NonNull CabinetRequest renewalRequest) {
+        User currentUser = userService.getCurrentUser();
+        Cabinet cabinet = cabinetRepository.findById(cabinetId).orElseThrow(() -> 
+            new ResourceNotFoundException("Cabinet not found with id: " + cabinetId));
+
+        // 1. Deactivate all existing contracts for this cabinet
+        List<CabinetContract> existingContracts = contractRepository.findByCabinetIdOrderByStartDateDesc(cabinetId);
+        for (CabinetContract contract : existingContracts) {
+            contract.setActive(false);
+        }
+        contractRepository.saveAll(existingContracts);
+
+        // 2. Create and save the new contract
+        CabinetContract newContract = createInitialContract(cabinet, renewalRequest);
+        contractRepository.save(newContract);
+
+        // 3. Audit the renewal
+        auditService.logSuccessWithTargetCabinet(
+                currentUser,
+                "RENEW_CONTRACT",
+                "Cabinet",
+                cabinetId,
+                cabinet.getName(),
+                null,
+                newContract,
+                cabinetId,
+                cabinet.getName()
+        );
+
+        log.info("Contract renewed for cabinet {} (ID: {})", cabinet.getName(), cabinetId);
+    }
+
+    @Override
+    @Transactional
     public void assignCabinetToUser(@NonNull Long cabinetId, @NonNull UUID userId) {
         User currentUser = userService.getCurrentUser();
 

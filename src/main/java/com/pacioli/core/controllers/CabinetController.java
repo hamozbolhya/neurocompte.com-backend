@@ -12,6 +12,7 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.NonNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -82,6 +83,13 @@ public class CabinetController {
     @GetMapping("/{id}")
     public ResponseEntity<CabinetDTO> fetchCabinetById(@PathVariable Long id) {
         return ResponseEntity.ok(cabinetService.fetchCabinetById(Objects.requireNonNull(id, "id")));
+    }
+
+    @PostMapping("/{id}/renew")
+    @PreAuthorize("hasAuthority('PACIOLI')")
+    public ResponseEntity<String> renewContract(@PathVariable Long id, @RequestBody @NonNull CabinetRequest renewalRequest) {
+        cabinetService.renewContract(Objects.requireNonNull(id, "id"), renewalRequest);
+        return ResponseEntity.ok("Le contrat a été renouvelé avec succès.");
     }
 
     @GetMapping

@@ -194,18 +194,6 @@ public class CabinetController {
         }
     }
 
-    private static String jsonLocalDate(LocalDate d) {
-        return d != null ? "\"" + d + "\"" : "null";
-    }
-
-    private static String jsonEnum(Enum<?> e) {
-        return e != null ? "\"" + e.name() + "\"" : "null";
-    }
-
-    private static String jsonInteger(Integer n) {
-        return n != null ? n.toString() : "null";
-    }
-
     private static String jsonContracts(List<com.pacioli.core.models.CabinetContract> contracts) {
         if (contracts == null || contracts.isEmpty()) return "[]";
         StringBuilder sb = new StringBuilder("[");

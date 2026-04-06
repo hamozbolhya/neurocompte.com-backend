@@ -305,14 +305,18 @@ public class CabinetServiceImpl implements CabinetService {
 
         // 1. Deactivate all existing contracts for this cabinet
         List<CabinetContract> existingContracts = contractRepository.findByCabinetIdOrderByStartDateDesc(cabinetId);
-        for (CabinetContract contract : existingContracts) {
-            contract.setActive(false);
+        if (existingContracts != null && !existingContracts.isEmpty()) {
+            for (CabinetContract contract : existingContracts) {
+                contract.setActive(false);
+            }
+            contractRepository.saveAll(existingContracts);
         }
-        contractRepository.saveAll(existingContracts);
 
         // 2. Create and save the new contract
-        CabinetContract newContract = createInitialContract(cabinet, renewalRequest);
-        contractRepository.save(newContract);
+        CabinetContract newContract = createInitialContract(Objects.requireNonNull(cabinet), renewalRequest);
+        if (newContract != null) {
+            contractRepository.save(newContract);
+        }
 
         // 3. Audit the renewal
         auditService.logSuccessWithTargetCabinet(

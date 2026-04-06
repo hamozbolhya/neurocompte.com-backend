@@ -87,7 +87,8 @@ public class PieceServiceImpl implements PieceService {
             }
 
             // Set page count for PDF files
-            if (file.getContentType() != null && file.getContentType().equalsIgnoreCase("application/pdf")) {
+            String contentType = file.getContentType();
+            if (contentType != null && contentType.equalsIgnoreCase("application/pdf")) {
                 try (PDDocument document = PDDocument.load(file.getInputStream())) {
                     piece.setPageCount(document.getNumberOfPages());
                     log.info("PDF page count: {}", piece.getPageCount());

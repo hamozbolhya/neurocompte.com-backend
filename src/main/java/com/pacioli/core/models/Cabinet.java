@@ -22,14 +22,10 @@ public class Cabinet {
     private String ice;
     private String ville;
 
-    private LocalDate contractStartDate;
-    private LocalDate contractEndDate;
-
-    @Enumerated(EnumType.STRING)
-    private CabinetContractTier contractTier;
-
-    private Integer normalStatementPieceQuota;
-    private Integer bankStatementPageQuota;
+    @OneToMany(mappedBy = "cabinet", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("cabinet-contracts")
+    @ToString.Exclude
+    private List<CabinetContract> contracts;
 
     @OneToMany(mappedBy = "cabinet")
     @JsonManagedReference("cabinet-dossiers") // Unique reference for Cabinet-Dossiers

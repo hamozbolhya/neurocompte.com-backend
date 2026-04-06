@@ -1,5 +1,6 @@
 package com.pacioli.core.services;
 
+import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
@@ -12,7 +13,7 @@ import java.util.UUID;
 @Service
 public interface CabinetService {
 
-    Cabinet addCabinet(@NonNull Cabinet cabinet);
+    Cabinet addCabinet(@NonNull Cabinet cabinet, @NonNull CabinetRequest contractRequest);
 
     Cabinet updateCabinet(@NonNull Long id, @NonNull Cabinet cabinet);
 

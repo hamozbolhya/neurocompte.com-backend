@@ -3,8 +3,11 @@ package com.pacioli.core.services.serviceImp;
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.Exceptions.ResourceNotFoundException;
+import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.models.Cabinet;
+import com.pacioli.core.models.CabinetContract;
 import com.pacioli.core.models.User;
+import com.pacioli.core.repositories.CabinetContractRepository;
 import com.pacioli.core.repositories.CabinetRepository;
 import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.PieceRepository;
@@ -28,6 +31,9 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Autowired
     private CabinetRepository cabinetRepository;
+
+    @Autowired
+    private CabinetContractRepository contractRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -62,85 +68,50 @@ public class CabinetServiceImpl implements CabinetService {
         return contractStartDate.plusYears(1).minusDays(1);
     }
 
-    private void applyAndValidateContractDates(@NonNull Cabinet cabinet) {
-        LocalDate start = cabinet.getContractStartDate();
+    private CabinetContract createInitialContract(@NonNull Cabinet cabinet, @NonNull CabinetRequest incoming) {
+        LocalDate start = incoming.getContractStartDate();
         if (start == null) {
             throw new IllegalArgumentException("La date de début de contrat est obligatoire.");
         }
-        LocalDate end = cabinet.getContractEndDate();
+        LocalDate end = incoming.getContractEndDate();
         if (end == null) {
             end = defaultContractEndDate(start);
-            cabinet.setContractEndDate(end);
         }
         if (!end.isAfter(start)) {
             throw new IllegalArgumentException("La date de fin de contrat doit être postérieure à la date de début.");
         }
-    }
 
-    /** Preserves existing dates when the client omits them; backfills default end when start exists but end is missing. */
-    private void mergeAndValidateContractDatesOnUpdate(@NonNull Cabinet existing, @NonNull Cabinet incoming) {
-        if (incoming.getContractStartDate() != null) {
-            existing.setContractStartDate(incoming.getContractStartDate());
-        }
-        if (incoming.getContractEndDate() != null) {
-            existing.setContractEndDate(incoming.getContractEndDate());
-        }
-        LocalDate start = existing.getContractStartDate();
-        if (start == null) {
-            return;
-        }
-        LocalDate end = existing.getContractEndDate();
-        if (end == null) {
-            existing.setContractEndDate(defaultContractEndDate(start));
-            end = existing.getContractEndDate();
-        }
-        if (!end.isAfter(start)) {
-            throw new IllegalArgumentException("La date de fin de contrat doit être postérieure à la date de début.");
-        }
-    }
-
-    private void validateContractQuotas(@NonNull Cabinet cabinet) {
-        if (cabinet.getContractTier() == null) {
-            throw new IllegalArgumentException("Le type de contrat (contractTier) est obligatoire.");
-        }
-        Integer pieces = cabinet.getNormalStatementPieceQuota();
-        Integer pages = cabinet.getBankStatementPageQuota();
-        if (pieces == null) {
-            throw new IllegalArgumentException("Le quota de pièces (relevés normaux) est obligatoire.");
-        }
-        if (pages == null) {
-            throw new IllegalArgumentException("Le quota de pages (relevés bancaires) est obligatoire.");
+        Integer pieces = incoming.getNormalStatementPieceQuota();
+        Integer pages = incoming.getBankStatementPageQuota();
+        if (pieces == null || pages == null) {
+            throw new IllegalArgumentException("Les quotas de pièces et de pages sont obligatoires.");
         }
         if (pieces < 0 || pages < 0) {
             throw new IllegalArgumentException("Les quotas doivent être des entiers positifs ou nuls.");
         }
-    }
 
-    private void mergeContractQuotasOnUpdate(@NonNull Cabinet existing, @NonNull Cabinet incoming) {
-        if (incoming.getContractTier() != null) {
-            existing.setContractTier(incoming.getContractTier());
-        }
-        if (incoming.getNormalStatementPieceQuota() != null) {
-            existing.setNormalStatementPieceQuota(incoming.getNormalStatementPieceQuota());
-        }
-        if (incoming.getBankStatementPageQuota() != null) {
-            existing.setBankStatementPageQuota(incoming.getBankStatementPageQuota());
-        }
-        if (existing.getContractTier() != null || existing.getNormalStatementPieceQuota() != null
-                || existing.getBankStatementPageQuota() != null) {
-            validateContractQuotas(existing);
-        }
+        CabinetContract contract = new CabinetContract();
+        contract.setCabinet(cabinet);
+        contract.setStartDate(start);
+        contract.setEndDate(end);
+        contract.setNormalStatementPieceQuota(pieces);
+        contract.setBankStatementPageQuota(pages);
+        contract.setActive(true);
+        return contract;
     }
 
     @Override
     @Transactional
-    public Cabinet addCabinet(@NonNull Cabinet cabinet) {
+    public Cabinet addCabinet(@NonNull Cabinet cabinet, @NonNull CabinetRequest contractRequest) {
         User currentUser = userService.getCurrentUser();
 
-        applyAndValidateContractDates(cabinet);
-        validateContractQuotas(cabinet);
+        // Temporary storage of contract fields from the incoming object
+        // since we removed them from the Cabinet entity
+        CabinetContract initialContract = createInitialContract(cabinet, contractRequest);
 
         Cabinet savedCabinet = cabinetRepository.save(cabinet);
+        initialContract.setCabinet(savedCabinet);
+        contractRepository.save(initialContract);
 
         // ✅ Récupérer le cabinet cible (c'est le cabinet lui-même)
         Long targetCabinetId = getTargetCabinetId(savedCabinet);
@@ -176,11 +147,6 @@ public class CabinetServiceImpl implements CabinetService {
             oldCabinet.setPhone(existingCabinet.getPhone());
             oldCabinet.setIce(existingCabinet.getIce());
             oldCabinet.setVille(existingCabinet.getVille());
-            oldCabinet.setContractStartDate(existingCabinet.getContractStartDate());
-            oldCabinet.setContractEndDate(existingCabinet.getContractEndDate());
-            oldCabinet.setContractTier(existingCabinet.getContractTier());
-            oldCabinet.setNormalStatementPieceQuota(existingCabinet.getNormalStatementPieceQuota());
-            oldCabinet.setBankStatementPageQuota(existingCabinet.getBankStatementPageQuota());
 
             // Mise à jour
             existingCabinet.setName(cabinet.getName());
@@ -188,9 +154,6 @@ public class CabinetServiceImpl implements CabinetService {
             existingCabinet.setPhone(cabinet.getPhone());
             existingCabinet.setIce(cabinet.getIce());
             existingCabinet.setVille(cabinet.getVille());
-
-            mergeAndValidateContractDatesOnUpdate(existingCabinet, cabinet);
-            mergeContractQuotasOnUpdate(existingCabinet, cabinet);
 
             Cabinet updatedCabinet = cabinetRepository.save(existingCabinet);
 
@@ -286,10 +249,33 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     public CabinetDTO fetchCabinetById(@NonNull Long id) {
-        CabinetDTO cabinetDTO = cabinetRepository.findCabinetById(id).orElseThrow(() -> {
+        Cabinet cabinet = cabinetRepository.findById(id).orElseThrow(() -> {
             return new RuntimeException("Cabinet not found with id: " + id);
         });
-        return cabinetDTO;
+
+        CabinetDTO dto = new CabinetDTO(
+                cabinet.getId(),
+                cabinet.getName(),
+                cabinet.getAddress(),
+                cabinet.getPhone(),
+                cabinet.getIce(),
+                cabinet.getVille()
+        );
+
+        if (cabinet.getContracts() != null) {
+            dto.setContracts(cabinet.getContracts().stream()
+                    .map(c -> new CabinetDTO.ContractDTO(
+                            c.getId(),
+                            c.getStartDate(),
+                            c.getEndDate(),
+                            c.getNormalStatementPieceQuota(),
+                            c.getBankStatementPageQuota(),
+                            c.isActive()
+                    ))
+                    .collect(java.util.stream.Collectors.toList()));
+        }
+
+        return dto;
     }
 
     @Override

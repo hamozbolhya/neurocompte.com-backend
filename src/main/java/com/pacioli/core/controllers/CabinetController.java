@@ -7,6 +7,8 @@ import com.pacioli.core.repositories.CabinetRepository;
 import com.pacioli.core.repositories.DossierRepository;
 import com.pacioli.core.repositories.PieceRepository;
 import com.pacioli.core.services.CabinetService;
+
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -36,12 +38,33 @@ public class CabinetController {
     private DossierRepository dossierRepository;
 
     @PostMapping
-    public Cabinet addCabinet(@RequestBody Cabinet cabinet) {
-        Optional<Cabinet> existingCabinet = cabinetService.findByIce(cabinet.getIce());
+    public Cabinet addCabinet(@RequestBody CabinetRequest request) {
+        Optional<Cabinet> existingCabinet = cabinetService.findByIce(request.getIce());
         if (existingCabinet.isPresent()) {
             throw new RuntimeException("Le cabinet avec l'ICE donné existe déjà.");
         }
-        return cabinetService.addCabinet(Objects.requireNonNull(cabinet, "cabinet"));
+
+        Cabinet cabinet = new Cabinet();
+        cabinet.setName(request.getName());
+        cabinet.setAddress(request.getAddress());
+        cabinet.setPhone(request.getPhone());
+        cabinet.setIce(request.getIce());
+        cabinet.setVille(request.getVille());
+
+        return cabinetService.addCabinet(cabinet, request);
+    }
+
+    @Data
+    public static class CabinetRequest {
+        private String name;
+        private String address;
+        private String phone;
+        private String ice;
+        private String ville;
+        private LocalDate contractStartDate;
+        private LocalDate contractEndDate;
+        private Integer normalStatementPieceQuota;
+        private Integer bankStatementPageQuota;
     }
 
     @PutMapping("/{id}")
@@ -79,11 +102,7 @@ public class CabinetController {
                         .append("\"phone\":").append(cabinet.getPhone() != null ? "\"" + cabinet.getPhone() + "\"" : "null").append(",")
                         .append("\"ice\":").append(cabinet.getIce() != null ? "\"" + cabinet.getIce() + "\"" : "null").append(",")
                         .append("\"ville\":").append(cabinet.getVille() != null ? "\"" + cabinet.getVille().replace("\"", "\\\"") + "\"" : "null").append(",")
-                        .append("\"contractStartDate\":").append(jsonLocalDate(cabinet.getContractStartDate())).append(",")
-                        .append("\"contractEndDate\":").append(jsonLocalDate(cabinet.getContractEndDate())).append(",")
-                        .append("\"contractTier\":").append(jsonEnum(cabinet.getContractTier())).append(",")
-                        .append("\"normalStatementPieceQuota\":").append(jsonInteger(cabinet.getNormalStatementPieceQuota())).append(",")
-                        .append("\"bankStatementPageQuota\":").append(jsonInteger(cabinet.getBankStatementPageQuota()))
+                        .append("\"contracts\":").append(jsonContracts(cabinet.getContracts()))
                         .append("}");
             }
             json.append("]");
@@ -149,11 +168,19 @@ public class CabinetController {
 
                         cabinetInfo.put("totalPieces", totalPieces != null ? totalPieces : 0L);
                         cabinetInfo.put("totalDossiers", totalDossiers != null ? totalDossiers : 0L);
-                        cabinetInfo.put("contractStartDate", cabinet.getContractStartDate());
-                        cabinetInfo.put("contractEndDate", cabinet.getContractEndDate());
-                        cabinetInfo.put("contractTier", cabinet.getContractTier() != null ? cabinet.getContractTier().name() : null);
-                        cabinetInfo.put("normalStatementPieceQuota", cabinet.getNormalStatementPieceQuota());
-                        cabinetInfo.put("bankStatementPageQuota", cabinet.getBankStatementPageQuota());
+                        
+                        if (cabinet.getContracts() != null && !cabinet.getContracts().isEmpty()) {
+                            // Find active contract or latest
+                            com.pacioli.core.models.CabinetContract active = cabinet.getContracts().stream()
+                                    .filter(com.pacioli.core.models.CabinetContract::isActive)
+                                    .findFirst()
+                                    .orElse(cabinet.getContracts().get(cabinet.getContracts().size() - 1));
+                            
+                            cabinetInfo.put("contractStartDate", active.getStartDate());
+                            cabinetInfo.put("contractEndDate", active.getEndDate());
+                            cabinetInfo.put("normalStatementPieceQuota", active.getNormalStatementPieceQuota());
+                            cabinetInfo.put("bankStatementPageQuota", active.getBankStatementPageQuota());
+                        }
 
                         return cabinetInfo;
                     })
@@ -177,5 +204,24 @@ public class CabinetController {
 
     private static String jsonInteger(Integer n) {
         return n != null ? n.toString() : "null";
+    }
+
+    private static String jsonContracts(List<com.pacioli.core.models.CabinetContract> contracts) {
+        if (contracts == null || contracts.isEmpty()) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < contracts.size(); i++) {
+            com.pacioli.core.models.CabinetContract c = contracts.get(i);
+            if (i > 0) sb.append(",");
+            sb.append("{")
+                    .append("\"id\":").append(c.getId()).append(",")
+                    .append("\"startDate\":\"").append(c.getStartDate()).append("\",")
+                    .append("\"endDate\":\"").append(c.getEndDate()).append("\",")
+                    .append("\"normalStatementPieceQuota\":").append(c.getNormalStatementPieceQuota()).append(",")
+                    .append("\"bankStatementPageQuota\":").append(c.getBankStatementPageQuota()).append(",")
+                    .append("\"active\":").append(c.isActive())
+                    .append("}");
+        }
+        sb.append("]");
+        return sb.toString();
     }
 }

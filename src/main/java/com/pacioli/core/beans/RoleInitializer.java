@@ -1,12 +1,13 @@
 package com.pacioli.core.beans;
 
+import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.models.Role;
 import com.pacioli.core.models.User;
 import com.pacioli.core.models.Cabinet;
-import com.pacioli.core.models.CabinetContractTier;
 import com.pacioli.core.repositories.RoleRepository;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.repositories.CabinetRepository;
+import com.pacioli.core.services.CabinetService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,6 +24,7 @@ public class RoleInitializer {
     CommandLineRunner initRolesAndUsers(RoleRepository roleRepository,
                                         UserRepository userRepository,
                                         CabinetRepository cabinetRepository,
+                                        CabinetService cabinetService,
                                         PasswordEncoder passwordEncoder) {
         return args -> {
             Role pacioliRole = roleRepository.findByName("PACIOLI").orElseGet(() -> {
@@ -44,12 +46,13 @@ public class RoleInitializer {
                                 Cabinet newCabinet = new Cabinet();
                                 newCabinet.setName("PACIOLI_SYSTEM");
                                 LocalDate start = LocalDate.now();
-                                newCabinet.setContractStartDate(start);
-                                newCabinet.setContractEndDate(start.plusYears(1).minusDays(1));
-                                newCabinet.setContractTier(CabinetContractTier.CUSTOM);
-                                newCabinet.setNormalStatementPieceQuota(1_000_000);
-                                newCabinet.setBankStatementPageQuota(1_000_000);
-                                return cabinetRepository.save(newCabinet);
+                                CabinetRequest contractRequest = new CabinetRequest();
+                                contractRequest.setContractStartDate(start);
+                                contractRequest.setContractEndDate(start.plusYears(1).minusDays(1));
+                                contractRequest.setNormalStatementPieceQuota(1_000_000);
+                                contractRequest.setBankStatementPageQuota(1_000_000);
+
+                                return cabinetService.addCabinet(newCabinet, contractRequest);
                             });
 
                     // Create the default user

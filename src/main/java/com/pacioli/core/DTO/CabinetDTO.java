@@ -30,6 +30,8 @@ public class CabinetDTO {
         private LocalDate endDate;
         private Integer normalStatementPieceQuota;
         private Integer bankStatementPageQuota;
+        private Long normalStatementPieceConsumption;
+        private Long bankStatementPageConsumption;
         private boolean active;
     }
 

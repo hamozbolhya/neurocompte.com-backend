@@ -4,6 +4,8 @@ import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
+import com.pacioli.core.models.CabinetContract;
+import org.springframework.data.domain.Page;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +22,8 @@ public interface CabinetService {
     void deleteCabinet(@NonNull Long id);
 
     CabinetDTO fetchCabinetById(@NonNull Long id);
+
+    Page<CabinetContract> fetchContractsByCabinetId(@NonNull Long cabinetId, int page, int size);
 
     void renewContract(@NonNull Long cabinetId, @NonNull CabinetRequest renewalRequest);
 

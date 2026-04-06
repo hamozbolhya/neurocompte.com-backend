@@ -19,6 +19,8 @@ import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
@@ -276,6 +278,11 @@ public class CabinetServiceImpl implements CabinetService {
         }
 
         return dto;
+    }
+
+    @Override
+    public Page<CabinetContract> fetchContractsByCabinetId(@NonNull Long cabinetId, int page, int size) {
+        return contractRepository.findByCabinetIdOrderByStartDateDesc(cabinetId, PageRequest.of(page, size));
     }
 
     @Override

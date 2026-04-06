@@ -25,6 +25,7 @@ import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 
 @Slf4j
@@ -266,14 +267,24 @@ public class CabinetServiceImpl implements CabinetService {
 
         if (cabinet.getContracts() != null) {
             dto.setContracts(cabinet.getContracts().stream()
-                    .map(c -> new CabinetDTO.ContractDTO(
+                    .map(c -> {
+                        LocalDateTime start = c.getStartDate().atStartOfDay();
+                        LocalDateTime end = c.getEndDate().atTime(23, 59, 59);
+                        
+                        long normalConsumption = pieceRepository.countNormalPiecesForCabinetInPeriod(cabinet.getId(), start, end);
+                        Long bankConsumption = pieceRepository.sumBankPagesForCabinetInPeriod(cabinet.getId(), start, end);
+                        
+                        return new CabinetDTO.ContractDTO(
                             c.getId(),
                             c.getStartDate(),
                             c.getEndDate(),
                             c.getNormalStatementPieceQuota(),
                             c.getBankStatementPageQuota(),
+                            normalConsumption,
+                            bankConsumption != null ? bankConsumption : 0L,
                             c.isActive()
-                    ))
+                        );
+                    })
                     .collect(java.util.stream.Collectors.toList()));
         }
 

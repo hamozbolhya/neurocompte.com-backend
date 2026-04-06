@@ -18,6 +18,7 @@ import com.pacioli.core.services.serviceImp.pieces.PieceProcessingService;
 import com.pacioli.core.utils.FileContentHashing;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -83,6 +84,19 @@ public class PieceServiceImpl implements PieceService {
             String multipartOriginalName = file.getOriginalFilename();
             if (multipartOriginalName != null && !multipartOriginalName.isBlank()) {
                 piece.setOriginalFileName(multipartOriginalName.trim());
+            }
+
+            // Set page count for PDF files
+            if (file.getContentType() != null && file.getContentType().equalsIgnoreCase("application/pdf")) {
+                try (PDDocument document = PDDocument.load(file.getInputStream())) {
+                    piece.setPageCount(document.getNumberOfPages());
+                    log.info("PDF page count: {}", piece.getPageCount());
+                } catch (Exception e) {
+                    log.warn("Could not determine PDF page count: {}", e.getMessage());
+                    piece.setPageCount(1);
+                }
+            } else {
+                piece.setPageCount(1);
             }
 
             // Validate and save file - returns both filename and the file to process

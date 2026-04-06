@@ -37,6 +37,10 @@ public class Piece {
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "UTC")
     private Date uploadDate;
     private Double amount;
+
+    @Column(name = "page_count")
+    private Integer pageCount = 1; // Default to 1 for normal pieces
+
     @Enumerated(EnumType.STRING)
     private PieceStatus status; // New Status field
 

@@ -19,6 +19,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -199,6 +200,14 @@ public class CabinetController {
                             cabinetInfo.put("contractEndDate", active.getEndDate());
                             cabinetInfo.put("normalStatementPieceQuota", active.getNormalStatementPieceQuota());
                             cabinetInfo.put("bankStatementPageQuota", active.getBankStatementPageQuota());
+
+                            LocalDateTime start = active.getStartDate().atStartOfDay();
+                            LocalDateTime end = active.getEndDate().atTime(23, 59, 59);
+                            long normalConsumption = pieceRepository.countNormalPiecesForCabinetInPeriod(cabinet.getId(), start, end);
+                            Long bankConsumption = pieceRepository.sumBankPagesForCabinetInPeriod(cabinet.getId(), start, end);
+                            
+                            cabinetInfo.put("normalStatementPieceConsumption", normalConsumption);
+                            cabinetInfo.put("bankStatementPageConsumption", bankConsumption != null ? bankConsumption : 0L);
                         }
 
                         return cabinetInfo;
@@ -213,7 +222,7 @@ public class CabinetController {
         }
     }
 
-    private static String jsonContracts(List<com.pacioli.core.models.CabinetContract> contracts) {
+    private String jsonContracts(List<com.pacioli.core.models.CabinetContract> contracts) {
         if (contracts == null || contracts.isEmpty()) return "[]";
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < contracts.size(); i++) {
@@ -225,10 +234,24 @@ public class CabinetController {
                     .append("\"endDate\":\"").append(c.getEndDate()).append("\",")
                     .append("\"normalStatementPieceQuota\":").append(c.getNormalStatementPieceQuota()).append(",")
                     .append("\"bankStatementPageQuota\":").append(c.getBankStatementPageQuota()).append(",")
+                    .append("\"normalStatementPieceConsumption\":").append(pieceRepository.countNormalPiecesForCabinetInPeriod(c.getCabinet().getId(), c.getStartDate().atStartOfDay(), c.getEndDate().atTime(23, 59, 59))).append(",")
+                    .append("\"bankStatementPageConsumption\":").append(Optional.ofNullable(pieceRepository.sumBankPagesForCabinetInPeriod(c.getCabinet().getId(), c.getStartDate().atStartOfDay(), c.getEndDate().atTime(23, 59, 59))).orElse(0L)).append(",")
                     .append("\"active\":").append(c.isActive())
                     .append("}");
         }
         sb.append("]");
         return sb.toString();
+    }
+
+    private String jsonLocalDate(LocalDate d) {
+        return d != null ? "\"" + d + "\"" : "null";
+    }
+
+    private String jsonEnum(Enum<?> e) {
+        return e != null ? "\"" + e.name() + "\"" : "null";
+    }
+
+    private String jsonInteger(Integer n) {
+        return n != null ? n.toString() : "null";
     }
 }

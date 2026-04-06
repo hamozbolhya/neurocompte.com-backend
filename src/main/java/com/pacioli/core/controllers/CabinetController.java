@@ -242,16 +242,4 @@ public class CabinetController {
         sb.append("]");
         return sb.toString();
     }
-
-    private String jsonLocalDate(LocalDate d) {
-        return d != null ? "\"" + d + "\"" : "null";
-    }
-
-    private String jsonEnum(Enum<?> e) {
-        return e != null ? "\"" + e.name() + "\"" : "null";
-    }
-
-    private String jsonInteger(Integer n) {
-        return n != null ? n.toString() : "null";
-    }
 }

@@ -60,8 +60,9 @@ public class CabinetContractConsumptionService {
         LocalDate uploadDay = uploadDateToLocalDate(loaded.getUploadDate());
         log.info("📊 Piece upload local date: {}, Cabinet ID: {}", uploadDay, cabinetId);
 
-        Optional<Long> contractIdOpt = resolveContractIdForConsumption(cabinetId, uploadDay, loaded.getId());
+        Optional<Long> contractIdOpt = findApplicableContract(cabinetId, uploadDay).map(CabinetContract::getId);
         if (contractIdOpt.isEmpty()) {
+            log.warn("No cabinet contract for cabinet {} covers upload/today and no active contract (piece {})", cabinetId, loaded.getId());
             return;
         }
         Long contractId = contractIdOpt.get();
@@ -87,33 +88,25 @@ public class CabinetContractConsumptionService {
     }
 
     /**
-     * Prefer a contract whose period contains the upload day; then try "today" (processing day);
-     * finally the cabinet's current active contract so consumption still applies when dates are misaligned.
+     * Same resolution as consumption: period containing {@code referenceDay}, then today, then active contract.
+     * Not read-only so it can safely join a read-write transaction when called from quota checks during upload.
      */
-    private Optional<Long> resolveContractIdForConsumption(Long cabinetId, LocalDate uploadDay, Long pieceId) {
-        List<CabinetContract> byUpload = contractRepository.findByCabinetIdAndDateInContract(cabinetId, uploadDay);
-        if (byUpload != null && !byUpload.isEmpty()) {
-            return Optional.of(byUpload.get(0).getId());
+    public Optional<CabinetContract> findApplicableContract(Long cabinetId, LocalDate referenceDay) {
+        if (cabinetId == null || referenceDay == null) {
+            return Optional.empty();
         }
-
+        List<CabinetContract> byRef = contractRepository.findByCabinetIdAndDateInContract(cabinetId, referenceDay);
+        if (byRef != null && !byRef.isEmpty()) {
+            return Optional.of(byRef.get(0));
+        }
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
-        if (!today.equals(uploadDay)) {
+        if (!today.equals(referenceDay)) {
             List<CabinetContract> byToday = contractRepository.findByCabinetIdAndDateInContract(cabinetId, today);
             if (byToday != null && !byToday.isEmpty()) {
-                log.info("📊 No contract for upload day {} — using contract covering today {} (piece {})", uploadDay, today, pieceId);
-                return Optional.of(byToday.get(0).getId());
+                return Optional.of(byToday.get(0));
             }
         }
-
-        Optional<CabinetContract> active = contractRepository.findFirstByCabinetIdAndActiveTrueOrderByStartDateDesc(cabinetId);
-        if (active.isPresent()) {
-            log.warn("📊 No contract for upload day {} nor today {} — attributing piece {} to active contract {}",
-                    uploadDay, today, pieceId, active.get().getId());
-            return Optional.of(active.get().getId());
-        }
-
-        log.warn("No cabinet contract for cabinet {} covers upload/today and no active contract (piece {})", cabinetId, pieceId);
-        return Optional.empty();
+        return contractRepository.findFirstByCabinetIdAndActiveTrueOrderByStartDateDesc(cabinetId);
     }
 
     private static LocalDate uploadDateToLocalDate(Date uploadDate) {

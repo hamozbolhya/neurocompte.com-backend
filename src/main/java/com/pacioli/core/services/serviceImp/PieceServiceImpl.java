@@ -16,7 +16,7 @@ import com.pacioli.core.services.serviceImp.pieces.FileProcessingResult;
 import com.pacioli.core.services.serviceImp.pieces.FileService;
 import com.pacioli.core.services.serviceImp.pieces.PieceProcessingService;
 import com.pacioli.core.utils.FileContentHashing;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.data.domain.Page;
@@ -54,9 +54,10 @@ public class PieceServiceImpl implements PieceService {
     private final AuditService auditService;
     private final UserService userService;
     private final CabinetContractConsumptionService contractConsumptionService;
+    private final CabinetContractQuotaService contractQuotaService;
     private final PieceService pieceServiceSelf;
 
-    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService, CabinetContractConsumptionService contractConsumptionService, @Lazy PieceService pieceServiceSelf) {
+    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService, CabinetContractConsumptionService contractConsumptionService, CabinetContractQuotaService contractQuotaService, @Lazy PieceService pieceServiceSelf) {
         this.pieceRepository = pieceRepository;
         this.pieceDTOMapper = pieceDTOMapper;
         this.dossierRepository = dossierRepository;
@@ -69,6 +70,7 @@ public class PieceServiceImpl implements PieceService {
         this.auditService = auditService;
         this.userService = userService;
         this.contractConsumptionService = contractConsumptionService;
+        this.contractQuotaService = contractQuotaService;
         this.pieceServiceSelf = pieceServiceSelf;
     }
 
@@ -106,6 +108,9 @@ public class PieceServiceImpl implements PieceService {
                 piece.setPageCount(1);
             }
 
+            int pagesForQuota = piece.getPageCount() != null && piece.getPageCount() > 0 ? piece.getPageCount() : 1;
+            contractQuotaService.assertUploadWithinQuota(dossierId, piece.getType(), pagesForQuota);
+
             // Validate and save file - returns both filename and the file to process
             FileProcessingResult fileResult = fileService.validateAndSaveFile(file, piece.getType());
             String formattedFilename = fileResult.getFilename();
@@ -133,6 +138,8 @@ public class PieceServiceImpl implements PieceService {
 
             return savedPiece;
 
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IOException e) {
             // Audit: Échec création - erreur IO
             auditService.logFailure(currentUser, "CREATE", "Piece", null, file != null ? file.getOriginalFilename() : "unknown", "IO Error: " + e.getMessage());
@@ -148,7 +155,7 @@ public class PieceServiceImpl implements PieceService {
 
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData,
             @Nullable JsonNode originalAiResponse) {
         User currentUser = userService.getCurrentUser();
@@ -208,7 +215,10 @@ public class PieceServiceImpl implements PieceService {
                 }
             }
 
-            // ** Step 5: Update the status of the Piece **
+            // ** Step 5: Quota guard before PROCESSED (consumption + pipeline must not exceed contract) **
+            contractQuotaService.assertMayCompleteProcessing(piece);
+
+            // ** Step 6: Update the status of the Piece **
             piece.setStatus(PieceStatus.PROCESSED);
             piece.setIsDuplicate(false); // Ensure it's not marked as duplicate
             piece = pieceRepository.saveAndFlush(piece);
@@ -224,6 +234,13 @@ public class PieceServiceImpl implements PieceService {
 
             log.info("✅ Piece {} successfully processed with amount: {}", piece.getId(), piece.getAmount());
 
+        } catch (ResponseStatusException e) {
+            log.warn("💥 saveEcrituresAndFacture blocked for piece {}: {}", piece.getId(), e.getReason());
+            piece.setStatus(PieceStatus.REJECTED);
+            pieceRepository.save(piece);
+            auditService.logFailureWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(),
+                    "Quota / refus: " + e.getReason(), targetCabinetId, targetCabinetName);
+            throw e;
         } catch (Exception e) {
             log.error("💥 Error in saveEcrituresAndFacture for piece {}: {}", piece.getId(), e.getMessage(), e);
             piece.setStatus(PieceStatus.REJECTED);
@@ -457,6 +474,10 @@ public class PieceServiceImpl implements PieceService {
         Piece piece = getPieceById(pieceId);
         PieceStatus previous = piece.getStatus();
         PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
+
+        if (status == PieceStatus.PROCESSED && previous != PieceStatus.PROCESSED) {
+            contractQuotaService.assertMayCompleteProcessing(piece);
+        }
 
         piece.setStatus(status);
         Piece updatedPiece = pieceRepository.saveAndFlush(piece);

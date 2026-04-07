@@ -26,7 +26,12 @@ public interface PieceService {
     Piece saveEcrituresAndFacture(@NonNull Long pieceId, @NonNull Long dossierId, String pieceData,
             @Nullable JsonNode originalAiResponse);
 
-    Piece updatePieceStatus(@NonNull Long pieceId, String newStatus);
+    Piece updatePieceStatus(@NonNull Long pieceId, String newStatus, @Nullable String motifOfRejection);
+
+    default Piece updatePieceStatus(@NonNull Long pieceId, String newStatus) {
+        return updatePieceStatus(pieceId, newStatus, null);
+    }
+
     Piece forcePieceNotDuplicate(@NonNull Long pieceId);
 
     PieceStatsDTO getPieceStatsByDossier(@NonNull Long dossierId);

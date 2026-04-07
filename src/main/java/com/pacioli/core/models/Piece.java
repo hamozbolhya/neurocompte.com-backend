@@ -44,6 +44,9 @@ public class Piece {
     @Enumerated(EnumType.STRING)
     private PieceStatus status; // New Status field
 
+    @Column(name = "motif_of_rejection", columnDefinition = "TEXT")
+    private String motifOfRejection;
+
     // Duplicate detection field
     @Column(name = "is_duplicate", nullable = false)
     private Boolean isDuplicate = false;

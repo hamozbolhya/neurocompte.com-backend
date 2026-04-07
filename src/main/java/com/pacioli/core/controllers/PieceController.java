@@ -359,7 +359,8 @@ public class PieceController {
             throw new SecurityException("User cannot access this piece");
         }
 
-        Piece updatedPiece = pieceService.updatePieceStatus(piecePk, requestBody.getStatus());
+        Piece updatedPiece = pieceService.updatePieceStatus(piecePk, requestBody.getStatus(),
+                requestBody.getMotifOfRejection());
 
         if (updatedPiece != null) {
             return ResponseEntity.ok(updatedPiece);

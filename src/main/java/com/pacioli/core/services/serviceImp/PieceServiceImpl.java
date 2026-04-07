@@ -220,6 +220,7 @@ public class PieceServiceImpl implements PieceService {
 
             // ** Step 6: Update the status of the Piece **
             piece.setStatus(PieceStatus.PROCESSED);
+            piece.setMotifOfRejection(null);
             piece.setIsDuplicate(false); // Ensure it's not marked as duplicate
             piece = pieceRepository.saveAndFlush(piece);
             
@@ -237,6 +238,7 @@ public class PieceServiceImpl implements PieceService {
         } catch (ResponseStatusException e) {
             log.warn("💥 saveEcrituresAndFacture blocked for piece {}: {}", piece.getId(), e.getReason());
             piece.setStatus(PieceStatus.REJECTED);
+            piece.setMotifOfRejection(e.getReason() != null ? e.getReason() : e.getMessage());
             pieceRepository.save(piece);
             auditService.logFailureWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(),
                     "Quota / refus: " + e.getReason(), targetCabinetId, targetCabinetName);
@@ -244,6 +246,7 @@ public class PieceServiceImpl implements PieceService {
         } catch (Exception e) {
             log.error("💥 Error in saveEcrituresAndFacture for piece {}: {}", piece.getId(), e.getMessage(), e);
             piece.setStatus(PieceStatus.REJECTED);
+            piece.setMotifOfRejection("Processing error: " + e.getMessage());
             pieceRepository.save(piece);
 
             // Audit: Échec traitement avec cabinet cible
@@ -470,7 +473,7 @@ public class PieceServiceImpl implements PieceService {
     // Status operations
     @Override
     @Transactional
-    public Piece updatePieceStatus(@NonNull Long pieceId, String newStatus) {
+    public Piece updatePieceStatus(@NonNull Long pieceId, String newStatus, @Nullable String motifOfRejection) {
         Piece piece = getPieceById(pieceId);
         PieceStatus previous = piece.getStatus();
         PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
@@ -480,6 +483,11 @@ public class PieceServiceImpl implements PieceService {
         }
 
         piece.setStatus(status);
+        if (status == PieceStatus.REJECTED) {
+            piece.setMotifOfRejection(motifOfRejection);
+        } else {
+            piece.setMotifOfRejection(null);
+        }
         Piece updatedPiece = pieceRepository.saveAndFlush(piece);
         if (status == PieceStatus.PROCESSED && previous != PieceStatus.PROCESSED) {
             try {

@@ -23,6 +23,8 @@ public class PieceDTO {
 
     private PieceStatus status;
 
+    private String motifOfRejection;
+
     private FactureDataDTO factureData;
     private List<EcrituresDTO2> ecritures;
     private String dossierName;

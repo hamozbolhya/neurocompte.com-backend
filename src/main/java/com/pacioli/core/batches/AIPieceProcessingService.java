@@ -185,30 +185,11 @@ public class AIPieceProcessingService {
 
     private void rejectPiece(Piece piece, String reason) {
         log.error("❌ Rejecting piece {}: {}", piece.getId(), reason);
-        updatePieceStatus(piece, PieceStatus.REJECTED);
+        Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required");
+        pieceService.updatePieceStatus(pieceId, PieceStatus.REJECTED.name(), reason);
 
         // ✅ Ensure notification is sent for rejected pieces too
         notifyPiecesUpdate(piece.getDossier().getId());
-    }
-
-    private void updatePieceStatus(Piece piece, PieceStatus status) {
-        Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required");
-        Piece currentPiece = pieceRepository.findById(pieceId).orElse(piece);
-        currentPiece.setStatus(status);
-
-        // ✅ Preserve AI data if it exists
-        if (piece.getAiAmount() != null) {
-            currentPiece.setAiAmount(piece.getAiAmount());
-        }
-        if (piece.getAiCurrency() != null) {
-            currentPiece.setAiCurrency(piece.getAiCurrency());
-        }
-
-        Piece savedPiece = pieceRepository.save(currentPiece);
-
-        log.info("📝 Updated piece {} status to: {}", savedPiece.getId(), status);
-
-        // WebSocket notification will be handled by the calling method
     }
 
     private void notifyPiecesUpdate(Long dossierId) {

@@ -27,6 +27,7 @@ public class PieceDTOMapper {
         dto.setOriginalFileName(piece.getOriginalFileName());
         dto.setType(piece.getType());
         dto.setStatus(piece.getStatus());
+        dto.setMotifOfRejection(piece.getMotifOfRejection());
         dto.setUploadDate(piece.getUploadDate());
         dto.setAmount(piece.getAmount());
         dto.setDossierId(piece.getDossier().getId());

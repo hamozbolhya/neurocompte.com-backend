@@ -209,7 +209,7 @@ public abstract class BaseAIProcessor {
     protected void rejectPiece(Piece piece, String reason) {
         Long id = Objects.requireNonNull(piece.getId(), "piece id");
         log.error("❌ Rejecting piece {}: {}", id, reason);
-        pieceService.updatePieceStatus(id, PieceStatus.REJECTED.name());
+        pieceService.updatePieceStatus(id, PieceStatus.REJECTED.name(), reason);
     }
 
     /**

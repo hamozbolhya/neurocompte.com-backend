@@ -163,6 +163,10 @@ public class PieceServiceImpl implements PieceService {
         Dossier dossier = dossierRepository.findById(dossierId).orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
         Piece piece = pieceRepository.findById(pieceId).orElseThrow(() -> new IllegalArgumentException("Piece not found for ID: " + pieceId));
 
+        if (piece == null) {
+            throw new IllegalArgumentException("Piece not found for ID: " + pieceId);
+        }
+
         // Récupérer le cabinet cible (celui du dossier)
         Long targetCabinetId = dossier.getCabinet() != null ? dossier.getCabinet().getId() : null;
         String targetCabinetName = dossier.getCabinet() != null ? dossier.getCabinet().getName() : null;

@@ -132,7 +132,6 @@ public class CabinetContractQuotaService {
 
         String bankType = CabinetContractConsumptionService.BANK_PIECE_TYPE;
         if (isBankPieceType(piece.getType())) {
-            int pages = piece.getPageCount() != null && piece.getPageCount() > 0 ? piece.getPageCount() : 1;
             long quota = contract.getBankStatementPageQuota() == null ? 0L : contract.getBankStatementPageQuota();
             long consumed = nullToZero(contract.getBankStatementPageConsumption());
             Long pipelineBox = pieceRepository.sumBankPipelinePagesForCabinetInPeriod(

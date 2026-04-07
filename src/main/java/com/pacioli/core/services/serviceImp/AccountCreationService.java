@@ -8,15 +8,16 @@ import com.pacioli.core.repositories.JournalRepository;
 import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.UserService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -33,17 +34,16 @@ public class AccountCreationService {
     // Thread-safe locks for account creation per dossier
     private final Map<String, ReentrantLock> accountLocks = new ConcurrentHashMap<>();
 
-    @Autowired
     public AccountCreationService(AccountRepository accountRepository,
                                   JournalRepository journalRepository,
                                   @Lazy AuditService auditService,
                                   UserService userService,
-                                  PlatformTransactionManager transactionManager) {
+                                  @NonNull PlatformTransactionManager transactionManager) {
         this.accountRepository = accountRepository;
         this.journalRepository = journalRepository;
         this.auditService = auditService;
         this.userService = userService;
-        this.requiresNewTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTemplate = new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
@@ -130,13 +130,17 @@ public class AccountCreationService {
     }
 
     private Journal resolveJournalForInsert(Journal journal) {
-        if (journal == null || journal.getId() == null) {
+        if (journal == null) {
+            return null;
+        }
+        Long journalId = journal.getId();
+        if (journalId == null) {
             return journal;
         }
-        if (journalRepository.existsById(journal.getId())) {
+        if (journalRepository.existsById(Objects.requireNonNull(journalId))) {
             return journal;
         }
-        log.warn("Journal id {} not found in database; creating account without journal reference", journal.getId());
+        log.warn("Journal id {} not found in database; creating account without journal reference", journalId);
         return null;
     }
 

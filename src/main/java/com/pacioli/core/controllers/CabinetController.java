@@ -19,7 +19,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -200,14 +199,8 @@ public class CabinetController {
                             cabinetInfo.put("contractEndDate", active.getEndDate());
                             cabinetInfo.put("normalStatementPieceQuota", active.getNormalStatementPieceQuota());
                             cabinetInfo.put("bankStatementPageQuota", active.getBankStatementPageQuota());
-
-                            LocalDateTime start = active.getStartDate().atStartOfDay();
-                            LocalDateTime end = active.getEndDate().atTime(23, 59, 59);
-                            long normalConsumption = pieceRepository.countNormalPiecesForCabinetInPeriod(cabinet.getId(), start, end);
-                            Long bankConsumption = pieceRepository.sumBankPagesForCabinetInPeriod(cabinet.getId(), start, end);
-                            
-                            cabinetInfo.put("normalStatementPieceConsumption", normalConsumption);
-                            cabinetInfo.put("bankStatementPageConsumption", bankConsumption != null ? bankConsumption : 0L);
+                            cabinetInfo.put("normalStatementPieceConsumption", active.getNormalStatementPieceConsumption() != null ? active.getNormalStatementPieceConsumption() : 0L);
+                            cabinetInfo.put("bankStatementPageConsumption", active.getBankStatementPageConsumption() != null ? active.getBankStatementPageConsumption() : 0L);
                         }
 
                         return cabinetInfo;
@@ -234,8 +227,8 @@ public class CabinetController {
                     .append("\"endDate\":\"").append(c.getEndDate()).append("\",")
                     .append("\"normalStatementPieceQuota\":").append(c.getNormalStatementPieceQuota()).append(",")
                     .append("\"bankStatementPageQuota\":").append(c.getBankStatementPageQuota()).append(",")
-                    .append("\"normalStatementPieceConsumption\":").append(pieceRepository.countNormalPiecesForCabinetInPeriod(c.getCabinet().getId(), c.getStartDate().atStartOfDay(), c.getEndDate().atTime(23, 59, 59))).append(",")
-                    .append("\"bankStatementPageConsumption\":").append(Optional.ofNullable(pieceRepository.sumBankPagesForCabinetInPeriod(c.getCabinet().getId(), c.getStartDate().atStartOfDay(), c.getEndDate().atTime(23, 59, 59))).orElse(0L)).append(",")
+                    .append("\"normalStatementPieceConsumption\":").append(c.getNormalStatementPieceConsumption() != null ? c.getNormalStatementPieceConsumption() : 0).append(",")
+                    .append("\"bankStatementPageConsumption\":").append(c.getBankStatementPageConsumption() != null ? c.getBankStatementPageConsumption() : 0).append(",")
                     .append("\"active\":").append(c.isActive())
                     .append("}");
         }

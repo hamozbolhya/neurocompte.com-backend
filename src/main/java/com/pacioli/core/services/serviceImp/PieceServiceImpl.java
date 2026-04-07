@@ -50,9 +50,10 @@ public class PieceServiceImpl implements PieceService {
     private final DuplicateDetectionService duplicateDetectionService;
     private final AuditService auditService;
     private final UserService userService;
+    private final CabinetContractConsumptionService contractConsumptionService;
 
 
-    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService) {
+    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService, CabinetContractConsumptionService contractConsumptionService) {
         this.pieceRepository = pieceRepository;
         this.pieceDTOMapper = pieceDTOMapper;
         this.dossierRepository = dossierRepository;
@@ -64,6 +65,7 @@ public class PieceServiceImpl implements PieceService {
         this.duplicateDetectionService = duplicateDetectionService;
         this.auditService = auditService;
         this.userService = userService;
+        this.contractConsumptionService = contractConsumptionService;
     }
 
     @Override
@@ -205,7 +207,13 @@ public class PieceServiceImpl implements PieceService {
             // ** Step 5: Update the status of the Piece **
             piece.setStatus(PieceStatus.PROCESSED);
             piece.setIsDuplicate(false); // Ensure it's not marked as duplicate
-            piece = pieceRepository.save(piece);
+            piece = pieceRepository.saveAndFlush(piece);
+            
+            try {
+                contractConsumptionService.recordProcessedPiece(piece);
+            } catch (Exception e) {
+                log.error("📊 Failed to record contract consumption for piece {}: {}", piece.getId(), e.getMessage());
+            }
 
             // Audit: Traitement réussi avec cabinet cible
             auditService.logSuccessWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(), null, Map.of("status", piece.getStatus(), "amount", piece.getAmount()), targetCabinetId, targetCabinetName);
@@ -422,10 +430,18 @@ public class PieceServiceImpl implements PieceService {
     @Transactional
     public Piece updatePieceStatus(@NonNull Long pieceId, String newStatus) {
         Piece piece = getPieceById(pieceId);
+        PieceStatus previous = piece.getStatus();
         PieceStatus status = PieceStatus.valueOf(newStatus.toUpperCase());
 
         piece.setStatus(status);
-        Piece updatedPiece = pieceRepository.save(piece);
+        Piece updatedPiece = pieceRepository.saveAndFlush(piece);
+        if (status == PieceStatus.PROCESSED && previous != PieceStatus.PROCESSED) {
+            try {
+                contractConsumptionService.recordProcessedPiece(updatedPiece);
+            } catch (Exception e) {
+                log.error("📊 Failed to record contract consumption for piece {}: {}", updatedPiece.getId(), e.getMessage());
+            }
+        }
         return updatedPiece;
     }
 

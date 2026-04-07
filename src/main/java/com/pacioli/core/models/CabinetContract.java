@@ -9,6 +9,7 @@ import java.time.LocalDate;
 
 @Entity
 @Data
+@Table(name = "cabinet_contract")
 public class CabinetContract {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,6 +32,14 @@ public class CabinetContract {
 
     @Column(nullable = false)
     private Integer bankStatementPageQuota;
+
+    /** Normal (non-bank) pieces counted when status becomes PROCESSED. */
+    @Column(name = "normal_pieces_consumed")
+    private Long normalStatementPieceConsumption = 0L;
+
+    /** Bank statement pages counted when status becomes PROCESSED. */
+    @Column(name = "bank_pages_consumed")
+    private Long bankStatementPageConsumption = 0L;
 
     private boolean active = true;
 

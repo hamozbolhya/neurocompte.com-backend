@@ -233,44 +233,20 @@ public class PieceProcessingService {
     @Transactional
     public void saveEcrituresForPiece(Piece piece, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("🔥🔥🔥 SAVE ECritures START =========================================");
-//        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         try {
-            // DEBUG: Log the incoming pieceData
-            log.debug("🔥 Raw pieceData length: {}", pieceData.length());
-            try {
-                JsonNode root = objectMapper.readTree(pieceData);
-//                log.info("🔥 Root keys: {}", root.fieldNames());
-
-                if (root.has("ecritures")) {
-                    JsonNode ecrituresNode = root.get("ecritures");
-                    log.info("🔥 Found 'ecritures' field with {} elements",
-                            ecrituresNode.isArray() ? ecrituresNode.size() : "not an array");
-
-                    if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                        log.info("🔥 First ecriture in pieceData has keys: {}",
-                                ecrituresNode.get(0).fieldNames());
-                    }
-                }
-            } catch (Exception e) {
-                log.error("Error parsing pieceData for debug: {}", e.getMessage());
-            }
-
             Dossier dossier = dossierRepository.findById(dossierId)
                     .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
             log.info("🔥 Fetched Dossier: {} (ID: {})", dossier.getName(), dossier.getId());
 
             // Parse original AI response to get exact string values
             JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
-            log.info("🔥 Original AI response parsed: {}", originalEcritures != null);
 
             // Fetch existing Accounts and Journals for the Dossier
             Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
                     .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-//            log.info("🔥 Loaded {} existing accounts", accountMap.size());
 
             List<Journal> journals = journalRepository.findByDossierId(dossierId);
-//            log.info("🔥 Loaded {} existing journals", journals.size());
 
             // ✅ THIS SHOULD RETURN ALL ECritures
             List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -284,57 +260,27 @@ public class PieceProcessingService {
             int totalLines = 0;
             int totalSavedEcritures = 0;
 
+            // pass 1: prepare all ecritures and lines (including accounts)
             for (int i = 0; i < ecritures.size(); i++) {
                 Ecriture ecriture = ecritures.get(i);
-                log.info("🔥 Processing Ecriture {} of {}: uniqueNumber={}, date={}",
-                        i + 1, ecritures.size(),
-                        ecriture.getUniqueEntryNumber(), ecriture.getEntryDate());
-
-                // Link to piece
                 ecriture.setPiece(piece);
-                log.debug("🔥 Linked to piece {}", piece.getId());
-
                 if (ecriture.getManuallyUpdated() == null) {
                     ecriture.setManuallyUpdated(false);
                 }
 
-                // Find or create Journal
                 Journal journal = findOrCreateJournal(ecriture, dossier, journals);
                 ecriture.setJournal(journal);
-                log.debug("🔥 Set journal: {}", journal.getName());
 
-                try {
-                    // ✅ SAVE ECriture first
-                    Ecriture savedEcriture = ecritureRepository.save(ecriture);
-                    log.info("✅ Saved Ecriture {}: ID={}, uniqueNumber={}",
-                            i + 1, savedEcriture.getId(), savedEcriture.getUniqueEntryNumber());
-                    totalSavedEcritures++;
-
-                    if (ecriture.getLines() == null || ecriture.getLines().isEmpty()) {
-                        log.warn("⚠️ Ecriture {} has no lines!", i + 1);
-                        continue;
-                    }
-
-                    log.info("🔥 Processing {} lines for Ecriture {}",
-                            ecriture.getLines().size(), i + 1);
-
-                    // Process lines
+                if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
                     for (int j = 0; j < ecriture.getLines().size(); j++) {
                         Line line = ecriture.getLines().get(j);
-                        line.setEcriture(savedEcriture); // Link to saved ecriture
-
+                        line.setEcriture(ecriture);
                         if (line.getManuallyUpdated() == null) {
                             line.setManuallyUpdated(false);
                         }
 
-//                        log.debug("🔥 Line {}: label={}, account={}",
-//                                j + 1, line.getLabel(),
-//                                line.getAccount() != null ? line.getAccount().getAccount() : "null");
-
-                        // Handle currency conversion info from original AI response
                         processLineConversion(line, j, originalEcritures, piece);
 
-                        // Handle account creation
                         String accountNumber = line.getAccount() != null ?
                                 line.getAccount().getAccount() : null;
 
@@ -343,19 +289,24 @@ public class PieceProcessingService {
                             Account account = findOrCreateAccount(accountNumber, dossier, journal,
                                     accountLabel, accountMap);
                             line.setAccount(account);
-//                            log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
-                        } else {
-                            log.warn("⚠️ Line {} has no account number!", j + 1);
                         }
                     }
+                }
+            }
 
-                    // ✅ SAVE LINES after linking
-                    lineRepository.saveAll(Objects.requireNonNull(ecriture.getLines()));
-                    totalLines += ecriture.getLines().size();
-
-                    log.info("✅ Saved {} lines for Ecriture {}",
-                            ecriture.getLines().size(), savedEcriture.getId());
-
+            // pass 2: save everything
+            for (int i = 0; i < ecritures.size(); i++) {
+                Ecriture ecriture = ecritures.get(i);
+                try {
+                    // ✅ SAVE ECriture (cascades to lines)
+                    Ecriture savedEcriture = ecritureRepository.save(Objects.requireNonNull(ecriture));
+                    totalSavedEcritures++;
+                    if (savedEcriture.getLines() != null) {
+                        totalLines += savedEcriture.getLines().size();
+                    }
+                    log.info("✅ Saved Ecriture {}: ID={}, lines={}",
+                            i + 1, savedEcriture.getId(),
+                            savedEcriture.getLines() != null ? savedEcriture.getLines().size() : 0);
                 } catch (Exception e) {
                     log.error("❌ Error saving Ecriture {}: {}", i + 1, e.getMessage(), e);
                     throw e;
@@ -579,6 +530,8 @@ public class PieceProcessingService {
                                     line.setAccount(existingAccount);
                                 } else {
                                     account.setDossier(dossier);
+                                    // JSON often carries a phantom journal id that does not exist in DB; journal is set in saveEcritures pass 1.
+                                    account.setJournal(null);
                                     log.info("🔥 Prepared new Account: {}", account.getAccount());
                                     accountMap.put(account.getAccount(), account);
                                 }
@@ -616,7 +569,12 @@ public class PieceProcessingService {
     private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal,
                                         String accountLabel, Map<String, Account> accountMap) {
         if (accountMap.containsKey(accountNumber)) {
-            return accountMap.get(accountNumber);
+            Account cached = accountMap.get(accountNumber);
+            // Transient accounts from JSON must use the journal resolved for this écriture, not deserialized FKs.
+            if (cached.getId() == null) {
+                cached.setJournal(journal);
+            }
+            return cached;
         }
 
         try {

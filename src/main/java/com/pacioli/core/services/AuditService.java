@@ -9,7 +9,10 @@ import com.pacioli.core.repositories.AuditLogRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -25,6 +28,10 @@ public class AuditService {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
+    @Autowired
+    @Lazy
+    private AuditService self;
+
     private final ObjectMapper objectMapper;
 
     public AuditService() {
@@ -37,7 +44,7 @@ public class AuditService {
      * Enregistre une action dans les logs d'audit - Version simplifiée (utilise le cabinet de l'utilisateur)
      */
     public void logSuccess(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue) {
-        logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, null);
+        self.logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, null);
     }
 
     /**
@@ -46,14 +53,14 @@ public class AuditService {
      * @param targetCabinetId Le cabinet sur lequel l'action est effectuée (important pour le super admin en mode support)
      */
     public void logSuccessWithTargetCabinet(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, Long targetCabinetId, String targetCabinetName) {
-        logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
+        self.logAction(user, action, entityType, entityId, entityName, oldValue, newValue, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
     }
 
     /**
      * Méthode simplifiée pour les actions en échec
      */
     public void logFailure(User user, String action, String entityType, Object entityId, String entityName, String errorMessage) {
-        logAction(user, action, entityType, entityId, entityName, null, null, "FAILURE", errorMessage, null);
+        self.logAction(user, action, entityType, entityId, entityName, null, null, "FAILURE", errorMessage, null);
     }
 
 
@@ -63,6 +70,7 @@ public class AuditService {
     /**
      * Version simplifiée avec cabinet cible pour les actions en échec
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logFailureWithTargetCabinet(User user, String action, String entityType, Object entityId, String entityName, String errorMessage, Long targetCabinetId, String targetCabinetName) {
         try {
             AuditLog auditLog = new AuditLog();
@@ -117,14 +125,14 @@ public class AuditService {
      * Méthode pour les actions de consultation
      */
     public void logView(User user, String entityType, Object entityId, String entityName) {
-        logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, null);
+        self.logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, null);
     }
 
     /**
      * Méthode pour les actions de consultation avec cabinet cible
      */
     public void logViewWithTargetCabinet(User user, String entityType, Object entityId, String entityName, Long targetCabinetId, String targetCabinetName) {
-        logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
+        self.logAction(user, "VIEW", entityType, entityId, entityName, null, null, "SUCCESS", null, new TargetCabinet(targetCabinetId, targetCabinetName));
     }
 
     /**
@@ -143,7 +151,8 @@ public class AuditService {
     /**
      * Méthode principale enrichie avec le concept de cabinet cible
      */
-    private void logAction(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, String status, String errorMessage, TargetCabinet targetCabinet) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logAction(User user, String action, String entityType, Object entityId, String entityName, Object oldValue, Object newValue, String status, String errorMessage, TargetCabinet targetCabinet) {
         try {
             AuditLog auditLog = new AuditLog();
 

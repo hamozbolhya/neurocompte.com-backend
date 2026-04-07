@@ -95,7 +95,8 @@ public class Line {
     private Ecriture ecriture;        // Associated Ecriture
 
 
-    @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.PERSIST)
+    /** No cascade: accounts are persisted elsewhere (e.g. REQUIRES_NEW); PERSIST here caused detached Account on flush. */
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_id", nullable = true)
     @JsonBackReference("account-lines")
     private Account account;

@@ -25,8 +25,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
 import org.springframework.lang.Nullable;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -51,9 +54,9 @@ public class PieceServiceImpl implements PieceService {
     private final AuditService auditService;
     private final UserService userService;
     private final CabinetContractConsumptionService contractConsumptionService;
+    private final PieceService pieceServiceSelf;
 
-
-    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService, CabinetContractConsumptionService contractConsumptionService) {
+    public PieceServiceImpl(PieceRepository pieceRepository, PieceDTOMapper pieceDTOMapper, DossierRepository dossierRepository, SimpMessagingTemplate messagingTemplate, FileService fileService, AIService aiService, PieceProcessingService pieceProcessingService, ObjectMapper objectMapper, EcritureRepository ecritureRepository, LineRepository lineRepository, DuplicateDetectionService duplicateDetectionService, AuditService auditService, UserService userService, CabinetContractConsumptionService contractConsumptionService, @Lazy PieceService pieceServiceSelf) {
         this.pieceRepository = pieceRepository;
         this.pieceDTOMapper = pieceDTOMapper;
         this.dossierRepository = dossierRepository;
@@ -66,6 +69,7 @@ public class PieceServiceImpl implements PieceService {
         this.auditService = auditService;
         this.userService = userService;
         this.contractConsumptionService = contractConsumptionService;
+        this.pieceServiceSelf = pieceServiceSelf;
     }
 
     @Override
@@ -199,7 +203,7 @@ public class PieceServiceImpl implements PieceService {
                             piece.getId(), orig.getId(),
                             orig.getOriginalFileName() != null && !orig.getOriginalFileName().isBlank()
                                     ? orig.getOriginalFileName() : orig.getFilename());
-                    notifyPiecesUpdate(dossierId);
+                    scheduleNotifyPiecesUpdateAfterTransaction(dossierId);
                     return piece;
                 }
             }
@@ -228,10 +232,31 @@ public class PieceServiceImpl implements PieceService {
             // Audit: Échec traitement avec cabinet cible
             auditService.logFailureWithTargetCabinet(currentUser, "PROCESS", "Piece", piece.getId(), piece.getOriginalFileName(), "Processing Error: " + e.getMessage(), targetCabinetId, targetCabinetName);
         } finally {
-            notifyPiecesUpdate(dossierId);
+            scheduleNotifyPiecesUpdateAfterTransaction(dossierId);
         }
 
         return piece;
+    }
+
+    /**
+     * Runs WebSocket reload after the surrounding transaction completes so a repository read does not
+     * auto-flush a session that still references accounts created in nested transactions.
+     */
+    private void scheduleNotifyPiecesUpdateAfterTransaction(@NonNull Long dossierId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            pieceServiceSelf.notifyPiecesUpdate(dossierId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    pieceServiceSelf.notifyPiecesUpdate(dossierId);
+                } catch (Exception e) {
+                    log.error("💥 Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage(), e);
+                }
+            }
+        });
     }
 
     private void ensurePieceAmountIsSet(Piece piece, String pieceData, Dossier dossier, JsonNode originalAiResponse) {

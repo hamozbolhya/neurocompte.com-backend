@@ -70,7 +70,14 @@ public class CabinetServiceImpl implements CabinetService {
         return contractStartDate.plusYears(1).minusDays(1);
     }
 
-    private CabinetContract createInitialContract(@NonNull Cabinet cabinet, @NonNull CabinetRequest incoming) {
+    private record ParsedContractFields(
+            LocalDate start,
+            LocalDate end,
+            int normalPieceQuota,
+            int bankPageQuota) {
+    }
+
+    private ParsedContractFields parseAndValidateContractFields(@NonNull CabinetRequest incoming) {
         LocalDate start = incoming.getContractStartDate();
         if (start == null) {
             throw new IllegalArgumentException("La date de début de contrat est obligatoire.");
@@ -92,12 +99,44 @@ public class CabinetServiceImpl implements CabinetService {
             throw new IllegalArgumentException("Les quotas doivent être des entiers positifs ou nuls.");
         }
 
+        return new ParsedContractFields(start, end, pieces, pages);
+    }
+
+    private static boolean hasContractFieldPayload(@NonNull CabinetRequest request) {
+        return request.getContractStartDate() != null
+                || request.getContractEndDate() != null
+                || request.getNormalStatementPieceQuota() != null
+                || request.getBankStatementPageQuota() != null;
+    }
+
+    private Optional<CabinetContract> resolveContractForUpdate(@NonNull Long cabinetId) {
+        Optional<CabinetContract> active = contractRepository.findFirstByCabinetIdAndActiveTrueOrderByStartDateDesc(cabinetId);
+        if (active.isPresent()) {
+            return active;
+        }
+        List<CabinetContract> list = contractRepository.findByCabinetIdOrderByStartDateDesc(cabinetId);
+        if (list == null || list.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(list.get(0));
+    }
+
+    private void applyContractUpdate(@NonNull CabinetContract contract, @NonNull CabinetRequest incoming) {
+        ParsedContractFields p = parseAndValidateContractFields(incoming);
+        contract.setStartDate(p.start());
+        contract.setEndDate(p.end());
+        contract.setNormalStatementPieceQuota(p.normalPieceQuota());
+        contract.setBankStatementPageQuota(p.bankPageQuota());
+    }
+
+    private CabinetContract createInitialContract(@NonNull Cabinet cabinet, @NonNull CabinetRequest incoming) {
+        ParsedContractFields p = parseAndValidateContractFields(incoming);
         CabinetContract contract = new CabinetContract();
         contract.setCabinet(cabinet);
-        contract.setStartDate(start);
-        contract.setEndDate(end);
-        contract.setNormalStatementPieceQuota(pieces);
-        contract.setBankStatementPageQuota(pages);
+        contract.setStartDate(p.start());
+        contract.setEndDate(p.end());
+        contract.setNormalStatementPieceQuota(p.normalPieceQuota());
+        contract.setBankStatementPageQuota(p.bankPageQuota());
         contract.setActive(true);
         return contract;
     }
@@ -137,48 +176,10 @@ public class CabinetServiceImpl implements CabinetService {
 
     @Override
     @Transactional
-    public Cabinet updateCabinet(@NonNull Long id, @NonNull Cabinet cabinet) {
+    public void updateCabinet(@NonNull Long id, @NonNull CabinetRequest request) {
         User currentUser = userService.getCurrentUser();
 
-        return cabinetRepository.findById(id).map(existingCabinet -> {
-            // Sauvegarder l'ancien état pour l'audit
-            Cabinet oldCabinet = new Cabinet();
-            oldCabinet.setId(existingCabinet.getId());
-            oldCabinet.setName(existingCabinet.getName());
-            oldCabinet.setAddress(existingCabinet.getAddress());
-            oldCabinet.setPhone(existingCabinet.getPhone());
-            oldCabinet.setIce(existingCabinet.getIce());
-            oldCabinet.setVille(existingCabinet.getVille());
-
-            // Mise à jour
-            existingCabinet.setName(cabinet.getName());
-            existingCabinet.setAddress(cabinet.getAddress());
-            existingCabinet.setPhone(cabinet.getPhone());
-            existingCabinet.setIce(cabinet.getIce());
-            existingCabinet.setVille(cabinet.getVille());
-
-            Cabinet updatedCabinet = cabinetRepository.save(existingCabinet);
-
-            // ✅ Récupérer le cabinet cible
-            Long targetCabinetId = getTargetCabinetId(updatedCabinet);
-            String targetCabinetName = getTargetCabinetName(updatedCabinet);
-
-            // Audit: Mise à jour de cabinet avec cabinet cible
-            auditService.logSuccessWithTargetCabinet(
-                    currentUser,
-                    "UPDATE",
-                    "Cabinet",
-                    updatedCabinet.getId(),
-                    updatedCabinet.getName(),
-                    oldCabinet,
-                    updatedCabinet,
-                    targetCabinetId,
-                    targetCabinetName
-            );
-
-            return updatedCabinet;
-        }).orElseThrow(() -> {
-            // Audit: Échec mise à jour - cabinet non trouvé
+        Cabinet existingCabinet = cabinetRepository.findById(id).orElseThrow(() -> {
             auditService.logFailure(
                     currentUser,
                     "UPDATE",
@@ -187,8 +188,51 @@ public class CabinetServiceImpl implements CabinetService {
                     "Cabinet-" + id,
                     "Cabinet not found with id: " + id
             );
-            return new RuntimeException("Cabinet not found");
+            return new ResourceNotFoundException("Cabinet not found with id: " + id);
         });
+
+        Cabinet oldCabinet = new Cabinet();
+        oldCabinet.setId(existingCabinet.getId());
+        oldCabinet.setName(existingCabinet.getName());
+        oldCabinet.setAddress(existingCabinet.getAddress());
+        oldCabinet.setPhone(existingCabinet.getPhone());
+        oldCabinet.setIce(existingCabinet.getIce());
+        oldCabinet.setVille(existingCabinet.getVille());
+
+        existingCabinet.setName(request.getName());
+        existingCabinet.setAddress(request.getAddress());
+        existingCabinet.setPhone(request.getPhone());
+        existingCabinet.setIce(request.getIce());
+        existingCabinet.setVille(request.getVille());
+
+        Cabinet updatedCabinet = cabinetRepository.save(existingCabinet);
+
+        if (hasContractFieldPayload(request)) {
+            Optional<CabinetContract> contractOpt = resolveContractForUpdate(id);
+            if (contractOpt.isEmpty()) {
+                CabinetContract newContract = createInitialContract(updatedCabinet, request);
+                contractRepository.save(newContract);
+            } else {
+                CabinetContract toUpdate = contractOpt.get();
+                applyContractUpdate(toUpdate, request);
+                contractRepository.save(toUpdate);
+            }
+        }
+
+        Long targetCabinetId = getTargetCabinetId(updatedCabinet);
+        String targetCabinetName = getTargetCabinetName(updatedCabinet);
+
+        auditService.logSuccessWithTargetCabinet(
+                currentUser,
+                "UPDATE",
+                "Cabinet",
+                updatedCabinet.getId(),
+                updatedCabinet.getName(),
+                oldCabinet,
+                updatedCabinet,
+                targetCabinetId,
+                targetCabinetName
+        );
     }
 
     @Override

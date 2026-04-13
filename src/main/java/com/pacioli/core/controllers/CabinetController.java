@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -71,9 +72,14 @@ public class CabinetController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Cabinet> updateCabinet(@PathVariable Long id, @RequestBody Cabinet cabinet) {
-        return ResponseEntity.ok(cabinetService.updateCabinet(Objects.requireNonNull(id, "id"),
-                Objects.requireNonNull(cabinet, "cabinet")));
+    public ResponseEntity<Map<String, Object>> updateCabinet(
+            @PathVariable Long id,
+            @RequestBody @NonNull CabinetRequest request) {
+        cabinetService.updateCabinet(Objects.requireNonNull(id, "id"), Objects.requireNonNull(request, "request"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", true);
+        body.put("message", "Le cabinet a été mis à jour avec succès.");
+        return ResponseEntity.ok(body);
     }
 
     @DeleteMapping("/{id}")

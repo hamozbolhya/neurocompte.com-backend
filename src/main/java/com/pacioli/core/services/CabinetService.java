@@ -17,7 +17,7 @@ public interface CabinetService {
 
     Cabinet addCabinet(@NonNull Cabinet cabinet, @NonNull CabinetRequest contractRequest);
 
-    Cabinet updateCabinet(@NonNull Long id, @NonNull Cabinet cabinet);
+    void updateCabinet(@NonNull Long id, @NonNull CabinetRequest request);
 
     void deleteCabinet(@NonNull Long id);
 

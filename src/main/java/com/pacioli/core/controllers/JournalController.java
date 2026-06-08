@@ -1,5 +1,6 @@
 package com.pacioli.core.controllers;
 
+import com.pacioli.core.DTO.JournalDTO;
 import com.pacioli.core.models.Dossier;
 import com.pacioli.core.models.Journal;
 import com.pacioli.core.services.DossierService;
@@ -63,9 +64,19 @@ public class JournalController {
 
 
     @GetMapping("/dossier")
-    public ResponseEntity<List<Journal>> getJournalsByDossierId(@RequestParam Long dossierId) {
+    public ResponseEntity<List<JournalDTO>> getJournalsByDossierId(@RequestParam Long dossierId) {
         List<Journal> journals = journalService.getJournalsByDossierId(
                 Objects.requireNonNull(dossierId, "dossierId"));
-        return ResponseEntity.ok(journals);
+        return ResponseEntity.ok(journals.stream()
+                .map(this::toDTO)
+                .toList());
+    }
+
+    private JournalDTO toDTO(Journal journal) {
+        JournalDTO dto = new JournalDTO();
+        dto.setId(journal.getId());
+        dto.setName(journal.getName());
+        dto.setType(journal.getType());
+        return dto;
     }
 }

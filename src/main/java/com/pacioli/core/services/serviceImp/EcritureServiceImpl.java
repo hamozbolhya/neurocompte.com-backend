@@ -15,6 +15,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -116,6 +118,10 @@ public class EcritureServiceImpl implements EcritureService {
         dto.setId(ecriture.getId());
         dto.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto.setEntryDate(ecriture.getEntryDate());
+        dto.setExchangeRate(ecriture.getExchangeRate());
+        dto.setOriginalCurrency(ecriture.getOriginalCurrency());
+        dto.setConvertedCurrency(ecriture.getConvertedCurrency());
+        dto.setExchangeRateDate(ecriture.getExchangeRateDate());
 
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
@@ -315,6 +321,10 @@ public class EcritureServiceImpl implements EcritureService {
         dto.setId(ecriture.getId());
         dto.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto.setEntryDate(ecriture.getEntryDate());
+        dto.setExchangeRate(ecriture.getExchangeRate());
+        dto.setOriginalCurrency(ecriture.getOriginalCurrency());
+        dto.setConvertedCurrency(ecriture.getConvertedCurrency());
+        dto.setExchangeRateDate(ecriture.getExchangeRateDate());
 
         // Set the amountUpdated field
         dto.setAmountUpdated(ecriture.getAmountUpdated());
@@ -547,6 +557,10 @@ public class EcritureServiceImpl implements EcritureService {
 
         existingEcriture.setJournal(newJournal);
         existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
+        existingEcriture.setExchangeRate(ecritureRequest.getExchangeRate());
+        existingEcriture.setOriginalCurrency(ecritureRequest.getOriginalCurrency());
+        existingEcriture.setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+        existingEcriture.setExchangeRateDate(ecritureRequest.getExchangeRateDate());
 
         if (ecritureRequest.getManuallyUpdated() != null && ecritureRequest.getManuallyUpdated()) {
             existingEcriture.setManuallyUpdated(true);
@@ -560,11 +574,24 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Check if the exchange rate has been updated
         Piece associatedPiece = existingEcriture.getPiece();
+        Double previousPieceExchangeRate = associatedPiece != null ? associatedPiece.getExchangeRate() : null;
         if (associatedPiece != null && ecritureRequest.getExchangeRate() != null) {
             if (associatedPiece.getExchangeRate() == null || !associatedPiece.getExchangeRate().equals(ecritureRequest.getExchangeRate())) {
                 associatedPiece.setExchangeRateUpdated(true);
-                pieceRepository.save(associatedPiece);
             }
+            associatedPiece.setExchangeRate(ecritureRequest.getExchangeRate());
+            associatedPiece.setAiCurrency(ecritureRequest.getOriginalCurrency());
+            associatedPiece.setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+            associatedPiece.setExchangeRateDate(ecritureRequest.getExchangeRateDate());
+
+            if (associatedPiece.getFactureData() != null) {
+                associatedPiece.getFactureData().setExchangeRate(ecritureRequest.getExchangeRate());
+                associatedPiece.getFactureData().setOriginalCurrency(ecritureRequest.getOriginalCurrency());
+                associatedPiece.getFactureData().setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+                associatedPiece.getFactureData().setExchangeRateDate(ecritureRequest.getExchangeRateDate());
+            }
+
+            pieceRepository.save(associatedPiece);
         }
 
         // Check for exchange rate information
@@ -581,7 +608,7 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Update the lines
         updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
-                ecritureRequest.getManuallyUpdated());
+                ecritureRequest.getManuallyUpdated(), decimalPrecision, previousPieceExchangeRate);
 
         Ecriture updatedEcriture = ecritureRepository.save(existingEcriture);
 
@@ -602,7 +629,8 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines,
-                                     boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated) {
+                                     boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated,
+                                     int decimalPrecision, Double previousPieceExchangeRate) {
         List<Line> existingLines = existingEcriture.getLines();
 
         // Step 1: Remove lines that no longer exist
@@ -631,6 +659,8 @@ public class EcritureServiceImpl implements EcritureService {
                 String existingOriginalCurrency = existingLine.getOriginalCurrency();
                 String existingConvertedCurrency = existingLine.getConvertedCurrency();
                 Double existingExchangeRate = existingLine.getExchangeRate();
+                Double existingDebit = existingLine.getDebit();
+                Double existingCredit = existingLine.getCredit();
 
                 // Fetch the Account to ensure it is managed
                 Long lineAccountId = Objects.requireNonNull(
@@ -640,8 +670,6 @@ public class EcritureServiceImpl implements EcritureService {
 
                 existingLine.setAccount(managedAccount);
                 existingLine.setLabel(updatedLine.getLabel());
-                existingLine.setDebit(updatedLine.getDebit());
-                existingLine.setCredit(updatedLine.getCredit());
 
                 // ✅ PRESERVE CURRENCY FIELDS IF NOT PROVIDED IN UPDATE
                 if (isValidCurrency(updatedLine.getOriginalCurrency())) {
@@ -668,10 +696,15 @@ public class EcritureServiceImpl implements EcritureService {
                     existingLine.setExchangeRate(null);
                 }
 
-                existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
-                existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
-                existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
-                existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                if (shouldRecalculateConvertedAmounts(existingLine) &&
+                        !hasManualAmountChange(existingLine, updatedLine)) {
+                    recalculateExistingLineAmounts(existingLine, updatedLine, existingDebit, existingCredit,
+                            existingExchangeRate, previousPieceExchangeRate, decimalPrecision);
+                } else {
+                    applyRequestedLineAmounts(existingLine, updatedLine);
+                }
+                existingLine.setUsdDebit(updatedLine.getUsdDebit());
+                existingLine.setUsdCredit(updatedLine.getUsdCredit());
 
                 // ✅ PRESERVE EXCHANGE RATE DATE
                 boolean hasNewExchangeRateDate = updatedLine.getExchangeRateDate() != null &&
@@ -710,17 +743,19 @@ public class EcritureServiceImpl implements EcritureService {
                 Line newLine = new Line();
                 newLine.setAccount(managedAccount);
                 newLine.setLabel(updatedLine.getLabel());
-                newLine.setDebit(updatedLine.getDebit());
-                newLine.setCredit(updatedLine.getCredit());
                 newLine.setEcriture(existingEcriture);
 
                 newLine.setOriginalCurrency(isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null);
                 newLine.setConvertedCurrency(isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null);
                 newLine.setExchangeRate(updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0 ? updatedLine.getExchangeRate() : null);
+                newLine.setDebit(updatedLine.getDebit());
+                newLine.setCredit(updatedLine.getCredit());
                 newLine.setOriginalDebit(updatedLine.getOriginalDebit());
                 newLine.setOriginalCredit(updatedLine.getOriginalCredit());
                 newLine.setConvertedDebit(updatedLine.getConvertedDebit());
                 newLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                newLine.setUsdDebit(updatedLine.getUsdDebit());
+                newLine.setUsdCredit(updatedLine.getUsdCredit());
 
                 if (updatedLine.getExchangeRateDate() != null &&
                         !updatedLine.getExchangeRateDate().toString().isEmpty() &&
@@ -746,6 +781,108 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Update the Ecriture with the new list of lines
         existingEcriture.setLines(existingLines);
+    }
+
+    private boolean shouldRecalculateConvertedAmounts(Line line) {
+        return line.getExchangeRate() != null && line.getExchangeRate() > 0 &&
+                isValidCurrency(line.getOriginalCurrency()) &&
+                isValidCurrency(line.getConvertedCurrency()) &&
+                !line.getOriginalCurrency().equals(line.getConvertedCurrency());
+    }
+
+    private boolean hasManualAmountChange(Line existingLine, Line updatedLine) {
+        return !approximatelyEqual(existingLine.getDebit(), updatedLine.getDebit()) ||
+                !approximatelyEqual(existingLine.getCredit(), updatedLine.getCredit());
+    }
+
+    private void applyRequestedLineAmounts(Line existingLine, Line updatedLine) {
+        existingLine.setDebit(updatedLine.getDebit());
+        existingLine.setCredit(updatedLine.getCredit());
+
+        if (shouldRecalculateConvertedAmounts(existingLine)) {
+            existingLine.setConvertedDebit(updatedLine.getDebit());
+            existingLine.setConvertedCredit(updatedLine.getCredit());
+            existingLine.setOriginalDebit(divideByRate(updatedLine.getDebit(), existingLine.getExchangeRate()));
+            existingLine.setOriginalCredit(divideByRate(updatedLine.getCredit(), existingLine.getExchangeRate()));
+        } else {
+            existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
+            existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
+            existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
+            existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
+        }
+    }
+
+    private void recalculateExistingLineAmounts(Line existingLine, Line updatedLine, Double existingDebit,
+                                                Double existingCredit, Double existingExchangeRate,
+                                                Double previousPieceExchangeRate,
+                                                int decimalPrecision) {
+        Double originalDebit = resolveOriginalAmount(existingLine.getOriginalDebit(), existingDebit,
+                existingExchangeRate, previousPieceExchangeRate, updatedLine.getOriginalDebit());
+        Double originalCredit = resolveOriginalAmount(existingLine.getOriginalCredit(), existingCredit,
+                existingExchangeRate, previousPieceExchangeRate, updatedLine.getOriginalCredit());
+
+        Double convertedDebit = multiplyByRate(originalDebit, existingLine.getExchangeRate(), decimalPrecision);
+        Double convertedCredit = multiplyByRate(originalCredit, existingLine.getExchangeRate(), decimalPrecision);
+
+        existingLine.setOriginalDebit(originalDebit);
+        existingLine.setOriginalCredit(originalCredit);
+        existingLine.setDebit(convertedDebit);
+        existingLine.setCredit(convertedCredit);
+        existingLine.setConvertedDebit(convertedDebit);
+        existingLine.setConvertedCredit(convertedCredit);
+    }
+
+    private Double resolveOriginalAmount(Double existingOriginal, Double existingConverted,
+                                         Double existingExchangeRate, Double previousPieceExchangeRate,
+                                         Double requestedOriginal) {
+        if (existingOriginal != null) {
+            if (existingConverted != null &&
+                    existingExchangeRate != null && existingExchangeRate > 0 &&
+                    previousPieceExchangeRate != null && previousPieceExchangeRate > 0 &&
+                    !existingExchangeRate.equals(previousPieceExchangeRate) &&
+                    approximatelyEqual(existingOriginal, existingConverted)) {
+                return BigDecimal.valueOf(existingConverted)
+                        .divide(BigDecimal.valueOf(previousPieceExchangeRate), 10, RoundingMode.HALF_UP)
+                        .doubleValue();
+            }
+            return existingOriginal;
+        }
+
+        if (existingConverted != null && existingExchangeRate != null && existingExchangeRate > 0) {
+            return BigDecimal.valueOf(existingConverted)
+                    .divide(BigDecimal.valueOf(existingExchangeRate), 10, RoundingMode.HALF_UP)
+                    .doubleValue();
+        }
+
+        return requestedOriginal;
+    }
+
+    private boolean approximatelyEqual(Double left, Double right) {
+        if (left == null || right == null) {
+            return left == null && right == null;
+        }
+        return Math.abs(left - right) < 0.000001;
+    }
+
+    private Double divideByRate(Double amount, Double exchangeRate) {
+        if (amount == null || exchangeRate == null || exchangeRate <= 0) {
+            return null;
+        }
+
+        return BigDecimal.valueOf(amount)
+                .divide(BigDecimal.valueOf(exchangeRate), 10, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
+    private Double multiplyByRate(Double amount, Double exchangeRate, int decimalPrecision) {
+        if (amount == null || exchangeRate == null) {
+            return null;
+        }
+
+        return BigDecimal.valueOf(amount)
+                .multiply(BigDecimal.valueOf(exchangeRate))
+                .setScale(decimalPrecision, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 
     private boolean isValidCurrency(String currency) {

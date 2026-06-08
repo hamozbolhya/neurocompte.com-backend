@@ -2,9 +2,11 @@ package com.pacioli.core.controllers;
 
 import com.pacioli.core.DTO.EcritureDTO;
 import com.pacioli.core.DTO.EcritureExportDTO;
+import com.pacioli.core.DTO.LineDTO;
 import com.pacioli.core.models.Ecriture;
 import com.pacioli.core.models.Journal;
 import com.pacioli.core.models.Line;
+import com.pacioli.core.models.Account;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.DossierService;
 import com.pacioli.core.services.EcritureService;
@@ -172,7 +174,7 @@ public class EcritureController {
     @PutMapping("/lines/{ecritureId}")
     public ResponseEntity<String> updateEcriture(
             @PathVariable Long ecritureId,
-            @RequestBody Ecriture ecritureRequest) {
+            @RequestBody EcritureDTO ecritureRequest) {
         try {
             // log.debug("Received exchange rate update request for ecriture {}: {}",
             // ecritureId, ecritureRequest);
@@ -190,6 +192,10 @@ public class EcritureController {
                 log.debug("Amount updated flag provided: {}", ecritureRequest.getAmountUpdated());
             }
 
+            Ecriture updateRequest = mapUpdateRequest(ecritureRequest);
+            ecritureService.updateEcriture(Objects.requireNonNull(ecritureId, "ecritureId"),
+                    updateRequest);
+
             return ResponseEntity.ok("L'écriture a été mise à jour avec succès.");
         } catch (IllegalArgumentException ex) {
             log.error("Validation error during update: {}", ex.getMessage(), ex);
@@ -198,6 +204,62 @@ public class EcritureController {
             log.error("Unexpected error during update", ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erreur interne du serveur.");
         }
+    }
+
+    private Ecriture mapUpdateRequest(EcritureDTO request) {
+        Ecriture ecriture = new Ecriture();
+        ecriture.setEntryDate(request.getEntryDate());
+        ecriture.setExchangeRate(request.getExchangeRate());
+        ecriture.setOriginalCurrency(request.getOriginalCurrency());
+        ecriture.setConvertedCurrency(request.getConvertedCurrency());
+        ecriture.setExchangeRateDate(request.getExchangeRateDate());
+        ecriture.setAmountUpdated(request.getAmountUpdated());
+        ecriture.setManuallyUpdated(request.getManuallyUpdated());
+        ecriture.setManualUpdateDate(request.getManualUpdateDate());
+
+        if (request.getJournal() != null) {
+            Journal journal = new Journal();
+            journal.setId(request.getJournal().getId());
+            journal.setName(request.getJournal().getName());
+            journal.setType(request.getJournal().getType());
+            ecriture.setJournal(journal);
+        }
+
+        if (request.getLines() != null) {
+            ecriture.setLines(request.getLines().stream()
+                    .map(this::mapUpdateLine)
+                    .toList());
+        }
+
+        return ecriture;
+    }
+
+    private Line mapUpdateLine(LineDTO request) {
+        Line line = new Line();
+        line.setId(request.getId());
+        line.setLabel(request.getLabel());
+        line.setDebit(request.getDebit());
+        line.setCredit(request.getCredit());
+        line.setManuallyUpdated(request.getManuallyUpdated());
+        line.setManualUpdateDate(request.getManualUpdateDate());
+        line.setOriginalDebit(request.getOriginalDebit());
+        line.setOriginalCredit(request.getOriginalCredit());
+        line.setOriginalCurrency(request.getOriginalCurrency());
+        line.setExchangeRate(request.getExchangeRate());
+        line.setConvertedCurrency(request.getConvertedCurrency());
+        line.setExchangeRateDate(request.getExchangeRateDate() != null ? request.getExchangeRateDate().toString() : null);
+        line.setUsdDebit(request.getUsdDebit());
+        line.setUsdCredit(request.getUsdCredit());
+        line.setConvertedDebit(request.getConvertedDebit());
+        line.setConvertedCredit(request.getConvertedCredit());
+
+        if (request.getAccount() != null) {
+            Account account = new Account();
+            account.setId(request.getAccount().getId());
+            line.setAccount(account);
+        }
+
+        return line;
     }
 
     @GetMapping("/export")

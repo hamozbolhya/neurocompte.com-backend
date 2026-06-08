@@ -85,12 +85,14 @@ public class PieceDTOMapper {
 
     private EcrituresDTO2 mapEcritureToDTO(Ecriture ecriture) {
         EcrituresDTO2 dto2 = new EcrituresDTO2();
+        dto2.setId(ecriture.getId());
         dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto2.setEntryDate(ecriture.getEntryDate().format(DATE_FORMATTER));
 
         // Add journal information
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
+            journalDTO.setId(ecriture.getJournal().getId());
             journalDTO.setName(ecriture.getJournal().getName());
             journalDTO.setType(ecriture.getJournal().getType());
             dto2.setJournal(journalDTO);

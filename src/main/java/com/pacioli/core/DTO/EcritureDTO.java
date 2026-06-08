@@ -13,6 +13,10 @@ public class EcritureDTO {
     private JournalDTO journal;
     private List<LineDTO> lines;
     private PieceDTO piece; // Add this field
+    private Double exchangeRate;
+    private String originalCurrency;
+    private String convertedCurrency;
+    private LocalDate exchangeRateDate;
     private Boolean amountUpdated;
     private Boolean manuallyUpdated;
     private LocalDate manualUpdateDate;

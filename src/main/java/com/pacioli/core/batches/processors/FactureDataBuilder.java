@@ -7,10 +7,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
 public class FactureDataBuilder extends BaseDTOBuilder {
+
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
 
     public FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
@@ -23,12 +27,10 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             // Set invoice date
             setInvoiceDate(factureData, entry);
 
-            // Process TVA rate
-            Double tvaRate = extractTVARate(entry);
-            factureData.setTaxRate(tvaRate);
-
             // Set total amounts
-            setTotalAmounts(factureData, entry, tvaRate);
+            Double extractedTvaRate = extractTVARate(entry);
+            setTotalAmounts(factureData, entry, extractedTvaRate);
+            factureData.setTaxRate(resolveTaxRate(extractedTvaRate, factureData));
 
             // Set currency information
             setCurrencyInformation(factureData, entry);
@@ -105,21 +107,48 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             JsonNode tvaNode = entry.get("TVARate");
             if (tvaNode != null && !tvaNode.isNull()) {
                 if (tvaNode.isNumber()) {
-                    return tvaNode.asDouble();
+                    return normalizeTaxRate(tvaNode.asDouble());
                 } else {
-                    String tvaText = tvaNode.asText().trim();
-                    if (!tvaText.isEmpty()) {
-                        String numberStr = tvaText.replaceAll("[^0-9.]", "");
-                        if (!numberStr.isEmpty()) {
-                            return Double.parseDouble(numberStr);
-                        }
-                    }
+                    return parseTaxRate(tvaNode.asText());
                 }
             }
         } catch (Exception e) {
             log.trace("Error processing TVA rate: {}", e.getMessage());
         }
         return null;
+    }
+
+    private Double parseTaxRate(String rawValue) {
+        if (rawValue == null || rawValue.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim()
+                .replace(',', '.')
+                .replace("%", "");
+        Matcher matcher = NUMBER_PATTERN.matcher(normalized);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return normalizeTaxRate(Double.parseDouble(matcher.group()));
+    }
+
+    private Double normalizeTaxRate(Double value) {
+        if (value == null) {
+            return null;
+        }
+
+        double normalized = value;
+        if (normalized > 0 && normalized <= 1) {
+            normalized *= 100;
+        }
+
+        while (normalized > 100 && normalized / 100 <= 100) {
+            normalized /= 100;
+        }
+
+        return normalized;
     }
 
     private void setTotalAmounts(FactureDataDTO factureData, JsonNode entry, Double tvaRate) {
@@ -135,7 +164,15 @@ public class FactureDataBuilder extends BaseDTOBuilder {
         // Set total HT
         if (entry.has("TotalHT")) {
             factureData.setTotalHT(parseDoubleSafely(entry, "TotalHT"));
-        } else if (factureData.getTotalTTC() != null && tvaRate != null) {
+        }
+
+        if (entry.has("TotalTVA")) {
+            factureData.setTotalTVA(parseDoubleSafely(entry, "TotalTVA"));
+        }
+
+        if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && factureData.getTotalTVA() != null) {
+            factureData.setTotalHT(factureData.getTotalTTC() - factureData.getTotalTVA());
+        } else if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && tvaRate != null) {
             factureData.setTotalHT(factureData.getTotalTTC() / (1 + (tvaRate / 100)));
         }
 
@@ -143,6 +180,36 @@ public class FactureDataBuilder extends BaseDTOBuilder {
         if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalTVA() == null) {
             factureData.setTotalTVA(factureData.getTotalTTC() - factureData.getTotalHT());
         }
+    }
+
+    private Double resolveTaxRate(Double extractedRate, FactureDataDTO factureData) {
+        Double computedRate = computeTaxRateFromAmounts(factureData);
+        if (computedRate == null) {
+            return extractedRate;
+        }
+
+        if (extractedRate == null ||
+                (extractedRate == 0 && computedRate > 0) ||
+                (extractedRate > 30 && computedRate <= 30) ||
+                (Math.abs(extractedRate - computedRate) > 1 && computedRate <= 30)) {
+            log.warn("⚠️ Corrected suspicious TVA rate from {} to {} using invoice totals",
+                    extractedRate, computedRate);
+            return computedRate;
+        }
+
+        return extractedRate;
+    }
+
+    private Double computeTaxRateFromAmounts(FactureDataDTO factureData) {
+        if (factureData.getTotalTVA() != null && factureData.getTotalHT() != null && factureData.getTotalHT() != 0) {
+            return normalizeTaxRate((factureData.getTotalTVA() / factureData.getTotalHT()) * 100);
+        }
+
+        if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalHT() != 0) {
+            return normalizeTaxRate(((factureData.getTotalTTC() - factureData.getTotalHT()) / factureData.getTotalHT()) * 100);
+        }
+
+        return null;
     }
 
     private void setCurrencyInformation(FactureDataDTO factureData, JsonNode entry) {

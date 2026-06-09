@@ -608,7 +608,8 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Update the lines
         updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
-                ecritureRequest.getManuallyUpdated(), decimalPrecision, previousPieceExchangeRate);
+                ecritureRequest.getManuallyUpdated(), ecritureRequest.getAmountUpdated(), decimalPrecision,
+                previousPieceExchangeRate);
 
         Ecriture updatedEcriture = ecritureRepository.save(existingEcriture);
 
@@ -630,7 +631,7 @@ public class EcritureServiceImpl implements EcritureService {
 
     private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines,
                                      boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated,
-                                     int decimalPrecision, Double previousPieceExchangeRate) {
+                                     Boolean amountUpdated, int decimalPrecision, Double previousPieceExchangeRate) {
         List<Line> existingLines = existingEcriture.getLines();
 
         // Step 1: Remove lines that no longer exist
@@ -696,7 +697,8 @@ public class EcritureServiceImpl implements EcritureService {
                     existingLine.setExchangeRate(null);
                 }
 
-                if (shouldRecalculateConvertedAmounts(existingLine) &&
+                if (!Boolean.TRUE.equals(amountUpdated) &&
+                        shouldRecalculateConvertedAmounts(existingLine) &&
                         !hasManualAmountChange(existingLine, updatedLine)) {
                     recalculateExistingLineAmounts(existingLine, updatedLine, existingDebit, existingCredit,
                             existingExchangeRate, previousPieceExchangeRate, decimalPrecision);
@@ -796,20 +798,30 @@ public class EcritureServiceImpl implements EcritureService {
     }
 
     private void applyRequestedLineAmounts(Line existingLine, Line updatedLine) {
-        existingLine.setDebit(updatedLine.getDebit());
-        existingLine.setCredit(updatedLine.getCredit());
-
         if (shouldRecalculateConvertedAmounts(existingLine)) {
-            existingLine.setConvertedDebit(updatedLine.getDebit());
-            existingLine.setConvertedCredit(updatedLine.getCredit());
-            existingLine.setOriginalDebit(divideByRate(updatedLine.getDebit(), existingLine.getExchangeRate()));
-            existingLine.setOriginalCredit(divideByRate(updatedLine.getCredit(), existingLine.getExchangeRate()));
+            Double finalDebit = firstNonNull(updatedLine.getConvertedDebit(), updatedLine.getDebit());
+            Double finalCredit = firstNonNull(updatedLine.getConvertedCredit(), updatedLine.getCredit());
+
+            existingLine.setDebit(finalDebit);
+            existingLine.setCredit(finalCredit);
+            existingLine.setConvertedDebit(finalDebit);
+            existingLine.setConvertedCredit(finalCredit);
+            existingLine.setOriginalDebit(firstNonNull(updatedLine.getOriginalDebit(),
+                    divideByRate(finalDebit, existingLine.getExchangeRate())));
+            existingLine.setOriginalCredit(firstNonNull(updatedLine.getOriginalCredit(),
+                    divideByRate(finalCredit, existingLine.getExchangeRate())));
         } else {
+            existingLine.setDebit(updatedLine.getDebit());
+            existingLine.setCredit(updatedLine.getCredit());
             existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
             existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
             existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
             existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
         }
+    }
+
+    private Double firstNonNull(Double first, Double fallback) {
+        return first != null ? first : fallback;
     }
 
     private void recalculateExistingLineAmounts(Line existingLine, Line updatedLine, Double existingDebit,

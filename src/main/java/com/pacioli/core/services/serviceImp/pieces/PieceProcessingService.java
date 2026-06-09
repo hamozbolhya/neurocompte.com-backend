@@ -20,6 +20,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -29,6 +31,7 @@ import java.util.zip.ZipOutputStream;
 public class PieceProcessingService {
 
     private static final String DEFAULT_DEVISE = "MAD";
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
 
     private final PieceRepository pieceRepository;
     private final FactureDataRepository factureDataRepository;
@@ -437,14 +440,42 @@ public class PieceProcessingService {
         fd.setInvoiceNumber(firstEntry.has("FactureNum") ? firstEntry.get("FactureNum").asText() : null);
         fd.setDevise(firstEntry.has("Devise") ? firstEntry.get("Devise").asText() : DEFAULT_DEVISE);
 
-        String tvaRateStr = firstEntry.has("TVARate") ? firstEntry.get("TVARate").asText() : "0";
-        try {
-            fd.setTaxRate(Double.parseDouble(tvaRateStr.replace("%", "").trim()));
-        } catch (NumberFormatException e) {
-            fd.setTaxRate(0.0);
-        }
+        fd.setTaxRate(firstEntry.has("TVARate") ? parseTaxRate(firstEntry.get("TVARate").asText()) : 0.0);
 
         return fd;
+    }
+
+    private Double parseTaxRate(String rawValue) {
+        if (rawValue == null || rawValue.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim()
+                .replace(',', '.')
+                .replace("%", "");
+        Matcher matcher = NUMBER_PATTERN.matcher(normalized);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return normalizeTaxRate(Double.parseDouble(matcher.group()));
+    }
+
+    private Double normalizeTaxRate(Double value) {
+        if (value == null) {
+            return null;
+        }
+
+        double normalized = value;
+        if (normalized > 0 && normalized <= 1) {
+            normalized *= 100;
+        }
+
+        while (normalized > 100 && normalized / 100 <= 100) {
+            normalized /= 100;
+        }
+
+        return normalized;
     }
 
     /**

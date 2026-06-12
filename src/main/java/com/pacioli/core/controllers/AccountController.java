@@ -1,6 +1,5 @@
 package com.pacioli.core.controllers;
 
-
 import com.pacioli.core.models.Account;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.AccountService;
@@ -24,7 +23,7 @@ public class AccountController {
     @Autowired
     private UserRepository userRepository;
     @Autowired
-    private  AccountService accountService;
+    private AccountService accountService;
     @Autowired
     private DossierService dossierService;
 
@@ -61,6 +60,7 @@ public class AccountController {
         List<Account> accounts = accountService.getAccountsByDossierId(did);
         return ResponseEntity.ok(accounts);
     }
+
     // Create Account
     @PostMapping
     public ResponseEntity<Account> createAccount(@RequestBody Account account) {

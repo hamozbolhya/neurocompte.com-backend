@@ -6,6 +6,8 @@ import com.pacioli.core.batches.DTO.BaseDTOBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -15,6 +17,9 @@ import java.util.regex.Pattern;
 public class FactureDataBuilder extends BaseDTOBuilder {
 
     private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
+    private static final int MONEY_SCALE = 2;
+    private static final int RATE_SCALE = 10;
+    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
     public FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
@@ -170,15 +175,21 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             factureData.setTotalTVA(parseDoubleSafely(entry, "TotalTVA"));
         }
 
-        if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && factureData.getTotalTVA() != null) {
-            factureData.setTotalHT(factureData.getTotalTTC() - factureData.getTotalTVA());
-        } else if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && tvaRate != null) {
-            factureData.setTotalHT(factureData.getTotalTTC() / (1 + (tvaRate / 100)));
+        if (factureData.getTotalTTC() != null && tvaRate != null) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalTVA = calculateTvaFromTtc(totalTTC, toBigDecimal(tvaRate));
+            BigDecimal totalHT = calculateHtFromTtc(totalTTC, toBigDecimal(tvaRate));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+        } else if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && factureData.getTotalTVA() != null) {
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalTVA()));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
         }
 
         // Set total TVA
         if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalTVA() == null) {
-            factureData.setTotalTVA(factureData.getTotalTTC() - factureData.getTotalHT());
+            BigDecimal totalTVA = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalHT()));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
         }
     }
 
@@ -201,15 +212,46 @@ public class FactureDataBuilder extends BaseDTOBuilder {
     }
 
     private Double computeTaxRateFromAmounts(FactureDataDTO factureData) {
-        if (factureData.getTotalTVA() != null && factureData.getTotalHT() != null && factureData.getTotalHT() != 0) {
-            return normalizeTaxRate((factureData.getTotalTVA() / factureData.getTotalHT()) * 100);
+        if (factureData.getTotalTVA() != null && factureData.getTotalTTC() != null && factureData.getTotalTTC() != 0) {
+            return normalizeTaxRate(toBigDecimal(factureData.getTotalTVA())
+                    .multiply(ONE_HUNDRED)
+                    .divide(toBigDecimal(factureData.getTotalTTC()), RATE_SCALE, RoundingMode.HALF_UP)
+                    .doubleValue());
         }
 
-        if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalHT() != 0) {
-            return normalizeTaxRate(((factureData.getTotalTTC() - factureData.getTotalHT()) / factureData.getTotalHT()) * 100);
+        if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalTTC() != 0) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalHT());
+            if (totalHT.compareTo(BigDecimal.ZERO) == 0) {
+                return null;
+            }
+            return normalizeTaxRate(totalTTC
+                    .multiply(ONE_HUNDRED)
+                    .divide(totalHT, RATE_SCALE, RoundingMode.HALF_UP)
+                    .subtract(ONE_HUNDRED)
+                    .doubleValue());
         }
 
         return null;
+    }
+
+    private BigDecimal calculateHtFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        BigDecimal divisor = BigDecimal.ONE.add(taxRate.divide(ONE_HUNDRED, RATE_SCALE, RoundingMode.HALF_UP));
+        return totalTTC.divide(divisor, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateTvaFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        return totalTTC
+                .multiply(taxRate)
+                .divide(ONE_HUNDRED, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal toBigDecimal(Double value) {
+        return BigDecimal.valueOf(value == null ? 0 : value);
+    }
+
+    private Double toMoneyDouble(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).doubleValue();
     }
 
     private void setCurrencyInformation(FactureDataDTO factureData, JsonNode entry) {
@@ -237,13 +279,13 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             factureData.setExchangeRate(rate);
 
             if (factureData.getTotalTTC() != null) {
-                factureData.setConvertedTotalTTC(factureData.getTotalTTC() * rate);
+                factureData.setConvertedTotalTTC(toMoneyDouble(toBigDecimal(factureData.getTotalTTC()).multiply(toBigDecimal(rate))));
             }
             if (factureData.getTotalHT() != null) {
-                factureData.setConvertedTotalHT(factureData.getTotalHT() * rate);
+                factureData.setConvertedTotalHT(toMoneyDouble(toBigDecimal(factureData.getTotalHT()).multiply(toBigDecimal(rate))));
             }
             if (factureData.getTotalTVA() != null) {
-                factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
+                factureData.setConvertedTotalTVA(toMoneyDouble(toBigDecimal(factureData.getTotalTVA()).multiply(toBigDecimal(rate))));
             }
         }
 

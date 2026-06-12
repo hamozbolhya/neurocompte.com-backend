@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -32,6 +33,9 @@ public class PieceProcessingService {
 
     private static final String DEFAULT_DEVISE = "MAD";
     private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
+    private static final int MONEY_SCALE = 2;
+    private static final int RATE_SCALE = 10;
+    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
     private final PieceRepository pieceRepository;
     private final FactureDataRepository factureDataRepository;
@@ -161,6 +165,8 @@ public class PieceProcessingService {
             log.error("❌ Error processing original AI response for piece {}: {}", piece.getId(), e.getMessage(), e);
         }
 
+        normalizeFactureAmounts(factureData);
+
         // Set ICE if missing
         if (factureData.getIce() == null || factureData.getIce().isEmpty()) {
             try {
@@ -190,6 +196,8 @@ public class PieceProcessingService {
             if (factureData.getTotalTVA() != null && factureData.getConvertedTotalTVA() == null)
                 factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
         }
+
+        updateConvertedFactureAmounts(factureData);
 
         // Save or update FactureData
         Optional<FactureData> existingOpt = factureDataRepository.findByPiece(piece);
@@ -443,6 +451,93 @@ public class PieceProcessingService {
         fd.setTaxRate(firstEntry.has("TVARate") ? parseTaxRate(firstEntry.get("TVARate").asText()) : 0.0);
 
         return fd;
+    }
+
+    private void normalizeFactureAmounts(FactureData factureData) {
+        if (factureData == null || factureData.getTotalTTC() == null) {
+            return;
+        }
+
+        Double taxRate = factureData.getTaxRate();
+        if (taxRate != null && taxRate > 0) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalTVA = calculateTvaFromTtc(totalTTC, toBigDecimal(taxRate));
+            BigDecimal totalHT = calculateHtFromTtc(totalTTC, toBigDecimal(taxRate));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+            factureData.setTotalHTExact(toExactString(totalHT));
+            factureData.setTotalTVAExact(toExactString(totalTVA));
+        } else if (factureData.getTotalTVA() != null) {
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalTVA()));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+            factureData.setTaxRate(computeTaxRateFromTtc(factureData.getTotalTVA(), factureData.getTotalTTC()));
+            factureData.setTotalHTExact(toExactString(totalHT));
+        } else if (factureData.getTotalHT() != null) {
+            BigDecimal totalTVA = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalHT()));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTaxRate(computeTaxRateFromTtc(totalTVA.doubleValue(), factureData.getTotalTTC()));
+            factureData.setTotalTVAExact(toExactString(totalTVA));
+        }
+
+        if (factureData.getTotalTTC() != null) {
+            factureData.setTotalTTCExact(toExactString(toBigDecimal(factureData.getTotalTTC())));
+        }
+        if (factureData.getTotalHTExact() == null && factureData.getTotalHT() != null) {
+            factureData.setTotalHTExact(toExactString(toBigDecimal(factureData.getTotalHT())));
+        }
+        if (factureData.getTotalTVAExact() == null && factureData.getTotalTVA() != null) {
+            factureData.setTotalTVAExact(toExactString(toBigDecimal(factureData.getTotalTVA())));
+        }
+    }
+
+    private Double computeTaxRateFromTtc(Double totalTVA, Double totalTTC) {
+        if (totalTVA == null || totalTTC == null || totalTTC == 0) {
+            return null;
+        }
+        return normalizeTaxRate(toBigDecimal(totalTVA)
+                .multiply(ONE_HUNDRED)
+                .divide(toBigDecimal(totalTTC), RATE_SCALE, RoundingMode.HALF_UP)
+                .doubleValue());
+    }
+
+    private BigDecimal calculateHtFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        BigDecimal divisor = BigDecimal.ONE.add(taxRate.divide(ONE_HUNDRED, RATE_SCALE, RoundingMode.HALF_UP));
+        return totalTTC.divide(divisor, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateTvaFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        return totalTTC
+                .multiply(taxRate)
+                .divide(ONE_HUNDRED, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private void updateConvertedFactureAmounts(FactureData factureData) {
+        if (factureData == null || factureData.getExchangeRate() == null) {
+            return;
+        }
+
+        double rate = factureData.getExchangeRate();
+        if (factureData.getTotalTTC() != null) {
+            factureData.setConvertedTotalTTC(toMoneyDouble(toBigDecimal(factureData.getTotalTTC()).multiply(toBigDecimal(rate))));
+        }
+        if (factureData.getTotalHT() != null) {
+            factureData.setConvertedTotalHT(toMoneyDouble(toBigDecimal(factureData.getTotalHT()).multiply(toBigDecimal(rate))));
+        }
+        if (factureData.getTotalTVA() != null) {
+            factureData.setConvertedTotalTVA(toMoneyDouble(toBigDecimal(factureData.getTotalTVA()).multiply(toBigDecimal(rate))));
+        }
+    }
+
+    private BigDecimal toBigDecimal(Double value) {
+        return BigDecimal.valueOf(value == null ? 0 : value);
+    }
+
+    private Double toMoneyDouble(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private String toExactString(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
     private Double parseTaxRate(String rawValue) {

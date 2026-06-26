@@ -8,10 +8,13 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
 public class EcritureBuilder extends BaseDTOBuilder {
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
 
     public List<EcrituresDTO2> buildEcritures(JsonNode ecrituresNode) {
         List<EcrituresDTO2> ecritures = new ArrayList<>();
@@ -236,6 +239,7 @@ public class EcritureBuilder extends BaseDTOBuilder {
             line.setOriginalCredit(parseDoubleSafely(entry, "OriginalCreditAmt"));
             line.setDebit(parseDoubleSafely(entry, "DebitAmt"));
             line.setCredit(parseDoubleSafely(entry, "CreditAmt"));
+            line.setTaxRate(extractTVARate(entry));
             line.setConvertedDebit(parseDoubleSafely(entry, "DebitAmt"));
             line.setConvertedCredit(parseDoubleSafely(entry, "CreditAmt"));
             line.setUsdDebit(parseDoubleSafely(entry, "UsdDebitAmt"));
@@ -281,5 +285,51 @@ public class EcritureBuilder extends BaseDTOBuilder {
         journal.setName(extractStringSafely(entry, "JournalCode", "Unknown"));
         journal.setType(extractStringSafely(entry, "JournalLib", "Unknown"));
         return journal;
+    }
+
+    private Double extractTVARate(JsonNode entry) {
+        if (entry == null || !entry.has("TVARate") || entry.get("TVARate").isNull()) {
+            return null;
+        }
+
+        JsonNode tvaNode = entry.get("TVARate");
+        if (tvaNode.isNumber()) {
+            return normalizeTaxRate(tvaNode.asDouble());
+        }
+
+        return parseTaxRate(tvaNode.asText());
+    }
+
+    private Double parseTaxRate(String rawValue) {
+        if (rawValue == null || rawValue.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim()
+                .replace(',', '.')
+                .replace("%", "");
+        Matcher matcher = NUMBER_PATTERN.matcher(normalized);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return normalizeTaxRate(Double.parseDouble(matcher.group()));
+    }
+
+    private Double normalizeTaxRate(Double value) {
+        if (value == null) {
+            return null;
+        }
+
+        double normalized = value;
+        if (normalized > 0 && normalized <= 1) {
+            normalized *= 100;
+        }
+
+        while (normalized > 100 && normalized / 100 <= 100) {
+            normalized /= 100;
+        }
+
+        return normalized;
     }
 }

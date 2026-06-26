@@ -21,6 +21,7 @@ public class Line {
 
     private Double debit;
     private Double credit;
+    private Double taxRate;
 
     // ADD THESE NEW FIELDS FOR EXACT PRECISION
     @Column(name = "debit_exact", precision = 20, scale = 6)

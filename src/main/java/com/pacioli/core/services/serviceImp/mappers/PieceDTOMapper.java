@@ -115,6 +115,7 @@ public class PieceDTOMapper {
         lineDTO.setLabel(line.getLabel());
         lineDTO.setDebit(line.getDebit());
         lineDTO.setCredit(line.getCredit());
+        lineDTO.setTaxRate(line.getTaxRate());
 
         // Add account information
         if (line.getAccount() != null) {

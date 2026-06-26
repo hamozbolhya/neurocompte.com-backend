@@ -148,6 +148,7 @@ public class EcritureServiceImpl implements EcritureService {
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+            lineDTO.setTaxRate(line.getTaxRate());
 
             lineDTO.setOriginalDebit(line.getOriginalDebit());
             lineDTO.setOriginalCredit(line.getOriginalCredit());
@@ -357,6 +358,7 @@ public class EcritureServiceImpl implements EcritureService {
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+            lineDTO.setTaxRate(line.getTaxRate());
 
             // Set currency conversion fields
             lineDTO.setOriginalDebit(line.getOriginalDebit());
@@ -671,6 +673,7 @@ public class EcritureServiceImpl implements EcritureService {
 
                 existingLine.setAccount(managedAccount);
                 existingLine.setLabel(updatedLine.getLabel());
+                existingLine.setTaxRate(updatedLine.getTaxRate());
 
                 // ✅ PRESERVE CURRENCY FIELDS IF NOT PROVIDED IN UPDATE
                 if (isValidCurrency(updatedLine.getOriginalCurrency())) {
@@ -746,6 +749,7 @@ public class EcritureServiceImpl implements EcritureService {
                 newLine.setAccount(managedAccount);
                 newLine.setLabel(updatedLine.getLabel());
                 newLine.setEcriture(existingEcriture);
+                newLine.setTaxRate(updatedLine.getTaxRate());
 
                 newLine.setOriginalCurrency(isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null);
                 newLine.setConvertedCurrency(isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null);

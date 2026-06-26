@@ -240,6 +240,7 @@ public class EcritureController {
         line.setLabel(request.getLabel());
         line.setDebit(request.getDebit());
         line.setCredit(request.getCredit());
+        line.setTaxRate(request.getTaxRate());
         line.setManuallyUpdated(request.getManuallyUpdated());
         line.setManualUpdateDate(request.getManualUpdateDate());
         line.setOriginalDebit(request.getOriginalDebit());

@@ -84,7 +84,7 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
                     fd.totalTTC, 
                     fd.totalHT, 
                     fd.totalTVA, 
-                    fd.taxRate, 
+                    COALESCE(l.taxRate, fd.taxRate),
                     fd.tier, 
                     fd.ice,
                     (SELECT SUM(l2.debit) FROM Line l2 WHERE l2.ecriture = e),
@@ -159,4 +159,3 @@ public interface EcritureRepository extends JpaRepository<Ecriture, Long> {
     @Query("SELECT COUNT(e) FROM Ecriture e WHERE e.piece.dossier.cabinet.id = :cabinetId AND e.entryDate BETWEEN :startDate AND :endDate")
     Long countEcrituresByCabinetAndPeriod(@Param("cabinetId") Long cabinetId, @Param("startDate") Date startDate, @Param("endDate") Date endDate);
 }
-

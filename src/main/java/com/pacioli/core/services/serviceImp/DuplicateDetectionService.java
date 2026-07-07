@@ -184,10 +184,7 @@ public class DuplicateDetectionService {
             }
         }
 
-        // Remove trailing numbers and spaces
-        result = result.replaceAll("\\s*\\d+\\s*$", "").trim();
-
-        return result;
+        return result.trim();
     }
 
     public Optional<Piece> checkFunctionalDuplicate(Piece piece) {

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -41,24 +42,25 @@ public class UserController {
 
     @PostMapping("/{userId}/roles")
     public ResponseEntity<UserInfo> assignRolesToUser(@PathVariable String userId, @RequestBody List<String> roleIds) {
-        UserInfo updatedUserInfo = userService.assignRolesToUser(userId, roleIds);
+        UserInfo updatedUserInfo = userService.assignRolesToUser(userId,
+                Objects.requireNonNull(roleIds, "roleIds"));
         return ResponseEntity.ok(updatedUserInfo);
     }
 
     @PostMapping("/{userId}/roles/{roleId}")
     public User assignRoleToUser(@PathVariable String userId, @PathVariable String roleId) {
-        return userService.assignRoleToUser(userId, roleId);
+        return userService.assignRoleToUser(userId, Objects.requireNonNull(roleId, "roleId"));
     }
 
     // Remove a role from a user
     @PostMapping("/{userId}/roles/{roleId}/remove")
     public User removeRoleFromUser(@PathVariable String userId, @PathVariable String roleId) {
-        return userService.removeRoleFromUser(userId, roleId);
+        return userService.removeRoleFromUser(userId, Objects.requireNonNull(roleId, "roleId"));
     }
 
     @GetMapping("/by-cabinet/{cabinetId}")
     public List<User> getUsersByCabinetId(@PathVariable Long cabinetId) {
-        return userService.getUsersByCabinetId(cabinetId);
+        return userService.getUsersByCabinetId(Objects.requireNonNull(cabinetId, "cabinetId"));
     }
 
 
@@ -67,7 +69,7 @@ public class UserController {
             @PathVariable UUID userId,
             @RequestParam boolean isHold
     ) {
-        userService.updateUserHoldStatus(userId, isHold);
+        userService.updateUserHoldStatus(Objects.requireNonNull(userId, "userId"), isHold);
         return ResponseEntity.ok("Le statut de l'utilisateur a été mis à jour avec succès.");
     }
     @PutMapping("/{userId}/delete")
@@ -75,7 +77,7 @@ public class UserController {
             @PathVariable UUID userId,
             @RequestParam boolean isDelete
     ) {
-        userService.updateUserDeleteStatus(userId, isDelete);
+        userService.updateUserDeleteStatus(Objects.requireNonNull(userId, "userId"), isDelete);
         return ResponseEntity.ok("L'utilisateur est supprimé.");
     }
 
@@ -84,7 +86,7 @@ public class UserController {
             @PathVariable UUID userId,
             @RequestBody UpdatePasswordRequest request
     ) {
-        userService.updateUserPassword(userId, request.getNewPassword());
+        userService.updateUserPassword(Objects.requireNonNull(userId, "userId"), request.getNewPassword());
         return ResponseEntity.ok("Mot de passe mis à jour avec succès.");
     }
 
@@ -96,7 +98,7 @@ public class UserController {
             log.info("Received request to update user with ID: {}", userId);
             log.info("Update details: Username={}, Email={}, RoleId={}", request.getUsername(), request.getEmail(), request.getRoleId());
 
-            userService.updateUserInfo(userId, request);
+            userService.updateUserInfo(Objects.requireNonNull(userId, "userId"), request);
             return ResponseEntity.ok().body("User updated successfully.");
         } catch (Exception e) {
             log.error("Error updating user: {}", e.getMessage(), e);

@@ -19,6 +19,7 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.NonNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 import org.springframework.web.bind.annotation.*;
@@ -30,7 +31,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/analytics")
@@ -52,7 +52,7 @@ public class AnalyticsController {
     @GetMapping("/cabinet")
     @PreAuthorize("hasAuthority('PACIOLI')")
     public ResponseEntity<Map<String, Object>> getCabinetAnalytics(
-            @RequestParam("cabinetId") Long cabinetId,
+            @RequestParam("cabinetId") @NonNull Long cabinetId,
             @RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
 
         log.info("Cabinet analytics requested for cabinet: {} (refresh: {})", cabinetId, refresh);
@@ -92,7 +92,7 @@ public class AnalyticsController {
     @GetMapping("/cabinet/period")
     @PreAuthorize("hasAuthority('PACIOLI')")
     public ResponseEntity<Map<String, Object>> getCabinetAnalyticsForPeriod(
-            @RequestParam("cabinetId") Long cabinetId,
+            @RequestParam("cabinetId") @NonNull Long cabinetId,
             @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam("endDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
@@ -336,7 +336,7 @@ public class AnalyticsController {
 
     @GetMapping("/admin/cabinet/{cabinetId}/forced-pieces")
     @PreAuthorize("hasAuthority('PACIOLI')")
-    public ResponseEntity<Object> getCabinetForcedPiecesStatistics(@PathVariable Long cabinetId) {
+    public ResponseEntity<Object> getCabinetForcedPiecesStatistics(@PathVariable @NonNull Long cabinetId) {
         log.info("Forced pieces statistics requested for cabinet: {}", cabinetId);
 
         try {
@@ -378,6 +378,10 @@ public class AnalyticsController {
         try {
             AdminAnalyticsDTO analytics = analyticsService.getAdminAnalytics();
             log.info("Analytics retrieved: {}", analytics != null);
+            if (analytics == null) {
+                log.warn("Admin analytics not available");
+                return ResponseEntity.noContent().build();
+            }
             log.info("Manual update stats: {}", analytics.getManualUpdateStats() != null);
 
             if (analytics.getManualUpdateStats() == null) {
@@ -443,7 +447,7 @@ public class AnalyticsController {
 
     @GetMapping("/admin/cabinet/{cabinetId}/manual-updates")
     @PreAuthorize("hasAuthority('PACIOLI')")
-    public ResponseEntity<Object> getCabinetManualUpdateStatistics(@PathVariable Long cabinetId) {
+    public ResponseEntity<Object> getCabinetManualUpdateStatistics(@PathVariable @NonNull Long cabinetId) {
         log.info("Manual update statistics requested for cabinet: {}", cabinetId);
 
         try {
@@ -493,7 +497,7 @@ public class AnalyticsController {
     }
 
     @GetMapping("/debug/cabinet-pieces/{cabinetId}")
-    public ResponseEntity<Map<String, Object>> debugCabinetPieces(@PathVariable Long cabinetId) {
+    public ResponseEntity<Map<String, Object>> debugCabinetPieces(@PathVariable @NonNull Long cabinetId) {
         Map<String, Object> debug = new HashMap<>();
 
         try {
@@ -619,7 +623,7 @@ public class AnalyticsController {
 
     @GetMapping("/debug/specific-cabinet/{cabinetId}")
     @PreAuthorize("hasAuthority('PACIOLI')")
-    public ResponseEntity<Map<String, Object>> debugSpecificCabinet(@PathVariable Long cabinetId) {
+    public ResponseEntity<Map<String, Object>> debugSpecificCabinet(@PathVariable @NonNull Long cabinetId) {
         Map<String, Object> debug = new HashMap<>();
 
         try {
@@ -809,7 +813,7 @@ public class AnalyticsController {
 
     @GetMapping("/debug/cabinet-check/{cabinetId}")
     @PreAuthorize("hasAuthority('PACIOLI')")
-    public ResponseEntity<Map<String, Object>> debugCabinetCheck(@PathVariable Long cabinetId) {
+    public ResponseEntity<Map<String, Object>> debugCabinetCheck(@PathVariable @NonNull Long cabinetId) {
         Map<String, Object> debug = new HashMap<>();
 
         try {

@@ -6,11 +6,20 @@ import com.pacioli.core.batches.DTO.BaseDTOBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
 public class FactureDataBuilder extends BaseDTOBuilder {
+
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
+    private static final int MONEY_SCALE = 2;
+    private static final int RATE_SCALE = 10;
+    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
     public FactureDataDTO buildFactureData(JsonNode entry) {
         FactureDataDTO factureData = new FactureDataDTO();
@@ -23,12 +32,10 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             // Set invoice date
             setInvoiceDate(factureData, entry);
 
-            // Process TVA rate
-            Double tvaRate = extractTVARate(entry);
-            factureData.setTaxRate(tvaRate);
-
             // Set total amounts
-            setTotalAmounts(factureData, entry, tvaRate);
+            Double extractedTvaRate = extractTVARate(entry);
+            setTotalAmounts(factureData, entry, extractedTvaRate);
+            factureData.setTaxRate(resolveTaxRate(extractedTvaRate, factureData));
 
             // Set currency information
             setCurrencyInformation(factureData, entry);
@@ -105,21 +112,48 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             JsonNode tvaNode = entry.get("TVARate");
             if (tvaNode != null && !tvaNode.isNull()) {
                 if (tvaNode.isNumber()) {
-                    return tvaNode.asDouble();
+                    return normalizeTaxRate(tvaNode.asDouble());
                 } else {
-                    String tvaText = tvaNode.asText().trim();
-                    if (!tvaText.isEmpty()) {
-                        String numberStr = tvaText.replaceAll("[^0-9.]", "");
-                        if (!numberStr.isEmpty()) {
-                            return Double.parseDouble(numberStr);
-                        }
-                    }
+                    return parseTaxRate(tvaNode.asText());
                 }
             }
         } catch (Exception e) {
             log.trace("Error processing TVA rate: {}", e.getMessage());
         }
         return null;
+    }
+
+    private Double parseTaxRate(String rawValue) {
+        if (rawValue == null || rawValue.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim()
+                .replace(',', '.')
+                .replace("%", "");
+        Matcher matcher = NUMBER_PATTERN.matcher(normalized);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return normalizeTaxRate(Double.parseDouble(matcher.group()));
+    }
+
+    private Double normalizeTaxRate(Double value) {
+        if (value == null) {
+            return null;
+        }
+
+        double normalized = value;
+        if (normalized > 0 && normalized <= 1) {
+            normalized *= 100;
+        }
+
+        while (normalized > 100 && normalized / 100 <= 100) {
+            normalized /= 100;
+        }
+
+        return normalized;
     }
 
     private void setTotalAmounts(FactureDataDTO factureData, JsonNode entry, Double tvaRate) {
@@ -135,14 +169,89 @@ public class FactureDataBuilder extends BaseDTOBuilder {
         // Set total HT
         if (entry.has("TotalHT")) {
             factureData.setTotalHT(parseDoubleSafely(entry, "TotalHT"));
-        } else if (factureData.getTotalTTC() != null && tvaRate != null) {
-            factureData.setTotalHT(factureData.getTotalTTC() / (1 + (tvaRate / 100)));
+        }
+
+        if (entry.has("TotalTVA")) {
+            factureData.setTotalTVA(parseDoubleSafely(entry, "TotalTVA"));
+        }
+
+        if (factureData.getTotalTTC() != null && tvaRate != null) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalTVA = calculateTvaFromTtc(totalTTC, toBigDecimal(tvaRate));
+            BigDecimal totalHT = calculateHtFromTtc(totalTTC, toBigDecimal(tvaRate));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+        } else if (factureData.getTotalHT() == null && factureData.getTotalTTC() != null && factureData.getTotalTVA() != null) {
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalTVA()));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
         }
 
         // Set total TVA
         if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalTVA() == null) {
-            factureData.setTotalTVA(factureData.getTotalTTC() - factureData.getTotalHT());
+            BigDecimal totalTVA = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalHT()));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
         }
+    }
+
+    private Double resolveTaxRate(Double extractedRate, FactureDataDTO factureData) {
+        Double computedRate = computeTaxRateFromAmounts(factureData);
+        if (computedRate == null) {
+            return extractedRate;
+        }
+
+        if (extractedRate == null ||
+                (extractedRate == 0 && computedRate > 0) ||
+                (extractedRate > 30 && computedRate <= 30) ||
+                (Math.abs(extractedRate - computedRate) > 1 && computedRate <= 30)) {
+            log.warn("⚠️ Corrected suspicious TVA rate from {} to {} using invoice totals",
+                    extractedRate, computedRate);
+            return computedRate;
+        }
+
+        return extractedRate;
+    }
+
+    private Double computeTaxRateFromAmounts(FactureDataDTO factureData) {
+        if (factureData.getTotalTVA() != null && factureData.getTotalTTC() != null && factureData.getTotalTTC() != 0) {
+            return normalizeTaxRate(toBigDecimal(factureData.getTotalTVA())
+                    .multiply(ONE_HUNDRED)
+                    .divide(toBigDecimal(factureData.getTotalTTC()), RATE_SCALE, RoundingMode.HALF_UP)
+                    .doubleValue());
+        }
+
+        if (factureData.getTotalTTC() != null && factureData.getTotalHT() != null && factureData.getTotalTTC() != 0) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalHT());
+            if (totalHT.compareTo(BigDecimal.ZERO) == 0) {
+                return null;
+            }
+            return normalizeTaxRate(totalTTC
+                    .multiply(ONE_HUNDRED)
+                    .divide(totalHT, RATE_SCALE, RoundingMode.HALF_UP)
+                    .subtract(ONE_HUNDRED)
+                    .doubleValue());
+        }
+
+        return null;
+    }
+
+    private BigDecimal calculateHtFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        BigDecimal divisor = BigDecimal.ONE.add(taxRate.divide(ONE_HUNDRED, RATE_SCALE, RoundingMode.HALF_UP));
+        return totalTTC.divide(divisor, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateTvaFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        return totalTTC
+                .multiply(taxRate)
+                .divide(ONE_HUNDRED, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal toBigDecimal(Double value) {
+        return BigDecimal.valueOf(value == null ? 0 : value);
+    }
+
+    private Double toMoneyDouble(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).doubleValue();
     }
 
     private void setCurrencyInformation(FactureDataDTO factureData, JsonNode entry) {
@@ -170,13 +279,13 @@ public class FactureDataBuilder extends BaseDTOBuilder {
             factureData.setExchangeRate(rate);
 
             if (factureData.getTotalTTC() != null) {
-                factureData.setConvertedTotalTTC(factureData.getTotalTTC() * rate);
+                factureData.setConvertedTotalTTC(toMoneyDouble(toBigDecimal(factureData.getTotalTTC()).multiply(toBigDecimal(rate))));
             }
             if (factureData.getTotalHT() != null) {
-                factureData.setConvertedTotalHT(factureData.getTotalHT() * rate);
+                factureData.setConvertedTotalHT(toMoneyDouble(toBigDecimal(factureData.getTotalHT()).multiply(toBigDecimal(rate))));
             }
             if (factureData.getTotalTVA() != null) {
-                factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
+                factureData.setConvertedTotalTVA(toMoneyDouble(toBigDecimal(factureData.getTotalTVA()).multiply(toBigDecimal(rate))));
             }
         }
 

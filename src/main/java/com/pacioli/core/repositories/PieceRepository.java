@@ -5,6 +5,7 @@ import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,6 +20,32 @@ import java.util.UUID;
 @Repository
 public interface PieceRepository extends JpaRepository<Piece, Long> {
 
+    /** For consumption / cross-tx use: loads dossier and cabinet in one query (avoids lazy issues in REQUIRES_NEW). */
+    @Query("SELECT p FROM Piece p JOIN FETCH p.dossier d JOIN FETCH d.cabinet WHERE p.id = :id")
+    Optional<Piece> findByIdWithDossierAndCabinet(@Param("id") Long id);
+
+    /** Non-bank pieces in upload/AI pipeline for this cabinet in the counting window (not yet PROCESSED). */
+    @Query("SELECT COUNT(p) FROM Piece p JOIN p.dossier d WHERE d.cabinet.id = :cabinetId " +
+            "AND (p.type IS NULL OR LOWER(TRIM(p.type)) <> LOWER(TRIM(:bankType))) " +
+            "AND p.status IN :pipelineStatuses " +
+            "AND p.uploadDate >= :periodStart AND p.uploadDate < :periodEndExclusive")
+    long countNormalPipelineForCabinetInPeriod(@Param("cabinetId") Long cabinetId,
+                                               @Param("bankType") String bankType,
+                                               @Param("pipelineStatuses") List<PieceStatus> pipelineStatuses,
+                                               @Param("periodStart") Date periodStart,
+                                               @Param("periodEndExclusive") Date periodEndExclusive);
+
+    /** Bank pages reserved by uploads still in pipeline for this cabinet in the counting window. */
+    @Query("SELECT COALESCE(SUM(CASE WHEN p.pageCount IS NULL OR p.pageCount < 1 THEN 1 ELSE p.pageCount END), 0) FROM Piece p JOIN p.dossier d WHERE d.cabinet.id = :cabinetId " +
+            "AND LOWER(TRIM(p.type)) = LOWER(TRIM(:bankType)) " +
+            "AND p.status IN :pipelineStatuses " +
+            "AND p.uploadDate >= :periodStart AND p.uploadDate < :periodEndExclusive")
+    Long sumBankPipelinePagesForCabinetInPeriod(@Param("cabinetId") Long cabinetId,
+                                                @Param("bankType") String bankType,
+                                                @Param("pipelineStatuses") List<PieceStatus> pipelineStatuses,
+                                                @Param("periodStart") Date periodStart,
+                                                @Param("periodEndExclusive") Date periodEndExclusive);
+
     // ==================== DUPLICATION DETECTION METHODS ====================
 
     // Find by filename (exact match)
@@ -26,6 +53,10 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
 
     // Find by file hash
     List<Piece> findByFileHash(String fileHash);
+
+    List<Piece> findByDossierIdAndFileHash(Long dossierId, String fileHash);
+
+    List<Piece> findAllByDossierIdAndOriginalFileNameIgnoreCase(Long dossierId, String originalFileName);
 
     // Find similar AI data with amount range
     @Query("SELECT p FROM Piece p WHERE " +
@@ -56,6 +87,11 @@ public interface PieceRepository extends JpaRepository<Piece, Long> {
     // ==================== EXISTING METHODS ====================
 
     Page<Piece> findByDossierId(Long dossierId, Pageable pageable);
+
+    /** All pieces in dossier (no page cap) — WebSocket push; fetch originalPiece + dossier for duplicate fields in DTO. */
+    @EntityGraph(type = EntityGraph.EntityGraphType.FETCH, attributePaths = {"originalPiece", "dossier"})
+    List<Piece> findByDossierIdOrderByUploadDateDesc(Long dossierId);
+
     List<Piece> findAllByDossierIdAndOriginalFileName(Long dossierId, String originalFileName);
     List<Piece> findByOriginalPieceId(Long originalPieceId);
 

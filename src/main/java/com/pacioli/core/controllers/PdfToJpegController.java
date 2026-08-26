@@ -17,6 +17,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -53,7 +54,7 @@ public class PdfToJpegController {
 
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=converted-images.zip")
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .contentType(Objects.requireNonNull(MediaType.APPLICATION_OCTET_STREAM))
                     .body(zipOutputStream.toByteArray());
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();

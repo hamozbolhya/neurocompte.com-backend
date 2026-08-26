@@ -1,10 +1,10 @@
 package com.pacioli.core.controllers;
 
-
 import com.pacioli.core.models.Account;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.services.AccountService;
 import com.pacioli.core.services.DossierService;
+import com.pacioli.core.utils.SecurityHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -22,9 +23,12 @@ public class AccountController {
     @Autowired
     private UserRepository userRepository;
     @Autowired
-    private  AccountService accountService;
+    private AccountService accountService;
     @Autowired
     private DossierService dossierService;
+
+    @Autowired
+    private SecurityHelper securityHelper;
 
     // Get All Accounts
     @GetMapping
@@ -34,22 +38,33 @@ public class AccountController {
     }
 
     @GetMapping("/by-dossier/{dossierId}")
-    public ResponseEntity<List<Account>> getAccountsByDossierId(@PathVariable Long dossierId, @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
-        UUID userId = extractUserIdFromPrincipal(principal);
+    public ResponseEntity<List<Account>> getAccountsByDossierId(
+            @PathVariable Long dossierId,
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
 
-        // ✅ SECURITY CHECK: Verify user has access to this dossier
-        if (!dossierService.userHasAccessToDossier(userId, dossierId)) {
-            log.error("User {} attempted to access pieces from unauthorized dossier {}", principal.getUsername(), dossierId);
+        log.info("User {} fetching accounts for dossier: {}", principal.getUsername(), dossierId);
+
+        UUID userId = Objects.requireNonNull(extractUserIdFromPrincipal(principal), "userId");
+        Long did = Objects.requireNonNull(dossierId, "dossierId");
+
+        // ✅ SECURITY CHECK: Verify PACIOLI or user has access to this dossier
+        boolean hasAccess = securityHelper.isPacioli(principal)
+                || dossierService.userHasAccessToDossier(userId, did);
+
+        if (!hasAccess) {
+            log.error("User {} attempted to access accounts from unauthorized dossier {}",
+                    principal.getUsername(), did);
             throw new SecurityException("User cannot access this dossier");
         }
 
-        List<Account> accounts = accountService.getAccountsByDossierId(dossierId);
+        List<Account> accounts = accountService.getAccountsByDossierId(did);
         return ResponseEntity.ok(accounts);
     }
+
     // Create Account
     @PostMapping
     public ResponseEntity<Account> createAccount(@RequestBody Account account) {
-        Account createdAccount = accountService.createAccount(account);
+        Account createdAccount = accountService.createAccount(Objects.requireNonNull(account, "account"));
         return ResponseEntity.ok(createdAccount);
     }
 
@@ -58,21 +73,22 @@ public class AccountController {
     public ResponseEntity<Account> updateAccount(
             @PathVariable Long id,
             @RequestBody Account updatedAccount) {
-        Account account = accountService.updateAccount(id, updatedAccount);
+        Account account = accountService.updateAccount(Objects.requireNonNull(id, "id"),
+                Objects.requireNonNull(updatedAccount, "updatedAccount"));
         return ResponseEntity.ok(account);
     }
 
     // Delete Account
     @DeleteMapping
     public ResponseEntity<Void> deleteAccounts(@RequestBody List<Long> ids) {
-        accountService.deleteAccounts(ids);
+        accountService.deleteAccounts(Objects.requireNonNull(ids, "ids"));
         return ResponseEntity.noContent().build();
     }
 
     // Find Account by ID
     @GetMapping("/{id}")
     public ResponseEntity<Account> findAccountById(@PathVariable Long id) {
-        Account account = accountService.findAccountById(id);
+        Account account = accountService.findAccountById(Objects.requireNonNull(id, "id"));
         return ResponseEntity.ok(account);
     }
 

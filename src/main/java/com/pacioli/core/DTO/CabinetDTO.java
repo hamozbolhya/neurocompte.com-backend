@@ -3,9 +3,9 @@ package com.pacioli.core.DTO;
 import lombok.Data;
 
 import lombok.AllArgsConstructor;
-import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
@@ -19,6 +19,21 @@ public class CabinetDTO {
     private String phone;
     private String ice;
     private String ville;
+    private List<ContractDTO> contracts;
+
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class ContractDTO {
+        private Long id;
+        private LocalDate startDate;
+        private LocalDate endDate;
+        private Integer normalStatementPieceQuota;
+        private Integer bankStatementPageQuota;
+        private Long normalStatementPieceConsumption;
+        private Long bankStatementPageConsumption;
+        private boolean active;
+    }
 
     // List of users assigned to the cabinet, including their roles
     private List<UserDTO> users;

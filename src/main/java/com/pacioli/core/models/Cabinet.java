@@ -21,6 +21,11 @@ public class Cabinet {
     private String ice;
     private String ville;
 
+    @OneToMany(mappedBy = "cabinet", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("cabinet-contracts")
+    @ToString.Exclude
+    private List<CabinetContract> contracts;
+
     @OneToMany(mappedBy = "cabinet")
     @JsonManagedReference("cabinet-dossiers") // Unique reference for Cabinet-Dossiers
     @ToString.Exclude  // Prevent circular reference in toString

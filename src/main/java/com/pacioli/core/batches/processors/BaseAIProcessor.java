@@ -3,7 +3,6 @@ package com.pacioli.core.batches.processors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pacioli.core.DTO.EcrituresDTO2;
 import com.pacioli.core.DTO.PieceDTO;
 import com.pacioli.core.batches.DTO.DTOBuilder;
 import com.pacioli.core.config.batch.BatchProcessingConfig;
@@ -21,8 +20,10 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Component
@@ -80,35 +81,27 @@ public abstract class BaseAIProcessor {
     }
 
     protected JsonNode findEcrituresNodeForAI(JsonNode parsedJson) {
-//        log.info("🔍 Searching for ecritures in AI response - Root keys: {}", parsedJson.fieldNames());
-
         // First check for normal format
         if (parsedJson.has("ecritures")) {
-            log.info("✅ Found ecritures node directly");
             return parsedJson.get("ecritures");
         }
 
         if (parsedJson.has("Ecritures")) {
             JsonNode ecrituresNode = parsedJson.get("Ecritures");
-            log.info("✅ Found Ecritures node with {} elements", ecrituresNode.size());
 
             // Check if it's bank statement format (nested arrays with entries)
             if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
                 JsonNode firstItem = ecrituresNode.get(0);
-                log.info("🔍 First Ecritures item type: {}", firstItem.getNodeType());
 
                 if (firstItem.has("entries")) {
-                    log.info("🏦 Detected bank statement format with entries array");
                     return firstItem.get("entries");
                 }
             }
 
-            // If not bank format, return as-is (normal format)
-            log.info("📄 Detected normal Ecritures format");
             return ecrituresNode;
         }
 
-        log.warn("❌ No ecritures found in AI response");
+        log.warn("❌ No ecritures found in AI response ({})", describeNormalizedShape(parsedJson));
         return null;
     }
 
@@ -116,14 +109,9 @@ public abstract class BaseAIProcessor {
         double maxAmount = 0.0;
         int entryCount = 0;
 
-        log.info("🔍 calculateLargestAmount - Ecritures structure: {}", ecritures);
-
         for (JsonNode entry : ecritures) {
-            //log.info("🔍 Processing entry: {}", entry);
-
             // Check for bank statement structure
             if (entry.has("entries") && entry.get("entries").isArray()) {
-                log.info("🏦 Detected bank statement structure with entries");
                 JsonNode entries = entry.get("entries");
                 for (JsonNode nestedEntry : entries) {
                     double debit = parseDoubleSafely(nestedEntry, "DebitAmt");
@@ -132,23 +120,18 @@ public abstract class BaseAIProcessor {
 
                     maxAmount = Math.max(maxAmount, entryMax);
                     entryCount++;
-
-                    log.info("🔍 Bank entry - Debit: {}, Credit: {}, Max: {}", debit, credit, entryMax);
                 }
             } else {
-                // Regular structure
                 double debit = parseDoubleSafely(entry, "DebitAmt");
                 double credit = parseDoubleSafely(entry, "CreditAmt");
                 double entryMax = Math.max(debit, credit);
 
                 maxAmount = Math.max(maxAmount, entryMax);
                 entryCount++;
-
-                log.info("🔍 Regular entry - Debit: {}, Credit: {}, Max: {}", debit, credit, entryMax);
             }
         }
 
-        log.info("💰 Calculated largest amount: {} from {} entries", maxAmount, entryCount);
+        log.debug("💰 Calculated largest amount: {} from {} entries", maxAmount, entryCount);
         return maxAmount;
     }
 
@@ -169,12 +152,12 @@ public abstract class BaseAIProcessor {
                 rawCurrency.equalsIgnoreCase("None") ||
                 rawCurrency.equalsIgnoreCase("Unknown")) {
 
-            log.info("⚠️ Currency field is empty/invalid in AI response, returning null");
+            log.debug("⚠️ Currency field is empty/invalid in AI response, returning null");
             return null;
         }
 
         String normalizedCurrency = normalizeCurrencyCode.normalizeCurrencyCode(rawCurrency);
-        log.info("💰 Extracted currency from AI: {} -> {}", rawCurrency, normalizedCurrency);
+        log.debug("💰 Extracted currency from AI: {} -> {}", rawCurrency, normalizedCurrency);
         return normalizedCurrency;
     }
 
@@ -215,55 +198,72 @@ public abstract class BaseAIProcessor {
                     "Please set a currency for this dossier in the dossier settings.");
         }
 
-        String dossierCurrency = normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode());
-        log.info("💰 Dossier currency: {}", dossierCurrency);
-        return dossierCurrency;
+        return normalizeCurrencyCode.normalizeCurrencyCode(dossier.getCurrency().getCode());
     }
 
     protected void updatePieceStatus(Piece piece, PieceStatus status) {
-        pieceService.updatePieceStatus(piece.getId(), status.name());
+        Long id = Objects.requireNonNull(piece.getId(), "piece id");
+        pieceService.updatePieceStatus(id, status.name());
     }
 
     protected void rejectPiece(Piece piece, String reason) {
-        log.error("❌ Rejecting piece {}: {}", piece.getId(), reason);
-        pieceService.updatePieceStatus(piece.getId(), PieceStatus.REJECTED.name());
+        Long id = Objects.requireNonNull(piece.getId(), "piece id");
+        log.error("❌ Rejecting piece {}: {}", id, reason);
+        pieceService.updatePieceStatus(id, PieceStatus.REJECTED.name(), reason);
     }
 
-    protected abstract void handleInvalidResponse(Piece piece, int attempt, String jsonResponse) throws InterruptedException;
+    /**
+     * @param rejectionDetail short human-readable reason (no full AI payload)
+     */
+    protected abstract void handleInvalidResponse(Piece piece, int attempt, String rejectionDetail) throws InterruptedException;
+
+    /** Shape-only description (keys + ecritures count) for rejection messages. */
+    protected static String describeNormalizedShape(JsonNode node) {
+        if (node == null) {
+            return "null";
+        }
+        List<String> keys = new ArrayList<>();
+        node.fieldNames().forEachRemaining(keys::add);
+        StringBuilder sb = new StringBuilder("keys=").append(keys);
+        if (node.has("ecritures")) {
+            JsonNode e = node.get("ecritures");
+            sb.append(", ecrituresIsArray=").append(e.isArray());
+            if (e.isArray()) {
+                sb.append(", ecrituresSize=").append(e.size());
+            }
+        }
+        if (node.has("outputText")) {
+            String ot = node.get("outputText").asText("");
+            sb.append(", outputTextLength=").append(ot.length());
+        }
+        return sb.toString();
+    }
 
     protected abstract void handleProcessingError(Piece piece, int attempt, Exception e) throws InterruptedException;
 
     public void processValidAIResponse(Piece piece, JsonNode aiResponse) throws JsonProcessingException {
         try {
+            Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required for processValidAIResponse");
             // ✅ STEP 1: Reload piece to ensure we have latest data
-            Piece refreshedPiece = pieceRepository.findById(piece.getId())
+            Piece refreshedPiece = pieceRepository.findById(pieceId)
                     .orElseThrow(() -> new RuntimeException("Piece not found after AI data extraction"));
-
-            // ✅ DEBUG: Check the amount before processing
-            log.info("🔍 Before processing - Piece amount: {}, AI amount: {}",
-                    refreshedPiece.getAmount(), refreshedPiece.getAiAmount());
 
             // ✅ STEP 2: Process DTO and save ecritures
             PieceDTO pieceDTO = dtoBuilder.buildPieceDTO(refreshedPiece, aiResponse);
 
-            // ❌ REMOVED: Duplicate amount setting logic (now handled in extractAndSaveAIData)
-
-            // ✅ DEBUG: Check if lines are populated
-            if (pieceDTO.getEcritures() != null && !pieceDTO.getEcritures().isEmpty()) {
-                EcrituresDTO2 firstEcriture = pieceDTO.getEcritures().get(0);
-                log.info("🔍 DTO Built - Ecriture has {} lines",
-                        firstEcriture.getLines() != null ? firstEcriture.getLines().size() : 0);
-            } else {
-                log.warn("⚠️ No ecritures in built DTO");
+            if (pieceDTO.getEcritures() == null || pieceDTO.getEcritures().isEmpty()) {
+                log.warn("⚠️ No ecritures in built DTO for piece {}", refreshedPiece.getId());
             }
 
             // ✅ STEP 3: Create converted response and save
             JsonNode convertedResponse = createConvertedResponseNode(pieceDTO, aiResponse);
 
             // ✅ STEP 4: Save to database
+            Dossier dossier = Objects.requireNonNull(refreshedPiece.getDossier(), "dossier");
+            Long dossierId = Objects.requireNonNull(dossier.getId(), "dossier id");
             pieceService.saveEcrituresAndFacture(
-                    refreshedPiece.getId(),
-                    refreshedPiece.getDossier().getId(),
+                    pieceId,
+                    dossierId,
                     objectMapper.writeValueAsString(pieceDTO),
                     convertedResponse
             );
@@ -275,7 +275,8 @@ public abstract class BaseAIProcessor {
                     refreshedPiece.getId(), refreshedPiece.getAmount());
 
         } catch (Exception e) {
-            log.error("❌ Error in processValidAIResponse for piece {}: {}", piece.getId(), e.getMessage(), e);
+            log.error("❌ Error in processValidAIResponse for piece {}: {}", piece.getId(), e.getMessage());
+            log.debug("processValidAIResponse stack trace", e);
             throw e;
         }
     }

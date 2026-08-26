@@ -11,9 +11,11 @@ import com.pacioli.core.enums.PieceStatus;
 import com.pacioli.core.models.Piece;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -38,9 +40,10 @@ public class NormalAIProcessor extends BaseAIProcessor {
             return;
         }
 
-        if (duplicationDetectionService.isDuplicate(piece)) {
-            log.info("🚫 Skipping duplicate piece: {}", piece.getId());
-            updatePieceStatus(piece, PieceStatus.DUPLICATE);
+        Optional<Piece> originalPiece = duplicationDetectionService.findOriginalPiece(piece);
+        if (originalPiece.isPresent()) {
+            log.info("🚫 Skipping duplicate piece: {} (original: {})", piece.getId(), originalPiece.get().getId());
+            duplicationDetectionService.markAsDuplicate(piece, originalPiece.get());
             return;
         }
 
@@ -48,7 +51,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
 
 
         try {
-            log.info("📄 Processing normal piece: {}", piece.getFilename());
+            log.debug("📄 Processing normal piece: {}", piece.getFilename());
             JsonNode aiResponse = aiServiceClient.callAIService(piece.getFilename());
 
             // Handle markdown in raw AI response if needed
@@ -62,24 +65,25 @@ public class NormalAIProcessor extends BaseAIProcessor {
 
             // Normalize the response
             JsonNode normalizedResponse = responseNormalizer.normalizeAIResponse(aiResponse, false);
-            log.info("📄 Normalized response keys: {}", normalizedResponse.fieldNames());
 
             // Check if the normalized response is valid
             if (!pieceValidator.isValidAIResponse(normalizedResponse)) {
-                log.warn("❌ Invalid normalized response, retrying...");
-                handleInvalidResponse(piece, attempt, normalizedResponse.toString());
+                log.warn("❌ Piece {} — validation failed. {}", piece.getId(), describeNormalizedShape(normalizedResponse));
+                handleInvalidResponse(piece, attempt,
+                        "invoice AI response failed validation; " + describeNormalizedShape(normalizedResponse));
                 return;
             }
 
             // Extract the ecritures from normalized response for processing
             JsonNode ecrituresNode = normalizedResponse.get("ecritures");
             if (ecrituresNode == null || !ecrituresNode.isArray() || ecrituresNode.size() == 0) {
-                log.warn("❌ No ecritures in normalized response, retrying...");
-                handleInvalidResponse(piece, attempt, normalizedResponse.toString());
+                log.warn("❌ Piece {} — no ecritures after normalization. {}", piece.getId(), describeNormalizedShape(normalizedResponse));
+                handleInvalidResponse(piece, attempt,
+                        "no ecritures array or empty after normalization; " + describeNormalizedShape(normalizedResponse));
                 return;
             }
 
-            log.info("✅ Valid AI response with {} ecritures", ecrituresNode.size());
+            log.debug("✅ Piece {} — {} ecritures validated", piece.getId(), ecrituresNode.size());
 
             // Process the data - pass the normalized response which contains ecritures
             extractAndSaveAIData(piece, normalizedResponse);
@@ -93,12 +97,12 @@ public class NormalAIProcessor extends BaseAIProcessor {
         }
     }
 
-    private void extractAndSaveAIData(Piece piece, JsonNode normalizedResponse) throws JsonProcessingException {
+    private void extractAndSaveAIData(@NonNull Piece piece, JsonNode normalizedResponse) throws JsonProcessingException {
         try {
             JsonNode ecrituresNode = normalizedResponse.get("ecritures");
 
             if (ecrituresNode != null && ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                log.info("💰 Processing {} invoice entries", ecrituresNode.size());
+                log.debug("💰 Processing {} invoice entries", ecrituresNode.size());
                 JsonNode firstEntry = ecrituresNode.get(0);
 
                 extractAmountAndCurrency(piece, ecrituresNode, firstEntry);
@@ -113,7 +117,7 @@ public class NormalAIProcessor extends BaseAIProcessor {
         }
     }
 
-    private void extractAmountAndCurrency(Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
+    private void extractAmountAndCurrency(@NonNull Piece piece, JsonNode ecrituresNode, JsonNode firstEntry) {
         // Extract amount
         double originalAmount = calculateLargestAmount(ecrituresNode);
         piece.setAiAmount(originalAmount);
@@ -132,11 +136,11 @@ public class NormalAIProcessor extends BaseAIProcessor {
         // Apply currency conversion using dedicated service
         currencyDataExtractionService.calculateAndApplyExchangeRate(piece, invoiceCurrency, dossierCurrency, invoiceDate);
 
-        log.info("💰 Extracted invoice data - Amount: {}, Currency: {}, Converted: {}, Rate: {}",
+        log.debug("💰 Extracted invoice data - Amount: {}, Currency: {}, Converted: {}, Rate: {}",
                 originalAmount, invoiceCurrency, piece.getConvertedCurrency(), piece.getExchangeRate());
     }
 
-    private void applyFallbackCurrency(Piece piece) {
+    private void applyFallbackCurrency(@NonNull Piece piece) {
         log.warn("⚠️ No valid invoice entries, using dossier currency");
         String dossierCurrency = getDossierCurrencyCode(piece.getDossier());
         piece.setAiAmount(0.0);
@@ -147,17 +151,17 @@ public class NormalAIProcessor extends BaseAIProcessor {
 
 
     @Override
-    protected void handleInvalidResponse(Piece piece, int attempt, String jsonResponse) throws InterruptedException {
+    protected void handleInvalidResponse(Piece piece, int attempt, String rejectionDetail) throws InterruptedException {
         if (attempt < batchConfig.getMaxRetries()) {
-            log.warn("🔄 Retrying piece {} due to invalid AI response (attempt {}/{})",
-                    piece.getId(), attempt, batchConfig.getMaxRetries());
+            log.warn("🔄 Retrying piece {} (attempt {}/{}): {}",
+                    piece.getId(), attempt, batchConfig.getMaxRetries(), rejectionDetail);
 
             // For normal pieces, use shorter delay or immediate retry
             Thread.sleep(30000); // 30 seconds instead of 5 minutes
             processPieceWithRetry(piece, attempt + 1);
         } else {
-            log.error("❌ File rejected - invalid AI response after all attempts: {}", jsonResponse);
-            rejectPiece(piece, "Invalid AI response after all attempts");
+            log.error("❌ File rejected piece {} after all attempts — {}", piece.getId(), rejectionDetail);
+            rejectPiece(piece, "Invalid AI response after all attempts: " + rejectionDetail);
         }
     }
 

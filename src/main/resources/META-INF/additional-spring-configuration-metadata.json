@@ -1,0 +1,9 @@
+{
+  "properties": [
+    {
+      "name": "active.config",
+      "type": "java.lang.String",
+      "description": "Base name of the optional classpath .properties file imported via spring.config.import (e.g. dev, recette, prod → dev.properties)."
+    }
+  ]
+}

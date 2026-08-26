@@ -3,21 +3,24 @@ package com.pacioli.core.services.serviceImp;
 import com.pacioli.core.DTO.*;
 import com.pacioli.core.models.*;
 import com.pacioli.core.repositories.*;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.EcritureService;
+import com.pacioli.core.services.UserService;
 import com.pacioli.core.utils.EcritureValidationUtil;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -28,26 +31,69 @@ public class EcritureServiceImpl implements EcritureService {
     private final EcritureRepository ecritureRepository;
     private final JournalRepository journalRepository;
     private final LineRepository lineRepository;
-
     private final PieceRepository pieceRepository;
     private final AccountRepository accountRepository;
+    private final AuditService auditService;
+    private final UserService userService;
 
-    @Autowired
     public EcritureServiceImpl(EcritureRepository ecritureRepository, LineRepository lineRepository,
-                               JournalRepository journalRepository, AccountRepository accountRepository, PieceRepository pieceRepository) {
+                               JournalRepository journalRepository, AccountRepository accountRepository,
+                               PieceRepository pieceRepository, AuditService auditService, UserService userService) {
         this.ecritureRepository = ecritureRepository;
         this.lineRepository = lineRepository;
         this.journalRepository = journalRepository;
         this.accountRepository = accountRepository;
         this.pieceRepository = pieceRepository;
+        this.auditService = auditService;
+        this.userService = userService;
+    }
+
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible à partir d'une écriture
+    private Long getTargetCabinetId(Ecriture ecriture) {
+        if (ecriture != null && ecriture.getPiece() != null &&
+                ecriture.getPiece().getDossier() != null &&
+                ecriture.getPiece().getDossier().getCabinet() != null) {
+            return ecriture.getPiece().getDossier().getCabinet().getId();
+        }
+        return null;
+    }
+
+    // ✅ Méthode utilitaire pour récupérer le nom du cabinet cible
+    private String getTargetCabinetName(Ecriture ecriture) {
+        if (ecriture != null && ecriture.getPiece() != null &&
+                ecriture.getPiece().getDossier() != null &&
+                ecriture.getPiece().getDossier().getCabinet() != null) {
+            return ecriture.getPiece().getDossier().getCabinet().getName();
+        }
+        return null;
+    }
+
+    // ✅ Méthode utilitaire à partir d'un ID d'écriture
+    private Long getTargetCabinetId(@NonNull Long ecritureId) {
+        try {
+            Ecriture ecriture = ecritureRepository.findById(ecritureId).orElse(null);
+            return getTargetCabinetId(ecriture);
+        } catch (Exception e) {
+            log.warn("Could not get target cabinet ID for ecriture: {}", ecritureId);
+            return null;
+        }
+    }
+
+    // ✅ Méthode utilitaire pour le nom du cabinet cible à partir d'un ID
+    private String getTargetCabinetName(@NonNull Long ecritureId) {
+        try {
+            Ecriture ecriture = ecritureRepository.findById(ecritureId).orElse(null);
+            return getTargetCabinetName(ecriture);
+        } catch (Exception e) {
+            log.warn("Could not get target cabinet name for ecriture: {}", ecritureId);
+            return null;
+        }
     }
 
     @Override
-    public List<Ecriture> getEcrituresByPieceId(Long pieceId) {
+    public List<Ecriture> getEcrituresByPieceId(@NonNull Long pieceId) {
         return ecritureRepository.findByPieceId(pieceId);
     }
-
-
 
     @Override
     public Page<EcritureDTO> getEcrituresByExerciseAndCabinet(Long exerciseId, Long cabinetId, int page, int size) {
@@ -55,30 +101,27 @@ public class EcritureServiceImpl implements EcritureService {
         List<Ecriture> allEcritures = ecritureRepository.findEcrituresByExerciseAndCabinet(exerciseId, cabinetId);
 
         // Convert to DTOs
-        List<EcritureDTO> allDTOs = allEcritures.stream()
-                .map(e -> mapToDTO(e))
-                .collect(Collectors.toList());
+        List<EcritureDTO> allDTOs = allEcritures.stream().map(e -> mapToDTO(e)).collect(Collectors.toList());
 
         // Apply pagination in memory
         int start = page * size;
         int end = Math.min(start + size, allDTOs.size());
 
-        List<EcritureDTO> paginatedDTOs = allDTOs.subList(start, end);
+        List<EcritureDTO> paginatedDTOs = new ArrayList<>(allDTOs.subList(start, end));
 
         // Return as Page
-        return new PageImpl<>(
-                paginatedDTOs,
-                PageRequest.of(page, size),
-                allDTOs.size()  // Total size = all ecritures
-        );
+        return new PageImpl<>(paginatedDTOs, PageRequest.of(page, size), allDTOs.size());
     }
-
 
     private EcritureDTO mapToDTO(Ecriture ecriture) {
         EcritureDTO dto = new EcritureDTO();
         dto.setId(ecriture.getId());
         dto.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto.setEntryDate(ecriture.getEntryDate());
+        dto.setExchangeRate(ecriture.getExchangeRate());
+        dto.setOriginalCurrency(ecriture.getOriginalCurrency());
+        dto.setConvertedCurrency(ecriture.getConvertedCurrency());
+        dto.setExchangeRateDate(ecriture.getExchangeRateDate());
 
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
@@ -105,6 +148,7 @@ public class EcritureServiceImpl implements EcritureService {
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+            lineDTO.setTaxRate(line.getTaxRate());
 
             lineDTO.setOriginalDebit(line.getOriginalDebit());
             lineDTO.setOriginalCredit(line.getOriginalCredit());
@@ -133,47 +177,135 @@ public class EcritureServiceImpl implements EcritureService {
 
     @Override
     @Transactional
-    public Ecriture updateEcriture(Ecriture ecriture) {
-        return ecritureRepository.save(ecriture);
+    public Ecriture updateEcriture(@NonNull Ecriture ecriture) {
+        Ecriture savedEcriture = ecritureRepository.save(ecriture);
+
+        // ✅ Audit avec cabinet cible
+        Long targetCabinetId = getTargetCabinetId(savedEcriture);
+        String targetCabinetName = getTargetCabinetName(savedEcriture);
+
+        auditService.logSuccessWithTargetCabinet(
+                userService.getCurrentUser(),
+                "UPDATE",
+                "Ecriture",
+                savedEcriture.getId(),
+                "Ecriture-" + savedEcriture.getId(),
+                null,
+                savedEcriture,
+                targetCabinetId,
+                targetCabinetName
+        );
+
+        return savedEcriture;
     }
 
     @Override
-    public Ecriture getEcritureById(Long id) {
+    public Ecriture getEcritureById(@NonNull Long id) {
         return ecritureRepository.findById(id).orElse(null);
     }
 
     @Override
     @Transactional
-    public void deleteEcritures(List<Long> ecritureIds) {
+    public void deleteEcritures(@NonNull List<Long> ecritureIds) {
+        // Récupérer les écritures pour avoir le cabinet cible
+        List<Ecriture> ecritures = ecritureRepository.findAllById(ecritureIds);
+
+        // Audit avant suppression pour chaque écriture
+        for (Ecriture ecriture : ecritures) {
+            Long targetCabinetId = getTargetCabinetId(ecriture);
+            String targetCabinetName = getTargetCabinetName(ecriture);
+
+            auditService.logSuccessWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "DELETE",
+                    "Ecriture",
+                    ecriture.getId(),
+                    "Ecriture-" + ecriture.getId(),
+                    ecriture,
+                    null,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+        }
+
         // Validate that all IDs exist before deletion
         ecritureIds.forEach(id -> {
-            if (!ecritureRepository.existsById(id)) {
-                throw new RuntimeException("Ecriture with ID " + id + " does not exist");
+            Long nid = Objects.requireNonNull(id, "ecriture id");
+            if (!ecritureRepository.existsById(nid)) {
+                String errorMessage = "Ecriture with ID " + nid + " does not exist";
+
+                Long targetCabinetId = getTargetCabinetId(nid);
+                String targetCabinetName = getTargetCabinetName(nid);
+
+                // Audit échec
+                auditService.logFailureWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "DELETE",
+                        "Ecriture",
+                        nid,
+                        "Ecriture-" + nid,
+                        errorMessage,
+                        targetCabinetId,
+                        targetCabinetName
+                );
+
+                throw new RuntimeException(errorMessage);
             }
         });
+
         ecritureRepository.deleteAllById(ecritureIds);
     }
 
     @Transactional
     @Override
-    public void updateCompte(String accountId, List<Long> ecritureIds) {
+    public void updateCompte(String accountId, @NonNull List<Long> ecritureIds) {
         // 1️⃣ Convert the account ID (String) to a Long
-        Long accountLongId = Long.valueOf(accountId);
+        long accountPk = Long.parseLong(accountId);
+        Long accountLongId = accountPk;
 
         // 2️⃣ Fetch the account from the database
-        Account account = accountRepository.findById(accountLongId)
-                .orElseThrow(() -> new IllegalArgumentException("Account not found with ID: " + accountId));
+        Account account = accountRepository.findById(accountLongId).orElseThrow(() -> {
+            auditService.logFailure(
+                    userService.getCurrentUser(),
+                    "UPDATE_COMPTE",
+                    "Line",
+                    accountLongId,
+                    "Account-" + accountId,
+                    "Account not found with ID: " + accountId
+            );
+            return new IllegalArgumentException("Account not found with ID: " + accountId);
+        });
 
         log.info("When Change accounting account here's the account ID ----> {}", account);
 
         // 3️⃣ Update the Line with the fetched Account object
         lineRepository.updateCompteByIds(account, ecritureIds);
-    }
 
+        // ✅ Audit avec cabinet cible (récupéré à partir de la première écriture)
+        Long targetCabinetId = null;
+        String targetCabinetName = null;
+        if (!ecritureIds.isEmpty()) {
+            Long firstEcritureId = Objects.requireNonNull(ecritureIds.get(0), "ecriture id");
+            targetCabinetId = getTargetCabinetId(firstEcritureId);
+            targetCabinetName = getTargetCabinetName(firstEcritureId);
+        }
+
+        auditService.logSuccessWithTargetCabinet(
+                userService.getCurrentUser(),
+                "UPDATE_COMPTE",
+                "Line",
+                null,
+                "Updated " + ecritureIds.size() + " lines",
+                Map.of("oldAccountId", accountId, "ecritureIds", ecritureIds),
+                Map.of("newAccountId", accountId),
+                targetCabinetId,
+                targetCabinetName
+        );
+    }
 
     @Override
     @Transactional
-    public EcritureDTO getEcritureDetails(Long ecritureId) {
+    public EcritureDTO getEcritureDetails(@NonNull Long ecritureId) {
         Ecriture ecriture = ecritureRepository.findEcritureByIdWithDetails(ecritureId)
                 .orElseThrow(() -> new RuntimeException("Ecriture not found with ID: " + ecritureId));
 
@@ -190,6 +322,10 @@ public class EcritureServiceImpl implements EcritureService {
         dto.setId(ecriture.getId());
         dto.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto.setEntryDate(ecriture.getEntryDate());
+        dto.setExchangeRate(ecriture.getExchangeRate());
+        dto.setOriginalCurrency(ecriture.getOriginalCurrency());
+        dto.setConvertedCurrency(ecriture.getConvertedCurrency());
+        dto.setExchangeRateDate(ecriture.getExchangeRateDate());
 
         // Set the amountUpdated field
         dto.setAmountUpdated(ecriture.getAmountUpdated());
@@ -222,6 +358,7 @@ public class EcritureServiceImpl implements EcritureService {
             lineDTO.setLabel(line.getLabel());
             lineDTO.setDebit(line.getDebit());
             lineDTO.setCredit(line.getCredit());
+            lineDTO.setTaxRate(line.getTaxRate());
 
             // Set currency conversion fields
             lineDTO.setOriginalDebit(line.getOriginalDebit());
@@ -258,10 +395,6 @@ public class EcritureServiceImpl implements EcritureService {
             pieceDTO.setExchangeRateDate(ecriture.getPiece().getExchangeRateDate());
 
             pieceDTO.setExchangeRateUpdated(ecriture.getPiece().getExchangeRateUpdated());
-            // These fields might not exist directly in the Piece entity but would come from
-            // processing in AIPieceProcessingService - add them if they exist in your entity
-            // pieceDTO.setOriginalCurrency(...);
-            // pieceDTO.setDossierCurrency(...);
 
             if (ecriture.getPiece().getDossier() != null) {
                 pieceDTO.setDossierName(ecriture.getPiece().getDossier().getName());
@@ -274,41 +407,98 @@ public class EcritureServiceImpl implements EcritureService {
                 }
             }
 
-            // Optionally, you could also map factureData and ecritures if needed
-            // but this might create circular references or excessive data
-            // pieceDTO.setFactureData(...);
-            // pieceDTO.setEcritures(...);
-
             dto.setPiece(pieceDTO);
         }
 
         return dto;
     }
 
-
     @Transactional
     @Override
-    public Ecriture updateEcriture(Long ecritureId, Ecriture ecritureRequest) {
+    public Ecriture updateEcriture(@NonNull Long ecritureId, @NonNull Ecriture ecritureRequest) {
         Ecriture existingEcriture = ecritureRepository.findEcritureByIdCustom(ecritureId)
-                .orElseThrow(() -> new IllegalArgumentException("Ecriture non trouvée avec l'identifiant : " + ecritureId));
+                .orElseThrow(() -> {
+                    Long targetCabinetId = getTargetCabinetId(ecritureId);
+                    String targetCabinetName = getTargetCabinetName(ecritureId);
+
+                    auditService.logFailureWithTargetCabinet(
+                            userService.getCurrentUser(),
+                            "UPDATE",
+                            "Ecriture",
+                            ecritureId,
+                            "Ecriture-" + ecritureId,
+                            "Ecriture non trouvée avec l'identifiant : " + ecritureId,
+                            targetCabinetId,
+                            targetCabinetName
+                    );
+                    return new IllegalArgumentException("Ecriture non trouvée avec l'identifiant : " + ecritureId);
+                });
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(existingEcriture);
+        String targetCabinetName = getTargetCabinetName(existingEcriture);
 
         log.info("Existing Ecriture: {}", existingEcriture);
         log.info("Update Request: {}", ecritureRequest);
 
         if (ecritureRequest.getEntryDate() == null) {
-            throw new IllegalArgumentException("La date d'entrée est obligatoire.");
+            String errorMessage = "La date d'entrée est obligatoire.";
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Ecriture",
+                    ecritureId,
+                    "Ecriture-" + ecritureId,
+                    errorMessage,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+            throw new IllegalArgumentException(errorMessage);
         }
 
         if (ecritureRequest.getJournal() == null || ecritureRequest.getJournal().getId() == null) {
-            throw new IllegalArgumentException("Le journal est obligatoire.");
+            String errorMessage = "Le journal est obligatoire.";
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Ecriture",
+                    ecritureId,
+                    "Ecriture-" + ecritureId,
+                    errorMessage,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+            throw new IllegalArgumentException(errorMessage);
         }
 
-        Journal newJournal = journalRepository.findById(ecritureRequest.getJournal().getId())
-                .orElseThrow(() -> new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + ecritureRequest.getJournal().getId()));
+        Long newJournalId = Objects.requireNonNull(ecritureRequest.getJournal().getId(), "journal id");
+        Journal newJournal = journalRepository.findById(newJournalId)
+                .orElseThrow(() -> {
+                    auditService.logFailure(
+                            userService.getCurrentUser(),
+                            "UPDATE",
+                            "Journal",
+                            newJournalId,
+                            "Journal-" + newJournalId,
+                            "Journal non trouvé avec l'identifiant : " + newJournalId
+                    );
+                    return new IllegalArgumentException("Journal non trouvé avec l'identifiant : " + newJournalId);
+                });
 
         if (existingEcriture.getJournal() != null &&
                 !existingEcriture.getJournal().getDossier().getId().equals(newJournal.getDossier().getId())) {
-            throw new IllegalArgumentException("Le nouveau journal doit appartenir au même dossier.");
+            String errorMessage = "Le nouveau journal doit appartenir au même dossier.";
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Ecriture",
+                    ecritureId,
+                    "Ecriture-" + ecritureId,
+                    errorMessage,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+            throw new IllegalArgumentException(errorMessage);
         }
 
         // ✅ GET DECIMAL PRECISION FROM DOSSIER/COUNTRY
@@ -321,34 +511,62 @@ public class EcritureServiceImpl implements EcritureService {
         }
 
         // ✅ VALIDATE BEFORE PROCESSING
-        Map<String, String> balanceErrors = EcritureValidationUtil.validateEcritureBalance(
-                ecritureRequest, decimalPrecision);
+        Map<String, String> balanceErrors = EcritureValidationUtil.validateEcritureBalance(ecritureRequest, decimalPrecision);
 
         if (!balanceErrors.isEmpty()) {
-            String errorMessage = balanceErrors.values().stream()
-                    .findFirst()
-                    .orElse("Erreur de validation");
+            String errorMessage = balanceErrors.values().stream().findFirst().orElse("Erreur de validation");
             log.error("❌ Validation errors: {}", balanceErrors);
+
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Ecriture",
+                    ecritureId,
+                    "Ecriture-" + ecritureId,
+                    errorMessage,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+
             throw new IllegalArgumentException(errorMessage);
         }
 
         Map<String, String> exchangeRateErrors = EcritureValidationUtil.validateExchangeRate(ecritureRequest);
         if (!exchangeRateErrors.isEmpty()) {
-            String errorMessage = exchangeRateErrors.values().stream()
-                    .findFirst()
-                    .orElse("Erreur de validation du taux de change");
+            String errorMessage = exchangeRateErrors.values().stream().findFirst().orElse("Erreur de validation du taux de change");
             log.error("❌ Exchange rate validation errors: {}", exchangeRateErrors);
+
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "UPDATE",
+                    "Ecriture",
+                    ecritureId,
+                    "Ecriture-" + ecritureId,
+                    errorMessage,
+                    targetCabinetId,
+                    targetCabinetName
+            );
+
             throw new IllegalArgumentException(errorMessage);
         }
 
         // ✅ VALIDATION PASSED - Continue with update
+        Ecriture oldEcriture = new Ecriture();
+        oldEcriture.setId(existingEcriture.getId());
+        oldEcriture.setJournal(existingEcriture.getJournal());
+        oldEcriture.setEntryDate(existingEcriture.getEntryDate());
+        // Copy other fields as needed
+
         existingEcriture.setJournal(newJournal);
         existingEcriture.setEntryDate(ecritureRequest.getEntryDate());
+        existingEcriture.setExchangeRate(ecritureRequest.getExchangeRate());
+        existingEcriture.setOriginalCurrency(ecritureRequest.getOriginalCurrency());
+        existingEcriture.setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+        existingEcriture.setExchangeRateDate(ecritureRequest.getExchangeRateDate());
 
         if (ecritureRequest.getManuallyUpdated() != null && ecritureRequest.getManuallyUpdated()) {
             existingEcriture.setManuallyUpdated(true);
             existingEcriture.setManualUpdateDate(LocalDate.now());
-//            log.info("Ecriture {} marked as manually updated", ecritureId);
         }
 
         // Update the amountUpdated field if it's provided in the request
@@ -358,12 +576,24 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Check if the exchange rate has been updated
         Piece associatedPiece = existingEcriture.getPiece();
+        Double previousPieceExchangeRate = associatedPiece != null ? associatedPiece.getExchangeRate() : null;
         if (associatedPiece != null && ecritureRequest.getExchangeRate() != null) {
-            if (associatedPiece.getExchangeRate() == null ||
-                    !associatedPiece.getExchangeRate().equals(ecritureRequest.getExchangeRate())) {
+            if (associatedPiece.getExchangeRate() == null || !associatedPiece.getExchangeRate().equals(ecritureRequest.getExchangeRate())) {
                 associatedPiece.setExchangeRateUpdated(true);
-                pieceRepository.save(associatedPiece);
             }
+            associatedPiece.setExchangeRate(ecritureRequest.getExchangeRate());
+            associatedPiece.setAiCurrency(ecritureRequest.getOriginalCurrency());
+            associatedPiece.setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+            associatedPiece.setExchangeRateDate(ecritureRequest.getExchangeRateDate());
+
+            if (associatedPiece.getFactureData() != null) {
+                associatedPiece.getFactureData().setExchangeRate(ecritureRequest.getExchangeRate());
+                associatedPiece.getFactureData().setOriginalCurrency(ecritureRequest.getOriginalCurrency());
+                associatedPiece.getFactureData().setConvertedCurrency(ecritureRequest.getConvertedCurrency());
+                associatedPiece.getFactureData().setExchangeRateDate(ecritureRequest.getExchangeRateDate());
+            }
+
+            pieceRepository.save(associatedPiece);
         }
 
         // Check for exchange rate information
@@ -380,14 +610,30 @@ public class EcritureServiceImpl implements EcritureService {
 
         // Update the lines
         updateEcritureLines(existingEcriture, ecritureRequest.getLines(), hasExchangeRate, exchangeRate,
-                ecritureRequest.getManuallyUpdated());
+                ecritureRequest.getManuallyUpdated(), ecritureRequest.getAmountUpdated(), decimalPrecision,
+                previousPieceExchangeRate);
 
-//        log.info("✅ Ecriture {} validation passed and updated successfully", ecritureId);
-        return ecritureRepository.save(existingEcriture);
+        Ecriture updatedEcriture = ecritureRepository.save(existingEcriture);
+
+        // ✅ Audit avec cabinet cible
+        auditService.logSuccessWithTargetCabinet(
+                userService.getCurrentUser(),
+                "UPDATE",
+                "Ecriture",
+                ecritureId,
+                "Ecriture-" + ecritureId,
+                oldEcriture,
+                updatedEcriture,
+                targetCabinetId,
+                targetCabinetName
+        );
+
+        return updatedEcriture;
     }
 
     private void updateEcritureLines(Ecriture existingEcriture, List<Line> updatedLines,
-                                     boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated) {
+                                     boolean hasExchangeRate, double exchangeRate, Boolean manuallyUpdated,
+                                     Boolean amountUpdated, int decimalPrecision, Double previousPieceExchangeRate) {
         List<Line> existingLines = existingEcriture.getLines();
 
         // Step 1: Remove lines that no longer exist
@@ -416,21 +662,23 @@ public class EcritureServiceImpl implements EcritureService {
                 String existingOriginalCurrency = existingLine.getOriginalCurrency();
                 String existingConvertedCurrency = existingLine.getConvertedCurrency();
                 Double existingExchangeRate = existingLine.getExchangeRate();
+                Double existingDebit = existingLine.getDebit();
+                Double existingCredit = existingLine.getCredit();
 
                 // Fetch the Account to ensure it is managed
-                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
-                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+                Long lineAccountId = Objects.requireNonNull(
+                        Objects.requireNonNull(updatedLine.getAccount(), "line account").getId(), "account id");
+                Account managedAccount = accountRepository.findById(lineAccountId)
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + lineAccountId));
 
                 existingLine.setAccount(managedAccount);
                 existingLine.setLabel(updatedLine.getLabel());
-                existingLine.setDebit(updatedLine.getDebit());
-                existingLine.setCredit(updatedLine.getCredit());
+                existingLine.setTaxRate(updatedLine.getTaxRate());
 
                 // ✅ PRESERVE CURRENCY FIELDS IF NOT PROVIDED IN UPDATE
                 if (isValidCurrency(updatedLine.getOriginalCurrency())) {
                     existingLine.setOriginalCurrency(updatedLine.getOriginalCurrency());
                 } else if (existingOriginalCurrency != null) {
-                    // Keep existing if new one is invalid
                     existingLine.setOriginalCurrency(existingOriginalCurrency);
                 } else {
                     existingLine.setOriginalCurrency(null);
@@ -439,54 +687,47 @@ public class EcritureServiceImpl implements EcritureService {
                 if (isValidCurrency(updatedLine.getConvertedCurrency())) {
                     existingLine.setConvertedCurrency(updatedLine.getConvertedCurrency());
                 } else if (existingConvertedCurrency != null) {
-                    // Keep existing if new one is invalid
                     existingLine.setConvertedCurrency(existingConvertedCurrency);
                 } else {
                     existingLine.setConvertedCurrency(null);
                 }
 
-                // ✅ PRESERVE EXCHANGE RATE IF NOT PROVIDED
                 if (updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0) {
                     existingLine.setExchangeRate(updatedLine.getExchangeRate());
                 } else if (existingExchangeRate != null) {
-                    // Keep existing if new one is not provided
                     existingLine.setExchangeRate(existingExchangeRate);
                 } else {
                     existingLine.setExchangeRate(null);
                 }
 
-                existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
-                existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
-                existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
-                existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                if (!Boolean.TRUE.equals(amountUpdated) &&
+                        shouldRecalculateConvertedAmounts(existingLine) &&
+                        !hasManualAmountChange(existingLine, updatedLine)) {
+                    recalculateExistingLineAmounts(existingLine, updatedLine, existingDebit, existingCredit,
+                            existingExchangeRate, previousPieceExchangeRate, decimalPrecision);
+                } else {
+                    applyRequestedLineAmounts(existingLine, updatedLine);
+                }
+                existingLine.setUsdDebit(updatedLine.getUsdDebit());
+                existingLine.setUsdCredit(updatedLine.getUsdCredit());
 
-                // ✅ PRESERVE EXCHANGE RATE DATE - PRIORITY ORDER:
-                // 1. Use new value if provided and valid
-                // 2. Keep existing value if present
-                // 3. Try to get from piece
-                // 4. Set to null as last resort
-
+                // ✅ PRESERVE EXCHANGE RATE DATE
                 boolean hasNewExchangeRateDate = updatedLine.getExchangeRateDate() != null &&
                         !updatedLine.getExchangeRateDate().toString().isEmpty() &&
                         !updatedLine.getExchangeRateDate().toString().equals("null");
 
                 if (hasNewExchangeRateDate) {
-                    // New valid value provided - use it
                     existingLine.setExchangeRateDate(updatedLine.getExchangeRateDate().toString());
                     log.debug("📅 Updated exchange rate date from request: {}", updatedLine.getExchangeRateDate());
                 } else if (existingExchangeRateDate != null &&
                         !existingExchangeRateDate.equals("null") &&
                         !existingExchangeRateDate.isEmpty()) {
-                    // Keep existing value - DON'T OVERWRITE WITH NULL
                     log.debug("📅 Preserving existing exchange rate date: {}", existingExchangeRateDate);
-                    // existingLine already has this value, no need to set
                 } else if (existingEcriture.getPiece() != null &&
                         existingEcriture.getPiece().getExchangeRateDate() != null) {
-                    // Get from piece if available
                     existingLine.setExchangeRateDate(existingEcriture.getPiece().getExchangeRateDate().toString());
                     log.info("📅 Set exchange rate date from piece: {}", existingEcriture.getPiece().getExchangeRateDate());
                 } else {
-                    // Last resort - set to null
                     existingLine.setExchangeRateDate(null);
                     log.debug("📅 No exchange rate date available, setting to null");
                 }
@@ -495,49 +736,39 @@ public class EcritureServiceImpl implements EcritureService {
                 if (manuallyUpdated != null && manuallyUpdated) {
                     existingLine.setManuallyUpdated(true);
                     existingLine.setManualUpdateDate(LocalDate.now());
-//                    log.debug("Line {} marked as manually updated", existingLine.getId());
                 }
 
             } else {
                 // Add a new line
-                Account managedAccount = accountRepository.findById(updatedLine.getAccount().getId())
-                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + updatedLine.getAccount().getId()));
+                Long newLineAccountId = Objects.requireNonNull(
+                        Objects.requireNonNull(updatedLine.getAccount(), "line account").getId(), "account id");
+                Account managedAccount = accountRepository.findById(newLineAccountId)
+                        .orElseThrow(() -> new IllegalArgumentException("Account non trouvé avec l'identifiant : " + newLineAccountId));
 
                 Line newLine = new Line();
                 newLine.setAccount(managedAccount);
                 newLine.setLabel(updatedLine.getLabel());
+                newLine.setEcriture(existingEcriture);
+                newLine.setTaxRate(updatedLine.getTaxRate());
+
+                newLine.setOriginalCurrency(isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null);
+                newLine.setConvertedCurrency(isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null);
+                newLine.setExchangeRate(updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0 ? updatedLine.getExchangeRate() : null);
                 newLine.setDebit(updatedLine.getDebit());
                 newLine.setCredit(updatedLine.getCredit());
-                newLine.setEcriture(existingEcriture);
-
-                // Set currency fields from request, use null if not provided/invalid
-                newLine.setOriginalCurrency(
-                        isValidCurrency(updatedLine.getOriginalCurrency()) ? updatedLine.getOriginalCurrency() : null
-                );
-
-                newLine.setConvertedCurrency(
-                        isValidCurrency(updatedLine.getConvertedCurrency()) ? updatedLine.getConvertedCurrency() : null
-                );
-
-                newLine.setExchangeRate(
-                        updatedLine.getExchangeRate() != null && updatedLine.getExchangeRate() > 0
-                                ? updatedLine.getExchangeRate()
-                                : null
-                );
-
                 newLine.setOriginalDebit(updatedLine.getOriginalDebit());
                 newLine.setOriginalCredit(updatedLine.getOriginalCredit());
                 newLine.setConvertedDebit(updatedLine.getConvertedDebit());
                 newLine.setConvertedCredit(updatedLine.getConvertedCredit());
+                newLine.setUsdDebit(updatedLine.getUsdDebit());
+                newLine.setUsdCredit(updatedLine.getUsdCredit());
 
-                // ✅ For new lines, try to get exchangeRateDate from piece or request
                 if (updatedLine.getExchangeRateDate() != null &&
                         !updatedLine.getExchangeRateDate().toString().isEmpty() &&
                         !updatedLine.getExchangeRateDate().toString().equals("null")) {
                     newLine.setExchangeRateDate(updatedLine.getExchangeRateDate().toString());
                 } else if (existingEcriture.getPiece() != null &&
                         existingEcriture.getPiece().getExchangeRateDate() != null) {
-                    // Get from piece if not provided in request
                     newLine.setExchangeRateDate(existingEcriture.getPiece().getExchangeRateDate().toString());
                     log.info("📅 Set exchange rate date for new line from piece: {}", existingEcriture.getPiece().getExchangeRateDate());
                 } else {
@@ -558,17 +789,126 @@ public class EcritureServiceImpl implements EcritureService {
         existingEcriture.setLines(existingLines);
     }
 
+    private boolean shouldRecalculateConvertedAmounts(Line line) {
+        return line.getExchangeRate() != null && line.getExchangeRate() > 0 &&
+                isValidCurrency(line.getOriginalCurrency()) &&
+                isValidCurrency(line.getConvertedCurrency()) &&
+                !line.getOriginalCurrency().equals(line.getConvertedCurrency());
+    }
+
+    private boolean hasManualAmountChange(Line existingLine, Line updatedLine) {
+        return !approximatelyEqual(existingLine.getDebit(), updatedLine.getDebit()) ||
+                !approximatelyEqual(existingLine.getCredit(), updatedLine.getCredit());
+    }
+
+    private void applyRequestedLineAmounts(Line existingLine, Line updatedLine) {
+        if (shouldRecalculateConvertedAmounts(existingLine)) {
+            Double finalDebit = firstNonNull(updatedLine.getConvertedDebit(), updatedLine.getDebit());
+            Double finalCredit = firstNonNull(updatedLine.getConvertedCredit(), updatedLine.getCredit());
+
+            existingLine.setDebit(finalDebit);
+            existingLine.setCredit(finalCredit);
+            existingLine.setConvertedDebit(finalDebit);
+            existingLine.setConvertedCredit(finalCredit);
+            existingLine.setOriginalDebit(firstNonNull(updatedLine.getOriginalDebit(),
+                    divideByRate(finalDebit, existingLine.getExchangeRate())));
+            existingLine.setOriginalCredit(firstNonNull(updatedLine.getOriginalCredit(),
+                    divideByRate(finalCredit, existingLine.getExchangeRate())));
+        } else {
+            existingLine.setDebit(updatedLine.getDebit());
+            existingLine.setCredit(updatedLine.getCredit());
+            existingLine.setOriginalDebit(updatedLine.getOriginalDebit());
+            existingLine.setOriginalCredit(updatedLine.getOriginalCredit());
+            existingLine.setConvertedDebit(updatedLine.getConvertedDebit());
+            existingLine.setConvertedCredit(updatedLine.getConvertedCredit());
+        }
+    }
+
+    private Double firstNonNull(Double first, Double fallback) {
+        return first != null ? first : fallback;
+    }
+
+    private void recalculateExistingLineAmounts(Line existingLine, Line updatedLine, Double existingDebit,
+                                                Double existingCredit, Double existingExchangeRate,
+                                                Double previousPieceExchangeRate,
+                                                int decimalPrecision) {
+        Double originalDebit = resolveOriginalAmount(existingLine.getOriginalDebit(), existingDebit,
+                existingExchangeRate, previousPieceExchangeRate, updatedLine.getOriginalDebit());
+        Double originalCredit = resolveOriginalAmount(existingLine.getOriginalCredit(), existingCredit,
+                existingExchangeRate, previousPieceExchangeRate, updatedLine.getOriginalCredit());
+
+        Double convertedDebit = multiplyByRate(originalDebit, existingLine.getExchangeRate(), decimalPrecision);
+        Double convertedCredit = multiplyByRate(originalCredit, existingLine.getExchangeRate(), decimalPrecision);
+
+        existingLine.setOriginalDebit(originalDebit);
+        existingLine.setOriginalCredit(originalCredit);
+        existingLine.setDebit(convertedDebit);
+        existingLine.setCredit(convertedCredit);
+        existingLine.setConvertedDebit(convertedDebit);
+        existingLine.setConvertedCredit(convertedCredit);
+    }
+
+    private Double resolveOriginalAmount(Double existingOriginal, Double existingConverted,
+                                         Double existingExchangeRate, Double previousPieceExchangeRate,
+                                         Double requestedOriginal) {
+        if (existingOriginal != null) {
+            if (existingConverted != null &&
+                    existingExchangeRate != null && existingExchangeRate > 0 &&
+                    previousPieceExchangeRate != null && previousPieceExchangeRate > 0 &&
+                    !existingExchangeRate.equals(previousPieceExchangeRate) &&
+                    approximatelyEqual(existingOriginal, existingConverted)) {
+                return BigDecimal.valueOf(existingConverted)
+                        .divide(BigDecimal.valueOf(previousPieceExchangeRate), 10, RoundingMode.HALF_UP)
+                        .doubleValue();
+            }
+            return existingOriginal;
+        }
+
+        if (existingConverted != null && existingExchangeRate != null && existingExchangeRate > 0) {
+            return BigDecimal.valueOf(existingConverted)
+                    .divide(BigDecimal.valueOf(existingExchangeRate), 10, RoundingMode.HALF_UP)
+                    .doubleValue();
+        }
+
+        return requestedOriginal;
+    }
+
+    private boolean approximatelyEqual(Double left, Double right) {
+        if (left == null || right == null) {
+            return left == null && right == null;
+        }
+        return Math.abs(left - right) < 0.000001;
+    }
+
+    private Double divideByRate(Double amount, Double exchangeRate) {
+        if (amount == null || exchangeRate == null || exchangeRate <= 0) {
+            return null;
+        }
+
+        return BigDecimal.valueOf(amount)
+                .divide(BigDecimal.valueOf(exchangeRate), 10, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
+    private Double multiplyByRate(Double amount, Double exchangeRate, int decimalPrecision) {
+        if (amount == null || exchangeRate == null) {
+            return null;
+        }
+
+        return BigDecimal.valueOf(amount)
+                .multiply(BigDecimal.valueOf(exchangeRate))
+                .setScale(decimalPrecision, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
     private boolean isValidCurrency(String currency) {
-        return currency != null &&
-                !currency.isEmpty() &&
-                !currency.equals("NAN&") &&
-                !currency.equals("null") &&
-                !currency.equals("undefined") &&
-                currency.matches("[A-Z]{3}");
+        return currency != null && !currency.isEmpty() && !currency.equals("NAN&") &&
+                !currency.equals("null") && !currency.equals("undefined") && currency.matches("[A-Z]{3}");
     }
 
     @Override
-    public List<EcritureExportDTO> exportEcritures(Long dossierId, Long exerciseId, Long journalId, LocalDate startDate, LocalDate endDate) {
+    public List<EcritureExportDTO> exportEcritures(@NonNull Long dossierId, Long exerciseId, Long journalId,
+                                                   LocalDate startDate, LocalDate endDate) {
         return ecritureRepository.findEcrituresByFilters(dossierId, exerciseId, journalId, startDate, endDate);
     }
 }

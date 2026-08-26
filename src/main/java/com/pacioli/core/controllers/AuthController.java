@@ -6,8 +6,10 @@ import com.pacioli.core.DTO.UserRegistrationRequest;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.models.User;
 import com.pacioli.core.repositories.UserRepository;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.utils.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
@@ -29,22 +31,45 @@ public class AuthController {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private JwtUtil jwtUtil; // Inject JwtUtil
+    private JwtUtil jwtUtil;
+
+    @Autowired
+    @Lazy
+    private AuditService auditService;
 
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest user) {
         Optional<User> optionalUser = userRepository.findByEmail(user.getEmail());
+
         if (optionalUser.isPresent() && passwordEncoder.matches(user.getPassword(), optionalUser.get().getPassword())) {
             User foundUser = optionalUser.get();
+
             // Check if the user's account is on hold
             if (foundUser.isHold()) {
+                auditService.logFailure(
+                        foundUser,
+                        "LOGIN_FAILED",
+                        "User",
+                        foundUser.getId(),
+                        foundUser.getUsername(),
+                        "Compte suspendu"
+                );
                 return ResponseEntity.status(403).body("Votre compte est suspendu.");
             }
 
             // Check if the user's account is deleted
             if (foundUser.isDeleted()) {
+                auditService.logFailure(
+                        foundUser,
+                        "LOGIN_FAILED",
+                        "User",
+                        foundUser.getId(),
+                        foundUser.getUsername(),
+                        "Compte supprimé"
+                );
                 return ResponseEntity.status(403).body("Ce compte n'existe plus.");
             }
+
             // Assuming your User entity has a getCabinet() method to fetch the related Cabinet
             Cabinet cabinet = foundUser.getCabinet();
             Long cabinetId = cabinet != null ? cabinet.getId() : null;
@@ -52,7 +77,7 @@ public class AuthController {
 
             // Fetch roles as a list of strings
             List<String> roles = foundUser.getRoles().stream()
-                    .map(role -> role.getName()) // Assuming Role has getName() method
+                    .map(role -> role.getName())
                     .collect(Collectors.toList());
 
             // Generate token with additional information
@@ -65,12 +90,32 @@ public class AuthController {
                     foundUser.isActive()
             );
 
-            return ResponseEntity.ok(token); // Return the token
+            // Log successful login
+            auditService.logSuccess(
+                    foundUser,
+                    "LOGIN",
+                    "User",
+                    foundUser.getId(),
+                    foundUser.getUsername(),
+                    null,
+                    null
+            );
+
+            return ResponseEntity.ok(token);
         } else {
-            return ResponseEntity.status(401).body("Invalid credentials");
+            // Log failed login attempt
+            String errorMessage = "Identifiants invalides";
+            auditService.logFailure(
+                    null,
+                    "LOGIN_FAILED",
+                    "User",
+                    null,
+                    user.getEmail(),
+                    errorMessage
+            );
+            return ResponseEntity.status(401).body(errorMessage);
         }
     }
-
 
     @PostMapping("/register")
     public ResponseEntity<?> registerUser(@RequestBody UserRegistrationRequest request) {
@@ -83,6 +128,14 @@ public class AuthController {
         }
 
         if (userRepository.findByUsername(request.getUsername()).isPresent()) {
+            auditService.logFailure(
+                    null,
+                    "REGISTER_FAILED",
+                    "User",
+                    null,
+                    request.getUsername(),
+                    "Username already taken"
+            );
             return ResponseEntity.status(409).body("Username is already taken");
         }
 
@@ -94,19 +147,50 @@ public class AuthController {
         user.setCreatedAt(LocalDateTime.now());
 
         // Save the user to the database
-        userRepository.save(user);
+        User savedUser = userRepository.save(user);
+
+        // Log successful registration
+        auditService.logSuccess(
+                savedUser,
+                "REGISTER",
+                "User",
+                savedUser.getId(),
+                savedUser.getUsername(),
+                null,
+                savedUser
+        );
 
         return ResponseEntity.ok("User registered successfully");
     }
 
     @PutMapping("/change-password")
-    public String updatePassword(@RequestBody UpdatePasswordRequest request) {
+    public ResponseEntity<?> updatePassword(@RequestBody UpdatePasswordRequest request) {
         if (request.getCurrentPassword() == null || request.getNewPassword() == null) {
-            throw new IllegalArgumentException("Current password or new password cannot be null");
+            String errorMessage = "Current password or new password cannot be null";
+            auditService.logFailure(
+                    null,
+                    "PASSWORD_CHANGE_FAILED",
+                    "User",
+                    null,
+                    request.getEmail(),
+                    errorMessage
+            );
+            throw new IllegalArgumentException(errorMessage);
         }
 
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé."));
+                .orElseThrow(() -> {
+                    String errorMessage = "Utilisateur non trouvé: " + request.getEmail();
+                    auditService.logFailure(
+                            null,
+                            "PASSWORD_CHANGE_FAILED",
+                            "User",
+                            null,
+                            request.getEmail(),
+                            errorMessage
+                    );
+                    return new RuntimeException(errorMessage);
+                });
 
         // Log received data for debugging
         System.out.println("Current Password: " + request.getCurrentPassword());
@@ -114,14 +198,37 @@ public class AuthController {
 
         // Verify the current password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
-            throw new RuntimeException("Mot de passe actuel incorrect.");
+            String errorMessage = "Mot de passe actuel incorrect";
+            auditService.logFailure(
+                    user,
+                    "PASSWORD_CHANGE_FAILED",
+                    "User",
+                    user.getId(),
+                    user.getUsername(),
+                    errorMessage
+            );
+            return ResponseEntity.status(400).body(errorMessage);
         }
+
+        // Store old password hash for audit (optional)
+        String oldPasswordHash = user.getPassword();
 
         // Encrypt the new password and set it
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         user.setActive(true);
-        userRepository.save(user);
+        User updatedUser = userRepository.save(user);
 
-        return "Mot de passe changé avec succès.";
+        // Log successful password change
+        auditService.logSuccess(
+                user,
+                "PASSWORD_CHANGE",
+                "User",
+                user.getId(),
+                user.getUsername(),
+                oldPasswordHash, // You might want to create a DTO with only necessary fields instead of the whole user
+                updatedUser
+        );
+
+        return ResponseEntity.ok("Mot de passe changé avec succès.");
     }
 }

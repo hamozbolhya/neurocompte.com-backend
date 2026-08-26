@@ -8,17 +8,21 @@ import com.pacioli.core.repositories.*;
 import com.pacioli.core.services.serviceImp.AccountCreationService;
 import com.pacioli.core.services.serviceImp.DuplicateDetectionService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -27,8 +31,11 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class PieceProcessingService {
 
-    private static final String DEFAULT_CURRENCY = "USD";
     private static final String DEFAULT_DEVISE = "MAD";
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("[-+]?\\d+(?:\\.\\d+)?");
+    private static final int MONEY_SCALE = 2;
+    private static final int RATE_SCALE = 10;
+    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
     private final PieceRepository pieceRepository;
     private final FactureDataRepository factureDataRepository;
@@ -158,6 +165,8 @@ public class PieceProcessingService {
             log.error("❌ Error processing original AI response for piece {}: {}", piece.getId(), e.getMessage(), e);
         }
 
+        normalizeFactureAmounts(factureData);
+
         // Set ICE if missing
         if (factureData.getIce() == null || factureData.getIce().isEmpty()) {
             try {
@@ -187,6 +196,8 @@ public class PieceProcessingService {
             if (factureData.getTotalTVA() != null && factureData.getConvertedTotalTVA() == null)
                 factureData.setConvertedTotalTVA(factureData.getTotalTVA() * rate);
         }
+
+        updateConvertedFactureAmounts(factureData);
 
         // Save or update FactureData
         Optional<FactureData> existingOpt = factureDataRepository.findByPiece(piece);
@@ -231,46 +242,22 @@ public class PieceProcessingService {
      * Save Ecritures for piece
      */
     @Transactional
-    public void saveEcrituresForPiece(Piece piece, Long dossierId, String pieceData, JsonNode originalAiResponse) {
+    public void saveEcrituresForPiece(Piece piece, @NonNull Long dossierId, String pieceData, JsonNode originalAiResponse) {
         log.info("🔥🔥🔥 SAVE ECritures START =========================================");
-//        log.info("🔥 Processing Piece ID: {}, Dossier ID: {}", piece.getId(), dossierId);
 
         try {
-            // DEBUG: Log the incoming pieceData
-            log.debug("🔥 Raw pieceData length: {}", pieceData.length());
-            try {
-                JsonNode root = objectMapper.readTree(pieceData);
-//                log.info("🔥 Root keys: {}", root.fieldNames());
-
-                if (root.has("ecritures")) {
-                    JsonNode ecrituresNode = root.get("ecritures");
-                    log.info("🔥 Found 'ecritures' field with {} elements",
-                            ecrituresNode.isArray() ? ecrituresNode.size() : "not an array");
-
-                    if (ecrituresNode.isArray() && ecrituresNode.size() > 0) {
-                        log.info("🔥 First ecriture in pieceData has keys: {}",
-                                ecrituresNode.get(0).fieldNames());
-                    }
-                }
-            } catch (Exception e) {
-                log.error("Error parsing pieceData for debug: {}", e.getMessage());
-            }
-
             Dossier dossier = dossierRepository.findById(dossierId)
                     .orElseThrow(() -> new IllegalArgumentException("Dossier not found for ID: " + dossierId));
             log.info("🔥 Fetched Dossier: {} (ID: {})", dossier.getName(), dossier.getId());
 
             // Parse original AI response to get exact string values
             JsonNode originalEcritures = parseOriginalAiResponse(originalAiResponse);
-            log.info("🔥 Original AI response parsed: {}", originalEcritures != null);
 
             // Fetch existing Accounts and Journals for the Dossier
             Map<String, Account> accountMap = accountRepository.findByDossierId(dossierId).stream()
                     .collect(Collectors.toMap(Account::getAccount, Function.identity()));
-//            log.info("🔥 Loaded {} existing accounts", accountMap.size());
 
             List<Journal> journals = journalRepository.findByDossierId(dossierId);
-//            log.info("🔥 Loaded {} existing journals", journals.size());
 
             // ✅ THIS SHOULD RETURN ALL ECritures
             List<Ecriture> ecritures = deserializeEcritures(pieceData, dossier);
@@ -284,57 +271,27 @@ public class PieceProcessingService {
             int totalLines = 0;
             int totalSavedEcritures = 0;
 
+            // pass 1: prepare all ecritures and lines (including accounts)
             for (int i = 0; i < ecritures.size(); i++) {
                 Ecriture ecriture = ecritures.get(i);
-                log.info("🔥 Processing Ecriture {} of {}: uniqueNumber={}, date={}",
-                        i + 1, ecritures.size(),
-                        ecriture.getUniqueEntryNumber(), ecriture.getEntryDate());
-
-                // Link to piece
                 ecriture.setPiece(piece);
-                log.debug("🔥 Linked to piece {}", piece.getId());
-
                 if (ecriture.getManuallyUpdated() == null) {
                     ecriture.setManuallyUpdated(false);
                 }
 
-                // Find or create Journal
                 Journal journal = findOrCreateJournal(ecriture, dossier, journals);
                 ecriture.setJournal(journal);
-                log.debug("🔥 Set journal: {}", journal.getName());
 
-                try {
-                    // ✅ SAVE ECriture first
-                    Ecriture savedEcriture = ecritureRepository.save(ecriture);
-                    log.info("✅ Saved Ecriture {}: ID={}, uniqueNumber={}",
-                            i + 1, savedEcriture.getId(), savedEcriture.getUniqueEntryNumber());
-                    totalSavedEcritures++;
-
-                    if (ecriture.getLines() == null || ecriture.getLines().isEmpty()) {
-                        log.warn("⚠️ Ecriture {} has no lines!", i + 1);
-                        continue;
-                    }
-
-                    log.info("🔥 Processing {} lines for Ecriture {}",
-                            ecriture.getLines().size(), i + 1);
-
-                    // Process lines
+                if (ecriture.getLines() != null && !ecriture.getLines().isEmpty()) {
                     for (int j = 0; j < ecriture.getLines().size(); j++) {
                         Line line = ecriture.getLines().get(j);
-                        line.setEcriture(savedEcriture); // Link to saved ecriture
-
+                        line.setEcriture(ecriture);
                         if (line.getManuallyUpdated() == null) {
                             line.setManuallyUpdated(false);
                         }
 
-//                        log.debug("🔥 Line {}: label={}, account={}",
-//                                j + 1, line.getLabel(),
-//                                line.getAccount() != null ? line.getAccount().getAccount() : "null");
-
-                        // Handle currency conversion info from original AI response
                         processLineConversion(line, j, originalEcritures, piece);
 
-                        // Handle account creation
                         String accountNumber = line.getAccount() != null ?
                                 line.getAccount().getAccount() : null;
 
@@ -343,19 +300,24 @@ public class PieceProcessingService {
                             Account account = findOrCreateAccount(accountNumber, dossier, journal,
                                     accountLabel, accountMap);
                             line.setAccount(account);
-//                            log.debug("✅ Set account for line {}: {}", j + 1, accountNumber);
-                        } else {
-                            log.warn("⚠️ Line {} has no account number!", j + 1);
                         }
                     }
+                }
+            }
 
-                    // ✅ SAVE LINES after linking
-                    lineRepository.saveAll(ecriture.getLines());
-                    totalLines += ecriture.getLines().size();
-
-                    log.info("✅ Saved {} lines for Ecriture {}",
-                            ecriture.getLines().size(), savedEcriture.getId());
-
+            // pass 2: save everything
+            for (int i = 0; i < ecritures.size(); i++) {
+                Ecriture ecriture = ecritures.get(i);
+                try {
+                    // ✅ SAVE ECriture (cascades to lines)
+                    Ecriture savedEcriture = ecritureRepository.save(Objects.requireNonNull(ecriture));
+                    totalSavedEcritures++;
+                    if (savedEcriture.getLines() != null) {
+                        totalLines += savedEcriture.getLines().size();
+                    }
+                    log.info("✅ Saved Ecriture {}: ID={}, lines={}",
+                            i + 1, savedEcriture.getId(),
+                            savedEcriture.getLines() != null ? savedEcriture.getLines().size() : 0);
                 } catch (Exception e) {
                     log.error("❌ Error saving Ecriture {}: {}", i + 1, e.getMessage(), e);
                     throw e;
@@ -486,14 +448,129 @@ public class PieceProcessingService {
         fd.setInvoiceNumber(firstEntry.has("FactureNum") ? firstEntry.get("FactureNum").asText() : null);
         fd.setDevise(firstEntry.has("Devise") ? firstEntry.get("Devise").asText() : DEFAULT_DEVISE);
 
-        String tvaRateStr = firstEntry.has("TVARate") ? firstEntry.get("TVARate").asText() : "0";
-        try {
-            fd.setTaxRate(Double.parseDouble(tvaRateStr.replace("%", "").trim()));
-        } catch (NumberFormatException e) {
-            fd.setTaxRate(0.0);
-        }
+        fd.setTaxRate(firstEntry.has("TVARate") ? parseTaxRate(firstEntry.get("TVARate").asText()) : 0.0);
 
         return fd;
+    }
+
+    private void normalizeFactureAmounts(FactureData factureData) {
+        if (factureData == null || factureData.getTotalTTC() == null) {
+            return;
+        }
+
+        Double taxRate = factureData.getTaxRate();
+        if (taxRate != null && taxRate > 0) {
+            BigDecimal totalTTC = toBigDecimal(factureData.getTotalTTC());
+            BigDecimal totalTVA = calculateTvaFromTtc(totalTTC, toBigDecimal(taxRate));
+            BigDecimal totalHT = calculateHtFromTtc(totalTTC, toBigDecimal(taxRate));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+            factureData.setTotalHTExact(toExactString(totalHT));
+            factureData.setTotalTVAExact(toExactString(totalTVA));
+        } else if (factureData.getTotalTVA() != null) {
+            BigDecimal totalHT = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalTVA()));
+            factureData.setTotalHT(toMoneyDouble(totalHT));
+            factureData.setTaxRate(computeTaxRateFromTtc(factureData.getTotalTVA(), factureData.getTotalTTC()));
+            factureData.setTotalHTExact(toExactString(totalHT));
+        } else if (factureData.getTotalHT() != null) {
+            BigDecimal totalTVA = toBigDecimal(factureData.getTotalTTC()).subtract(toBigDecimal(factureData.getTotalHT()));
+            factureData.setTotalTVA(toMoneyDouble(totalTVA));
+            factureData.setTaxRate(computeTaxRateFromTtc(totalTVA.doubleValue(), factureData.getTotalTTC()));
+            factureData.setTotalTVAExact(toExactString(totalTVA));
+        }
+
+        if (factureData.getTotalTTC() != null) {
+            factureData.setTotalTTCExact(toExactString(toBigDecimal(factureData.getTotalTTC())));
+        }
+        if (factureData.getTotalHTExact() == null && factureData.getTotalHT() != null) {
+            factureData.setTotalHTExact(toExactString(toBigDecimal(factureData.getTotalHT())));
+        }
+        if (factureData.getTotalTVAExact() == null && factureData.getTotalTVA() != null) {
+            factureData.setTotalTVAExact(toExactString(toBigDecimal(factureData.getTotalTVA())));
+        }
+    }
+
+    private Double computeTaxRateFromTtc(Double totalTVA, Double totalTTC) {
+        if (totalTVA == null || totalTTC == null || totalTTC == 0) {
+            return null;
+        }
+        return normalizeTaxRate(toBigDecimal(totalTVA)
+                .multiply(ONE_HUNDRED)
+                .divide(toBigDecimal(totalTTC), RATE_SCALE, RoundingMode.HALF_UP)
+                .doubleValue());
+    }
+
+    private BigDecimal calculateHtFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        BigDecimal divisor = BigDecimal.ONE.add(taxRate.divide(ONE_HUNDRED, RATE_SCALE, RoundingMode.HALF_UP));
+        return totalTTC.divide(divisor, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateTvaFromTtc(BigDecimal totalTTC, BigDecimal taxRate) {
+        return totalTTC
+                .multiply(taxRate)
+                .divide(ONE_HUNDRED, MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    private void updateConvertedFactureAmounts(FactureData factureData) {
+        if (factureData == null || factureData.getExchangeRate() == null) {
+            return;
+        }
+
+        double rate = factureData.getExchangeRate();
+        if (factureData.getTotalTTC() != null) {
+            factureData.setConvertedTotalTTC(toMoneyDouble(toBigDecimal(factureData.getTotalTTC()).multiply(toBigDecimal(rate))));
+        }
+        if (factureData.getTotalHT() != null) {
+            factureData.setConvertedTotalHT(toMoneyDouble(toBigDecimal(factureData.getTotalHT()).multiply(toBigDecimal(rate))));
+        }
+        if (factureData.getTotalTVA() != null) {
+            factureData.setConvertedTotalTVA(toMoneyDouble(toBigDecimal(factureData.getTotalTVA()).multiply(toBigDecimal(rate))));
+        }
+    }
+
+    private BigDecimal toBigDecimal(Double value) {
+        return BigDecimal.valueOf(value == null ? 0 : value);
+    }
+
+    private Double toMoneyDouble(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private String toExactString(BigDecimal value) {
+        return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+    }
+
+    private Double parseTaxRate(String rawValue) {
+        if (rawValue == null || rawValue.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim()
+                .replace(',', '.')
+                .replace("%", "");
+        Matcher matcher = NUMBER_PATTERN.matcher(normalized);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return normalizeTaxRate(Double.parseDouble(matcher.group()));
+    }
+
+    private Double normalizeTaxRate(Double value) {
+        if (value == null) {
+            return null;
+        }
+
+        double normalized = value;
+        if (normalized > 0 && normalized <= 1) {
+            normalized *= 100;
+        }
+
+        while (normalized > 100 && normalized / 100 <= 100) {
+            normalized /= 100;
+        }
+
+        return normalized;
     }
 
     /**
@@ -579,6 +656,8 @@ public class PieceProcessingService {
                                     line.setAccount(existingAccount);
                                 } else {
                                     account.setDossier(dossier);
+                                    // JSON often carries a phantom journal id that does not exist in DB; journal is set in saveEcritures pass 1.
+                                    account.setJournal(null);
                                     log.info("🔥 Prepared new Account: {}", account.getAccount());
                                     accountMap.put(account.getAccount(), account);
                                 }
@@ -616,7 +695,12 @@ public class PieceProcessingService {
     private Account findOrCreateAccount(String accountNumber, Dossier dossier, Journal journal,
                                         String accountLabel, Map<String, Account> accountMap) {
         if (accountMap.containsKey(accountNumber)) {
-            return accountMap.get(accountNumber);
+            Account cached = accountMap.get(accountNumber);
+            // Transient accounts from JSON must use the journal resolved for this écriture, not deserialized FKs.
+            if (cached.getId() == null) {
+                cached.setJournal(journal);
+            }
+            return cached;
         }
 
         try {
@@ -652,18 +736,23 @@ public class PieceProcessingService {
         piece.setExchangeRateUpdated(false);
 
         // Delete factureData if exists
-        if (piece.getFactureData() != null) {
-            factureDataRepository.delete(piece.getFactureData());
+        FactureData factureData = piece.getFactureData();
+        if (factureData != null) {
+            factureDataRepository.delete(factureData);
             piece.setFactureData(null);
         }
 
         // Delete ecritures and lines
-        if (piece.getEcritures() != null) {
-            for (Ecriture ecriture : piece.getEcritures()) {
-                lineRepository.deleteAll(ecriture.getLines());
+        List<Ecriture> ecritures = piece.getEcritures();
+        if (ecritures != null) {
+            for (Ecriture ecriture : ecritures) {
+                List<Line> lines = ecriture.getLines();
+                if (lines != null) {
+                    lineRepository.deleteAll(lines);
+                }
             }
-            ecritureRepository.deleteAll(piece.getEcritures());
-            piece.getEcritures().clear();
+            ecritureRepository.deleteAll(ecritures);
+            ecritures.clear();
         }
 
         return pieceRepository.save(piece);
@@ -672,7 +761,7 @@ public class PieceProcessingService {
     /**
      * Create piece files as ZIP
      */
-    public byte[] createPieceFilesZip(Long pieceId) {
+    public byte[] createPieceFilesZip(@NonNull Long pieceId) {
         try {
             Optional<Piece> pieceOpt = pieceRepository.findById(pieceId);
             if (!pieceOpt.isPresent()) {

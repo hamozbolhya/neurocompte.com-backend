@@ -15,6 +15,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.lang.NonNull;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -98,7 +99,8 @@ public class SecurityConfig {
     public OncePerRequestFilter mobileAppFilter() {
         return new OncePerRequestFilter() {
             @Override
-            protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            protected void doFilterInternal(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
+                    @NonNull FilterChain filterChain)
                     throws ServletException, IOException {
 
                 // Check for mobile app identifier header
@@ -136,7 +138,8 @@ public class SecurityConfig {
             );
 
             @Override
-            protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            protected void doFilterInternal(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
+                    @NonNull FilterChain filterChain)
                     throws ServletException, IOException {
                 String origin = request.getHeader("Origin");
                 if (origin != null && allowedHosts.contains(origin)) {

@@ -3,15 +3,11 @@ package com.pacioli.core.models;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonSetter;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.pacioli.core.Deserialize.AccountDeserializer;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.ToString;
 
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.math.BigDecimal;
 
@@ -25,6 +21,7 @@ public class Line {
 
     private Double debit;
     private Double credit;
+    private Double taxRate;
 
     // ADD THESE NEW FIELDS FOR EXACT PRECISION
     @Column(name = "debit_exact", precision = 20, scale = 6)
@@ -99,7 +96,8 @@ public class Line {
     private Ecriture ecriture;        // Associated Ecriture
 
 
-    @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.PERSIST)
+    /** No cascade: accounts are persisted elsewhere (e.g. REQUIRES_NEW); PERSIST here caused detached Account on flush. */
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_id", nullable = true)
     @JsonBackReference("account-lines")
     private Account account;

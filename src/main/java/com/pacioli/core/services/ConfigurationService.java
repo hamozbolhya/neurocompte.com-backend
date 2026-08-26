@@ -9,7 +9,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -24,9 +23,6 @@ public class ConfigurationService {
     private final ConfigurationRepository configurationRepository;
 
     private final Map<String, String> configCache = new HashMap<>();
-    private Instant lastCacheRefresh = Instant.now();
-    private static final Duration CACHE_TTL = Duration.ofMinutes(1); // Refresh every minute
-
     @PostConstruct
     public void init() {
         refreshCache();
@@ -49,7 +45,7 @@ public class ConfigurationService {
 
             configCache.clear();
             configCache.putAll(newCache);
-            lastCacheRefresh = Instant.now();
+            Instant.now();
 
             log.debug("Configuration cache refreshed. {} configurations loaded", configCache.size());
         } catch (Exception e) {

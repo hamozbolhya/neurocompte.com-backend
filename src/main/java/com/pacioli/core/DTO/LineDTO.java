@@ -10,6 +10,7 @@ public class LineDTO {
     private String label;
     private Double debit;
     private Double credit;
+    private Double taxRate;
 
     private AccountDTO account; // Full account object instead of just the name
 

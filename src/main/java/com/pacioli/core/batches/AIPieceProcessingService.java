@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -141,7 +142,8 @@ public class AIPieceProcessingService {
 
     private void processSinglePiece(Piece piece) {
         try {
-            Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
+            Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required for batch processing");
+            Piece currentPiece = pieceRepository.findById(pieceId).orElse(piece);
 
             if (shouldSkipProcessing(currentPiece)) {
                 log.info("⏭️ Skipping piece {} - status: {}", currentPiece.getId(), currentPiece.getStatus());
@@ -152,8 +154,8 @@ public class AIPieceProcessingService {
             aiResponseProcessor.processPieceWithRetry(currentPiece, 1);
 
             // ✅ CRITICAL FIX: Reload the piece after AI processing to get updated AI data
-            Piece processedPiece = pieceRepository.findById(piece.getId())
-                    .orElseThrow(() -> new RuntimeException("Piece not found after processing: " + piece.getId()));
+            Piece processedPiece = pieceRepository.findById(pieceId)
+                    .orElseThrow(() -> new RuntimeException("Piece not found after processing: " + pieceId));
 
             log.info("✅ AI processing completed for piece {} - new status: {}, AI Amount: {}, AI Currency: {}",
                     processedPiece.getId(), processedPiece.getStatus(),
@@ -183,36 +185,19 @@ public class AIPieceProcessingService {
 
     private void rejectPiece(Piece piece, String reason) {
         log.error("❌ Rejecting piece {}: {}", piece.getId(), reason);
-        updatePieceStatus(piece, PieceStatus.REJECTED);
+        Long pieceId = Objects.requireNonNull(piece.getId(), "piece id required");
+        pieceService.updatePieceStatus(pieceId, PieceStatus.REJECTED.name(), reason);
 
         // ✅ Ensure notification is sent for rejected pieces too
         notifyPiecesUpdate(piece.getDossier().getId());
     }
 
-    private void updatePieceStatus(Piece piece, PieceStatus status) {
-        Piece currentPiece = pieceRepository.findById(piece.getId()).orElse(piece);
-        currentPiece.setStatus(status);
-
-        // ✅ Preserve AI data if it exists
-        if (piece.getAiAmount() != null) {
-            currentPiece.setAiAmount(piece.getAiAmount());
-        }
-        if (piece.getAiCurrency() != null) {
-            currentPiece.setAiCurrency(piece.getAiCurrency());
-        }
-
-        Piece savedPiece = pieceRepository.save(currentPiece);
-
-        log.info("📝 Updated piece {} status to: {}", savedPiece.getId(), status);
-
-        // WebSocket notification will be handled by the calling method
-    }
-
     private void notifyPiecesUpdate(Long dossierId) {
         try {
-            log.info("📢 Sending WebSocket notification for dossier {}", dossierId);
-            pieceService.notifyPiecesUpdate(dossierId);
-            log.info("✅ WebSocket notification sent for dossier {}", dossierId);
+            Long id = Objects.requireNonNull(dossierId, "dossierId");
+            log.info("📢 Sending WebSocket notification for dossier {}", id);
+            pieceService.notifyPiecesUpdate(id);
+            log.info("✅ WebSocket notification sent for dossier {}", id);
         } catch (Exception e) {
             log.error("❌ Failed to notify WebSocket for dossier {}: {}", dossierId, e.getMessage());
         }

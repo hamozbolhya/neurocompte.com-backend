@@ -167,11 +167,12 @@ public class EcritureValidationUtil {
                         errors.put("exchangeRate", "La devise de conversion est requise lorsqu'un taux de change est fourni.");
                     }
 
-                    // Validate that currencies are different
+                    // Same currency is valid for neutral "no conversion" updates.
                     if (line.getOriginalCurrency() != null &&
                             line.getConvertedCurrency() != null &&
-                            line.getOriginalCurrency().equals(line.getConvertedCurrency())) {
-                        errors.put("exchangeRate", "Les devises d'origine et de conversion doivent être différentes.");
+                            line.getOriginalCurrency().equals(line.getConvertedCurrency()) &&
+                            Double.compare(line.getExchangeRate(), 1.0) != 0) {
+                        errors.put("exchangeRate", "Le taux de change doit être égal à 1 lorsque les devises sont identiques.");
                     }
                 }
             }

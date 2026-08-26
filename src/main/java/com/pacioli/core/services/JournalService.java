@@ -1,15 +1,16 @@
 package com.pacioli.core.services;
 
 import com.pacioli.core.models.Journal;
+import org.springframework.lang.NonNull;
 
 import java.util.List;
 
 public interface JournalService {
-    Journal addJournal(Journal journal, Long dossierId);
-    Journal updateJournal(Long id, Journal updatedJournal);
-    void deleteJournal(Long id);
+    Journal addJournal(@NonNull Journal journal, @NonNull Long dossierId);
+    Journal updateJournal(@NonNull Long id, @NonNull Journal updatedJournal);
+    void deleteJournal(@NonNull Long id);
     List<Journal> getAllJournals();
-    List<Journal> getJournalsByDossierId(Long dossierId);
-    Journal getJournalById(Long id);
-    Journal findByName(String name, Long dossierId);
+    List<Journal> getJournalsByDossierId(@NonNull Long dossierId);
+    Journal getJournalById(@NonNull Long id);
+    Journal findByName(String name, @NonNull Long dossierId);
 }

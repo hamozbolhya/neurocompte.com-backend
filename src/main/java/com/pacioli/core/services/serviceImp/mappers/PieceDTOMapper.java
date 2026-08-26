@@ -27,6 +27,7 @@ public class PieceDTOMapper {
         dto.setOriginalFileName(piece.getOriginalFileName());
         dto.setType(piece.getType());
         dto.setStatus(piece.getStatus());
+        dto.setMotifOfRejection(piece.getMotifOfRejection());
         dto.setUploadDate(piece.getUploadDate());
         dto.setAmount(piece.getAmount());
         dto.setDossierId(piece.getDossier().getId());
@@ -34,10 +35,12 @@ public class PieceDTOMapper {
         dto.setIsForced(piece.getIsForced());
 
         // Add duplicate information
-        dto.setIsDuplicate(piece.getIsDuplicate());
+        dto.setIsDuplicate(Boolean.TRUE.equals(piece.getIsDuplicate()));
         if (piece.getOriginalPiece() != null) {
-            dto.setOriginalPieceId(piece.getOriginalPiece().getId());
-            dto.setOriginalPieceName(piece.getOriginalPiece().getOriginalFileName());
+            Piece orig = piece.getOriginalPiece();
+            dto.setOriginalPieceId(orig.getId());
+            String origName = orig.getOriginalFileName();
+            dto.setOriginalPieceName(origName != null && !origName.isBlank() ? origName : orig.getFilename());
         }
 
         // Add AI currency and amount info
@@ -82,12 +85,14 @@ public class PieceDTOMapper {
 
     private EcrituresDTO2 mapEcritureToDTO(Ecriture ecriture) {
         EcrituresDTO2 dto2 = new EcrituresDTO2();
+        dto2.setId(ecriture.getId());
         dto2.setUniqueEntryNumber(ecriture.getUniqueEntryNumber());
         dto2.setEntryDate(ecriture.getEntryDate().format(DATE_FORMATTER));
 
         // Add journal information
         if (ecriture.getJournal() != null) {
             JournalDTO journalDTO = new JournalDTO();
+            journalDTO.setId(ecriture.getJournal().getId());
             journalDTO.setName(ecriture.getJournal().getName());
             journalDTO.setType(ecriture.getJournal().getType());
             dto2.setJournal(journalDTO);
@@ -110,6 +115,7 @@ public class PieceDTOMapper {
         lineDTO.setLabel(line.getLabel());
         lineDTO.setDebit(line.getDebit());
         lineDTO.setCredit(line.getCredit());
+        lineDTO.setTaxRate(line.getTaxRate());
 
         // Add account information
         if (line.getAccount() != null) {

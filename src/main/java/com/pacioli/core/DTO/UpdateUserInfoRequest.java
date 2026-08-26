@@ -2,7 +2,6 @@ package com.pacioli.core.DTO;
 
 import lombok.Data;
 
-import java.util.UUID;
 
 @Data
 public class UpdateUserInfoRequest {

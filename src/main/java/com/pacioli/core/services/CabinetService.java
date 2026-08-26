@@ -1,23 +1,37 @@
 package com.pacioli.core.services;
 
+import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.DTO.CabinetDTO;
 import com.pacioli.core.DTO.CabinetStatsDTO;
 import com.pacioli.core.models.Cabinet;
+import com.pacioli.core.models.CabinetContract;
+import org.springframework.data.domain.Page;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public interface CabinetService {
 
-    Cabinet addCabinet(Cabinet cabinet);
-    Cabinet updateCabinet(Long id, Cabinet cabinet);
-    void deleteCabinet(Long id);
-    CabinetDTO fetchCabinetById(Long id);
-    void assignCabinetToUser(Long cabinetId, UUID userId);
-    void unassignCabinetFromUser(UUID userId);
+    Cabinet addCabinet(@NonNull Cabinet cabinet, @NonNull CabinetRequest contractRequest);
+
+    void updateCabinet(@NonNull Long id, @NonNull CabinetRequest request);
+
+    void deleteCabinet(@NonNull Long id);
+
+    CabinetDTO fetchCabinetById(@NonNull Long id);
+
+    Page<CabinetContract> fetchContractsByCabinetId(@NonNull Long cabinetId, int page, int size);
+
+    void renewContract(@NonNull Long cabinetId, @NonNull CabinetRequest renewalRequest);
+
+    void assignCabinetToUser(@NonNull Long cabinetId, @NonNull UUID userId);
+
+    void unassignCabinetFromUser(@NonNull UUID userId);
+
     Optional<Cabinet> findByIce(String ice);
-    CabinetStatsDTO getCabinetStatsForUser(Long cabinetId, String userEmail);
+
+    CabinetStatsDTO getCabinetStatsForUser(@NonNull Long cabinetId, String userEmail);
 }

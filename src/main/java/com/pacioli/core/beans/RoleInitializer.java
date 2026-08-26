@@ -1,15 +1,19 @@
 package com.pacioli.core.beans;
 
+import com.pacioli.core.controllers.CabinetController.CabinetRequest;
 import com.pacioli.core.models.Role;
 import com.pacioli.core.models.User;
 import com.pacioli.core.models.Cabinet;
 import com.pacioli.core.repositories.RoleRepository;
 import com.pacioli.core.repositories.UserRepository;
 import com.pacioli.core.repositories.CabinetRepository;
+import com.pacioli.core.services.CabinetService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.Set;
 
@@ -20,21 +24,9 @@ public class RoleInitializer {
     CommandLineRunner initRolesAndUsers(RoleRepository roleRepository,
                                         UserRepository userRepository,
                                         CabinetRepository cabinetRepository,
+                                        CabinetService cabinetService,
                                         PasswordEncoder passwordEncoder) {
         return args -> {
-            // Create default roles
-            Role adminRole = roleRepository.findByName("Adminstrateur").orElseGet(() -> {
-                Role role = new Role();
-                role.setName("Adminstrateur");
-                return roleRepository.save(role);
-            });
-
-            Role utilisateurRole = roleRepository.findByName("Utilisateur").orElseGet(() -> {
-                Role role = new Role();
-                role.setName("Utilisateur");
-                return roleRepository.save(role);
-            });
-
             Role pacioliRole = roleRepository.findByName("PACIOLI").orElseGet(() -> {
                 Role role = new Role();
                 role.setName("PACIOLI");
@@ -53,7 +45,14 @@ public class RoleInitializer {
                             .orElseGet(() -> {
                                 Cabinet newCabinet = new Cabinet();
                                 newCabinet.setName("PACIOLI_SYSTEM");
-                                return cabinetRepository.save(newCabinet);
+                                LocalDate start = LocalDate.now();
+                                CabinetRequest contractRequest = new CabinetRequest();
+                                contractRequest.setContractStartDate(start);
+                                contractRequest.setContractEndDate(start.plusYears(1).minusDays(1));
+                                contractRequest.setNormalStatementPieceQuota(1_000_000);
+                                contractRequest.setBankStatementPageQuota(1_000_000);
+
+                                return cabinetService.addCabinet(newCabinet, contractRequest);
                             });
 
                     // Create the default user

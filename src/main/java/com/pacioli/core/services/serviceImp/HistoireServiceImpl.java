@@ -1,14 +1,12 @@
 package com.pacioli.core.services.serviceImp;
 
 import com.pacioli.core.config.HistoireAiProperties;
+import com.pacioli.core.services.AuditService;
 import com.pacioli.core.services.HistoireService;
+import com.pacioli.core.services.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
@@ -16,10 +14,10 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -27,8 +25,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class HistoireServiceImpl implements HistoireService {
 
-    private final RestTemplate restTemplate;
     private final HistoireAiProperties histoireAiProperties;
+    private final AuditService auditService;
+    private final UserService userService;
 
     private static final List<String> VALID_EXTENSIONS = Arrays.asList(".xlsx", ".csv");
     private static final List<String> VALID_MIME_TYPES = Arrays.asList(
@@ -43,10 +42,33 @@ public class HistoireServiceImpl implements HistoireService {
 
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
+    // ✅ Méthode utilitaire pour récupérer le cabinet cible (à partir du dossier)
+    private Long getTargetCabinetId(String dossierId) {
+        // Ici, vous devriez récupérer le cabinet à partir du dossierId
+        // Si vous avez un service pour ça, vous pouvez l'injecter
+        // Pour l'instant, on retourne null si on ne peut pas le déterminer
+        return null;
+    }
+
+    // ✅ Méthode utilitaire pour récupérer le nom du cabinet cible
+    private String getTargetCabinetName(String dossierId) {
+        return null;
+    }
+
     @Override
     public String uploadHistoriqueFile(String dossierId, MultipartFile file, String fileType) {
         String requestId = UUID.randomUUID().toString();
         log.info("[{}] Starting AI file upload for dossier: {} with file type: {}", requestId, dossierId, fileType);
+
+        Map<String, Object> fileDetails = new HashMap<>();
+        fileDetails.put("dossierId", dossierId);
+        fileDetails.put("fileType", fileType);
+        fileDetails.put("fileName", file.getOriginalFilename());
+        fileDetails.put("fileSize", file.getSize());
+
+        // ✅ Récupérer le cabinet cible
+        Long targetCabinetId = getTargetCabinetId(dossierId);
+        String targetCabinetName = getTargetCabinetName(dossierId);
 
         try {
             validateFile(file);
@@ -73,6 +95,9 @@ public class HistoireServiceImpl implements HistoireService {
             String finalUrl = baseUrl + "/" + dossierId + "%2F" + fileName;
             log.info("[{}] Final AI URL: {}, filename: {}", requestId, finalUrl, fileName);
 
+            fileDetails.put("aiUrl", finalUrl);
+            fileDetails.put("aiFilename", fileName);
+
             // Setup connection
             URL url = new URL(finalUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -89,6 +114,8 @@ public class HistoireServiceImpl implements HistoireService {
             int responseCode = conn.getResponseCode();
             log.info("[{}] AI response code: {}", requestId, responseCode);
 
+            fileDetails.put("responseCode", responseCode);
+
             StringBuilder response = new StringBuilder();
             try (BufferedReader br = new BufferedReader(new InputStreamReader(
                     responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream()))) {
@@ -98,16 +125,75 @@ public class HistoireServiceImpl implements HistoireService {
                 }
             }
 
+            fileDetails.put("responseMessage", response.toString());
+
             if (responseCode == 200) {
                 log.info("[{}] Upload success: {}", requestId, response);
+
+                // ✅ Audit avec cabinet cible
+                auditService.logSuccessWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_UPLOAD",
+                        "Histoire",
+                        dossierId,
+                        "Dossier-" + dossierId,
+                        null,
+                        fileDetails,
+                        targetCabinetId,
+                        targetCabinetName
+                );
+
                 return "Le fichier a été transféré à l'IA avec succès !";
             } else {
                 log.error("[{}] AI error: {} - {}", requestId, responseCode, response);
+
+                // ✅ Audit d'échec avec cabinet cible
+                auditService.logFailureWithTargetCabinet(
+                        userService.getCurrentUser(),
+                        "AI_UPLOAD",
+                        "Histoire",
+                        dossierId,
+                        "Dossier-" + dossierId,
+                        "AI error: " + responseCode + " - " + response.toString(),
+                        targetCabinetId,
+                        targetCabinetName
+                );
+
                 throw new RuntimeException("Erreur lors de l'envoi à l'IA: " + response.toString());
             }
 
+        } catch (IllegalArgumentException e) {
+            log.error("[{}] Validation failure: {}", requestId, e.getMessage());
+
+            // ✅ Audit d'échec de validation avec cabinet cible
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPLOAD",
+                    "Histoire",
+                    dossierId,
+                    "Dossier-" + dossierId,
+                    "Validation error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
+
+            throw e;
+
         } catch (Exception e) {
             log.error("[{}] Upload failure: {}", requestId, e.getMessage(), e);
+
+            // ✅ Audit d'échec inattendu avec cabinet cible
+            auditService.logFailureWithTargetCabinet(
+                    userService.getCurrentUser(),
+                    "AI_UPLOAD",
+                    "Histoire",
+                    dossierId,
+                    "Dossier-" + dossierId,
+                    "Unexpected error: " + e.getMessage(),
+                    targetCabinetId,
+                    targetCabinetName
+            );
+
             throw new RuntimeException("Erreur inattendue pendant l'envoi: " + e.getMessage());
         }
     }
